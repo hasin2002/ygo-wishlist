@@ -1,7 +1,7 @@
-import { WishlistApp } from "@/components/wishlist-app";
+import { eq } from "drizzle-orm";
+import { SpendApp } from "@/components/spend-app";
 import { db } from "@/db";
 import { cards as cardsTable } from "@/db/schema";
-import { desc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -13,13 +13,13 @@ function serializeCard(card: typeof cardsTable.$inferSelect) {
   };
 }
 
-export default function Home() {
+export default function SpendPage() {
   const initialCards = db
     .select()
     .from(cardsTable)
-    .orderBy(desc(cardsTable.updatedAt))
+    .where(eq(cardsTable.status, "owned"))
     .all()
     .map(serializeCard);
 
-  return <WishlistApp initialCards={initialCards} />;
+  return <SpendApp initialCards={initialCards} />;
 }
