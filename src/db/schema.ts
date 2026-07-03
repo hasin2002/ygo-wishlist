@@ -1,7 +1,14 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
-export const cards = sqliteTable("cards", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const cards = pgTable("cards", {
+  id: serial("id").primaryKey(),
   name: text("name").notNull(),
   url: text("url"),
   source: text("source", { enum: ["tcgplayer", "ebay", "other", "manual"] })
@@ -21,20 +28,20 @@ export const cards = sqliteTable("cards", {
     .notNull()
     .default("wishlist"),
   notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
 });
 
-export const binderSlots = sqliteTable(
+export const binderSlots = pgTable(
   "binder_slots",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     pageIndex: integer("page_index").notNull(),
     slotIndex: integer("slot_index").notNull(),
     cardId: integer("card_id")
       .notNull()
       .references(() => cards.id, { onDelete: "cascade" }),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [
     uniqueIndex("binder_slots_page_slot_unique").on(
@@ -45,32 +52,32 @@ export const binderSlots = sqliteTable(
   ],
 );
 
-export const wheelEntries = sqliteTable(
+export const wheelEntries = pgTable(
   "wheel_entries",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     cardId: integer("card_id")
       .notNull()
       .references(() => cards.id, { onDelete: "cascade" }),
     sortOrder: integer("sort_order").notNull(),
-    selectedAt: integer("selected_at", { mode: "timestamp" }),
+    selectedAt: timestamp("selected_at", { mode: "date" }),
     selectedOrder: integer("selected_order"),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [uniqueIndex("wheel_entries_card_unique").on(table.cardId)],
 );
 
-export const monthlyFavorites = sqliteTable(
+export const monthlyFavorites = pgTable(
   "monthly_favorites",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: serial("id").primaryKey(),
     month: text("month").notNull(),
     cardId: integer("card_id")
       .notNull()
       .references(() => cards.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [uniqueIndex("monthly_favorites_month_unique").on(table.month)],
 );

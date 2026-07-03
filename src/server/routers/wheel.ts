@@ -103,14 +103,13 @@ function serializeWheelItem({
   };
 }
 
-function syncWishlistEntries() {
-  const wishlistCards = db
+async function syncWishlistEntries() {
+  const wishlistCards = await db
     .select()
     .from(cards)
     .where(eq(cards.status, "wishlist"))
-    .orderBy(asc(cards.name))
-    .all();
-  const existingEntries = db.select().from(wheelEntries).all();
+    .orderBy(asc(cards.name));
+  const existingEntries = await db.select().from(wheelEntries);
   const existingIds = new Set(existingEntries.map((entry) => entry.cardId));
   let nextSortOrder =
     existingEntries.reduce(
@@ -126,16 +125,16 @@ function syncWishlistEntries() {
 
   const now = new Date();
 
-  db.transaction((tx) => {
+  await db.transaction(async (tx) => {
     for (const card of missingCards) {
-      tx.insert(wheelEntries)
+      await tx
+        .insert(wheelEntries)
         .values({
           cardId: card.id,
           sortOrder: nextSortOrder,
           createdAt: now,
           updatedAt: now,
-        })
-        .run();
+        });
       nextSortOrder += 1;
     }
   });
@@ -147,15 +146,14 @@ function wheelRows() {
     .from(wheelEntries)
     .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
     .where(eq(cards.status, "wishlist"))
-    .orderBy(asc(wheelEntries.sortOrder))
-    .all();
+    .orderBy(asc(wheelEntries.sortOrder));
 }
 
 export const wheelRouter = router({
-  state: publicProcedure.query(() => {
-    syncWishlistEntries();
+  state: publicProcedure.query(async () => {
+    await syncWishlistEntries();
 
-    const rows = wheelRows();
+    const rows = await wheelRows();
 
     return {
       active: rows
@@ -180,94 +178,94 @@ export const wheelRouter = router({
         })
         .optional(),
     )
-    .mutation(({ input }) => {
-    syncWishlistEntries();
+    .mutation(async ({ input }) => {
+      await syncWishlistEntries();
 
-    const activeRows = db
-      .select({ card: cards, entry: wheelEntries })
-      .from(wheelEntries)
-      .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-      .where(eq(cards.status, "wishlist"))
-      .orderBy(asc(wheelEntries.sortOrder))
-      .all()
-      .filter(
+      const activeRows = (
+        await db
+          .select({ card: cards, entry: wheelEntries })
+          .from(wheelEntries)
+          .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
+          .where(eq(cards.status, "wishlist"))
+          .orderBy(asc(wheelEntries.sortOrder))
+      ).filter(
         ({ card, entry }) =>
           !entry.selectedAt &&
           matchesChaseFilter(card, input?.chaseLevels ?? []) &&
           matchesPriceFilter(card, input?.minPrice, input?.maxPrice),
       );
 
-    if (!activeRows.length) {
-      const hasFilters =
-        Boolean(input?.chaseLevels?.length) ||
-        input?.minPrice !== undefined ||
-        input?.maxPrice !== undefined;
+      if (!activeRows.length) {
+        const hasFilters =
+          Boolean(input?.chaseLevels?.length) ||
+          input?.minPrice !== undefined ||
+          input?.maxPrice !== undefined;
 
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: hasFilters
-          ? "No cards match the current wheel filters."
-          : "No wishlist cards left on the wheel.",
-      });
-    }
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: hasFilters
+            ? "No cards match the current wheel filters."
+            : "No wishlist cards left on the wheel.",
+        });
+      }
 
-    const weightedRows = activeRows.map((row) => ({
-      ...row,
-      weight: wheelWeight(row.card),
-    }));
-    const totalWeight = weightedRows.reduce((total, row) => total + row.weight, 0);
-    let target = Math.random() * totalWeight;
-    const selected =
-      weightedRows.find((row) => {
-        target -= row.weight;
-        return target <= 0;
-      }) ?? weightedRows[weightedRows.length - 1];
+      const weightedRows = activeRows.map((row) => ({
+        ...row,
+        weight: wheelWeight(row.card),
+      }));
+      const totalWeight = weightedRows.reduce(
+        (total, row) => total + row.weight,
+        0,
+      );
+      let target = Math.random() * totalWeight;
+      const selected =
+        weightedRows.find((row) => {
+          target -= row.weight;
+          return target <= 0;
+        }) ?? weightedRows[weightedRows.length - 1];
 
-    const selectedRows = db
-      .select()
-      .from(wheelEntries)
-      .where(isNotNull(wheelEntries.selectedAt))
-      .orderBy(desc(wheelEntries.selectedOrder))
-      .all();
-    const selectedOrder = (selectedRows[0]?.selectedOrder ?? 0) + 1;
+      const selectedRows = await db
+        .select()
+        .from(wheelEntries)
+        .where(isNotNull(wheelEntries.selectedAt))
+        .orderBy(desc(wheelEntries.selectedOrder));
+      const selectedOrder = (selectedRows[0]?.selectedOrder ?? 0) + 1;
 
-    const updated = db
-      .update(wheelEntries)
-      .set({
-        selectedAt: new Date(),
-        selectedOrder,
-        updatedAt: new Date(),
-      })
-      .where(eq(wheelEntries.id, selected.entry.id))
-      .returning()
-      .get();
+      const [updated] = await db
+        .update(wheelEntries)
+        .set({
+          selectedAt: new Date(),
+          selectedOrder,
+          updatedAt: new Date(),
+        })
+        .where(eq(wheelEntries.id, selected.entry.id))
+        .returning();
 
-    return {
-      selected: serializeWheelItem({ card: selected.card, entry: updated }),
-    };
-  }),
+      return {
+        selected: serializeWheelItem({ card: selected.card, entry: updated }),
+      };
+    }),
 
-  reset: publicProcedure.mutation(() => {
-    syncWishlistEntries();
+  reset: publicProcedure.mutation(async () => {
+    await syncWishlistEntries();
 
-    const wishlistRows = db
+    const wishlistRows = await db
       .select({ entry: wheelEntries })
       .from(wheelEntries)
       .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-      .where(eq(cards.status, "wishlist"))
-      .all();
+      .where(eq(cards.status, "wishlist"));
     const now = new Date();
 
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
       for (const { entry } of wishlistRows) {
-        tx.update(wheelEntries)
+        await tx
+          .update(wheelEntries)
           .set({
             selectedAt: null,
             selectedOrder: null,
             updatedAt: now,
           })
-          .where(eq(wheelEntries.id, entry.id))
-          .run();
+          .where(eq(wheelEntries.id, entry.id));
       }
     });
 

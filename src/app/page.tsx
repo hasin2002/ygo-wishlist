@@ -4,6 +4,7 @@ import { cards as cardsTable } from "@/db/schema";
 import { desc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function serializeCard(card: typeof cardsTable.$inferSelect) {
   return {
@@ -13,13 +14,13 @@ function serializeCard(card: typeof cardsTable.$inferSelect) {
   };
 }
 
-export default function Home() {
-  const initialCards = db
-    .select()
-    .from(cardsTable)
-    .orderBy(desc(cardsTable.updatedAt))
-    .all()
-    .map(serializeCard);
+export default async function Home() {
+  const initialCards = (
+    await db
+      .select()
+      .from(cardsTable)
+      .orderBy(desc(cardsTable.updatedAt))
+  ).map(serializeCard);
 
   return <WishlistApp initialCards={initialCards} />;
 }

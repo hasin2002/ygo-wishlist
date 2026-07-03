@@ -2,12 +2,15 @@
 
 import type { inferRouterOutputs } from "@trpc/server";
 import {
+  ArrowLeftRight,
   Check,
   ChevronLeft,
   ChevronRight,
+  Info,
   Loader2,
   RotateCcw,
   Search,
+  X,
 } from "lucide-react";
 import {
   type DragEvent,
@@ -21,6 +24,10 @@ import {
 import { PageFlip } from "page-flip";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
+import {
+  rarityAbbreviation,
+  rarityAbbreviations,
+} from "@/lib/rarity-abbreviations";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -73,6 +80,16 @@ function proxiedImageUrl(url: string) {
 
 function clampPageIndex(pageIndex: number) {
   return Math.min(Math.max(pageIndex, 0), pageCount - 1);
+}
+
+function parsePageNumber(value: string) {
+  const pageNumber = Number(value);
+
+  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pageCount) {
+    return null;
+  }
+
+  return pageNumber;
 }
 
 function formatMoney(value: number) {
@@ -247,6 +264,17 @@ function buildPageElement({
       badge.textContent = statusLabel(card);
       slot.appendChild(badge);
 
+      const rarityCode = rarityAbbreviation(card.rarity);
+
+      if (rarityCode) {
+        const rarityBadge = document.createElement("span");
+        rarityBadge.className = "binder-v2-rarity-badge";
+        rarityBadge.textContent = rarityCode;
+        rarityBadge.title = card.rarity ?? rarityCode;
+        rarityBadge.setAttribute("aria-label", card.rarity ?? rarityCode);
+        slot.appendChild(rarityBadge);
+      }
+
       const title = document.createElement("span");
       title.className = "binder-v2-card-title";
       title.textContent = card.name;
@@ -261,16 +289,77 @@ function buildPageElement({
   footer.className = "binder-v2-page-value";
 
   const ownedValue = document.createElement("span");
+  ownedValue.className = "is-owned";
   ownedValue.textContent = `Owned ${formatMoney(totals.owned)}`;
   footer.appendChild(ownedValue);
 
   const wishlistValue = document.createElement("span");
+  wishlistValue.className = "is-wishlist";
   wishlistValue.textContent = `Wishlist ${formatMoney(totals.wishlist)}`;
   footer.appendChild(wishlistValue);
 
   page.appendChild(footer);
 
   return page;
+}
+
+function PageValuePills({
+  className = "",
+  owned,
+  wishlist,
+}: {
+  className?: string;
+  owned: number;
+  wishlist: number;
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-emerald-700">
+        Owned {formatMoney(owned)}
+      </span>
+      <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-rose-700">
+        Wishlist {formatMoney(wishlist)}
+      </span>
+    </div>
+  );
+}
+
+function RarityLegendPopover() {
+  return (
+    <span className="group/rarity relative z-30 inline-flex">
+      <button
+        aria-label="View rarity abbreviation guide"
+        className="inline-flex size-9 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:border-amber-300 hover:bg-amber-100 hover:text-amber-800 focus-visible:bg-amber-100"
+        title="Rarity abbreviation guide"
+        type="button"
+      >
+        <Info aria-hidden="true" className="size-3.5" />
+      </button>
+      <span
+        className="pointer-events-none absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-zinc-200 bg-white p-3 text-left opacity-0 shadow-xl ring-1 ring-black/5 transition duration-150 group-hover/rarity:pointer-events-auto group-hover/rarity:translate-y-0 group-hover/rarity:opacity-100 group-focus-within/rarity:pointer-events-auto group-focus-within/rarity:translate-y-0 group-focus-within/rarity:opacity-100"
+        role="tooltip"
+      >
+        <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-[#8a1f2d]">
+          Rarity guide
+        </span>
+        <span className="mt-2 grid max-h-72 grid-cols-1 gap-1 overflow-y-auto pr-1 sm:grid-cols-2">
+          {rarityAbbreviations.map((entry) => (
+            <span
+              className="flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1"
+              key={entry.rarity}
+            >
+              <span className="min-w-12 rounded bg-zinc-950 px-1.5 py-1 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white">
+                {entry.abbreviation}
+              </span>
+              <span className="min-w-0 truncate text-xs font-semibold text-zinc-700">
+                {entry.rarity}
+              </span>
+            </span>
+          ))}
+        </span>
+      </span>
+    </span>
+  );
 }
 
 export function BinderV2App() {
@@ -285,6 +374,10 @@ export function BinderV2App() {
   const [closed, setClosed] = useState(false);
   const [dimWishlistCards, setDimWishlistCards] = useState(true);
   const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [swapModalOpen, setSwapModalOpen] = useState(false);
+  const [swapFromPage, setSwapFromPage] = useState("1");
+  const [swapToPage, setSwapToPage] = useState("2");
+  const [swapError, setSwapError] = useState("");
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
     typeof window === "undefined"
       ? false
@@ -307,6 +400,9 @@ export function BinderV2App() {
     onSuccess: () => void utils.binder.layout.invalidate(),
   });
   const clearAll = trpc.binder.clearAll.useMutation({
+    onSuccess: () => void utils.binder.layout.invalidate(),
+  });
+  const swapPages = trpc.binder.swapPages.useMutation({
     onSuccess: () => void utils.binder.layout.invalidate(),
   });
 
@@ -379,6 +475,15 @@ export function BinderV2App() {
 
     return totals;
   }, [cardById, layoutQuery.data]);
+  const pageCardCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+
+    for (const slot of layoutQuery.data ?? []) {
+      counts.set(slot.pageIndex, (counts.get(slot.pageIndex) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [layoutQuery.data]);
   const filteredCards = useMemo(() => {
     const search = query.toLowerCase().trim();
 
@@ -405,7 +510,8 @@ export function BinderV2App() {
     setSlot.isPending ||
     clearSlot.isPending ||
     clearCard.isPending ||
-    clearAll.isPending;
+    clearAll.isPending ||
+    swapPages.isPending;
 
   useEffect(() => {
     function updateViewportMode() {
@@ -631,6 +737,57 @@ export function BinderV2App() {
     setResetModalOpen(false);
   }
 
+  function openSwapModal() {
+    const fromPage = currentPage + 1;
+    const toPage = fromPage >= pageCount ? fromPage - 1 : fromPage + 1;
+    setSwapFromPage(String(fromPage));
+    setSwapToPage(String(Math.max(1, Math.min(pageCount, toPage))));
+    setSwapError("");
+    setSwapModalOpen(true);
+  }
+
+  function swapPageSummary(pageNumber: number | null) {
+    if (!pageNumber) {
+      return null;
+    }
+
+    const pageIndex = pageNumber - 1;
+    return {
+      cards: pageCardCounts.get(pageIndex) ?? 0,
+      totals: pageTotals.get(pageIndex) ?? { owned: 0, wishlist: 0 },
+    };
+  }
+
+  function swapBinderPages(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sourcePageNumber = parsePageNumber(swapFromPage);
+    const targetPageNumber = parsePageNumber(swapToPage);
+
+    if (!sourcePageNumber || !targetPageNumber) {
+      setSwapError(`Use page numbers from 1 to ${pageCount}.`);
+      return;
+    }
+
+    if (sourcePageNumber === targetPageNumber) {
+      setSwapError("Pick two different pages to swap.");
+      return;
+    }
+
+    setSwapError("");
+    swapPages.mutate(
+      {
+        sourcePageIndex: sourcePageNumber - 1,
+        targetPageIndex: targetPageNumber - 1,
+      },
+      {
+        onSuccess: () => {
+          setSwapModalOpen(false);
+          goToPage(sourcePageNumber - 1);
+        },
+      },
+    );
+  }
+
   function goToPage(pageIndex: number) {
     const nextPage = clampPageIndex(pageIndex);
     currentPageRef.current = nextPage;
@@ -697,6 +854,7 @@ export function BinderV2App() {
     const slot = layout.get(slotKey(currentPage, slotIndex));
     const card = slot ? cardById.get(slot.cardId) : null;
     const highlighted = card?.id === highlightedCardId;
+    const rarityCode = rarityAbbreviation(card?.rarity);
 
     return (
       <button
@@ -736,11 +894,29 @@ export function BinderV2App() {
             >
               {statusLabel(card)}
             </span>
+            {rarityCode ? (
+              <span
+                aria-label={card.rarity ?? rarityCode}
+                className="absolute bottom-1 left-1 z-10 rounded border border-white/15 bg-zinc-950/82 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-white shadow-sm"
+                title={card.rarity ?? rarityCode}
+              >
+                {rarityCode}
+              </span>
+            ) : null}
           </>
         ) : null}
       </button>
     );
   }
+
+  const swapFromNumber = parsePageNumber(swapFromPage);
+  const swapToNumber = parsePageNumber(swapToPage);
+  const swapFromSummary = swapPageSummary(swapFromNumber);
+  const swapToSummary = swapPageSummary(swapToNumber);
+  const currentPageTotals = pageTotals.get(currentPage) ?? {
+    owned: 0,
+    wishlist: 0,
+  };
 
   return (
     <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
@@ -750,17 +926,17 @@ export function BinderV2App() {
           title="Page-flip binder"
           actions={
             <div className="flex items-center gap-2">
-            <button
-              aria-label="Clear binder"
-              className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
-              disabled={binderBusy}
-              onClick={() => setResetModalOpen(true)}
-              title="Clear binder"
-              type="button"
-            >
-              <RotateCcw className="size-4" />
-            </button>
-          </div>
+              <button
+                aria-label="Clear binder"
+                className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
+                disabled={binderBusy}
+                onClick={() => setResetModalOpen(true)}
+                title="Clear binder"
+                type="button"
+              >
+                <RotateCcw className="size-4" />
+              </button>
+            </div>
           }
         />
 
@@ -814,6 +990,15 @@ export function BinderV2App() {
                     Go
                   </button>
                 </form>
+                <button
+                  className="mt-1 inline-flex min-h-11 items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
+                  disabled={binderBusy}
+                  onClick={openSwapModal}
+                  type="button"
+                >
+                  <ArrowLeftRight className="size-3.5" />
+                  Swap pages
+                </button>
               </div>
               <button
                 aria-label={closed ? "Open binder" : "Next pages"}
@@ -862,12 +1047,11 @@ export function BinderV2App() {
                         <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
                           Page {currentPage + 1}
                         </p>
-                        <p className="text-xs font-bold text-zinc-500">
-                          Owned{" "}
-                          {formatMoney(pageTotals.get(currentPage)?.owned ?? 0)}
-                          {"  "}Wishlist{" "}
-                          {formatMoney(pageTotals.get(currentPage)?.wishlist ?? 0)}
-                        </p>
+                        <PageValuePills
+                          className="justify-end"
+                          owned={currentPageTotals.owned}
+                          wishlist={currentPageTotals.wishlist}
+                        />
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         {Array.from({ length: slotsPerPage }, (_, slotIndex) =>
@@ -892,10 +1076,13 @@ export function BinderV2App() {
             }}
           >
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
-                  Staging
-                </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
+                    Staging
+                  </p>
+                  <RarityLegendPopover />
+                </div>
                 <p className="text-lg font-bold">{stagingCards.length}</p>
               </div>
               {selectedCard ? (
@@ -1037,6 +1224,7 @@ export function BinderV2App() {
               <div className="grid grid-cols-2 gap-2">
                 {paginatedCards.map((card) => {
                   const selected = selectedCardId === card.id;
+                  const rarityCode = rarityAbbreviation(card.rarity);
 
                   return (
                     <div
@@ -1090,9 +1278,19 @@ export function BinderV2App() {
                             {statusLabel(card)}
                           </span>
                           {card.rarity ? (
-                            <span className="truncate text-xs font-semibold text-zinc-500">
-                              {card.rarity}
-                            </span>
+                            <>
+                              {rarityCode ? (
+                                <span
+                                  className="rounded border border-zinc-200 bg-zinc-950 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-white"
+                                  title={card.rarity}
+                                >
+                                  {rarityCode}
+                                </span>
+                              ) : null}
+                              <span className="truncate text-xs font-semibold text-zinc-500">
+                                {card.rarity}
+                              </span>
+                            </>
                           ) : null}
                           {card.cardType ? (
                             <span className="truncate text-xs font-semibold text-zinc-400">
@@ -1146,6 +1344,130 @@ export function BinderV2App() {
           </aside>
         </section>
       </div>
+
+      {swapModalOpen ? (
+        <div
+          aria-labelledby="swap-pages-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
+          role="dialog"
+        >
+          <div className="w-full max-w-xl rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
+                  Binder pages
+                </p>
+                <h2
+                  className="mt-2 text-2xl font-bold tracking-normal"
+                  id="swap-pages-title"
+                >
+                  Swap whole pages
+                </h2>
+                <p className="mt-1 text-sm font-medium leading-6 text-zinc-600">
+                  Exchange every card between two binder pages.
+                </p>
+              </div>
+              <button
+                aria-label="Close page swap"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
+                onClick={() => setSwapModalOpen(false)}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <form className="mt-5 grid gap-4" onSubmit={swapBinderPages}>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
+                <label className="flex min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3">
+                  <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
+                    From page
+                  </span>
+                  <input
+                    className="mt-2 h-11 rounded-md border border-zinc-300 bg-white px-3 text-lg font-bold outline-none transition focus:border-[#8a1f2d]"
+                    inputMode="numeric"
+                    max={pageCount}
+                    min={1}
+                    onChange={(event) => {
+                      setSwapFromPage(event.target.value);
+                      setSwapError("");
+                    }}
+                    type="number"
+                    value={swapFromPage}
+                  />
+                  <div className="mt-3 flex flex-col gap-2">
+                    <p className="text-sm font-bold text-zinc-950">
+                      {swapFromSummary?.cards ?? 0} cards
+                    </p>
+                    <PageValuePills
+                      owned={swapFromSummary?.totals.owned ?? 0}
+                      wishlist={swapFromSummary?.totals.wishlist ?? 0}
+                    />
+                  </div>
+                </label>
+
+                <div className="hidden items-center justify-center sm:flex">
+                  <span className="grid size-11 place-items-center rounded-full border border-zinc-300 bg-white text-zinc-600 shadow-sm">
+                    <ArrowLeftRight className="size-4" />
+                  </span>
+                </div>
+
+                <label className="flex min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3">
+                  <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
+                    To page
+                  </span>
+                  <input
+                    className="mt-2 h-11 rounded-md border border-zinc-300 bg-white px-3 text-lg font-bold outline-none transition focus:border-[#8a1f2d]"
+                    inputMode="numeric"
+                    max={pageCount}
+                    min={1}
+                    onChange={(event) => {
+                      setSwapToPage(event.target.value);
+                      setSwapError("");
+                    }}
+                    type="number"
+                    value={swapToPage}
+                  />
+                  <div className="mt-3 flex flex-col gap-2">
+                    <p className="text-sm font-bold text-zinc-950">
+                      {swapToSummary?.cards ?? 0} cards
+                    </p>
+                    <PageValuePills
+                      owned={swapToSummary?.totals.owned ?? 0}
+                      wishlist={swapToSummary?.totals.wishlist ?? 0}
+                    />
+                  </div>
+                </label>
+              </div>
+
+              {swapError ? (
+                <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                  {swapError}
+                </p>
+              ) : null}
+
+              <div className="flex justify-end gap-2 border-t border-zinc-200 pt-4">
+                <button
+                  className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+                  onClick={() => setSwapModalOpen(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-4 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
+                  disabled={swapPages.isPending}
+                  type="submit"
+                >
+                  <ArrowLeftRight className="size-4" />
+                  {swapPages.isPending ? "Swapping..." : "Swap pages"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {resetModalOpen ? (
         <div

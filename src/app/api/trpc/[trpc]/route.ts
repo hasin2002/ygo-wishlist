@@ -1,6 +1,8 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "@/server/root";
 
+export const runtime = "nodejs";
+
 const handler = (request: Request) =>
   fetchRequestHandler({
     allowMethodOverride: true,

@@ -295,22 +295,20 @@ export async function refreshEbayPricing(card: typeof cards.$inferSelect) {
   const ebaySearchUrl = buildEbaySearchUrl(card);
 
   if (!sample.length) {
-    const updated = db
+    const [updated] = await db
       .update(cards)
       .set({ ebaySearchUrl, updatedAt: new Date() })
       .where(eq(cards.id, card.id))
-      .returning()
-      .get();
+      .returning();
     return updated;
   }
 
   const priceText = `£${average(sample).toFixed(2)} avg (${sample.length})`;
-  const updated = db
+  const [updated] = await db
     .update(cards)
     .set({ priceText, ebaySearchUrl, updatedAt: new Date() })
     .where(eq(cards.id, card.id))
-    .returning()
-    .get();
+    .returning();
 
   return updated;
 }

@@ -72,7 +72,7 @@ export const cardsRouter = router({
         query: z.string().trim().default(""),
       }),
     )
-    .query(({ input }) => {
+    .query(async ({ input }) => {
       const filters = [];
 
       if (input.status !== "all") {
@@ -95,12 +95,11 @@ export const cardsRouter = router({
         );
       }
 
-      const rows = db
+      const rows = await db
         .select()
         .from(cards)
         .where(filters.length ? and(...filters) : undefined)
-        .orderBy(desc(cards.updatedAt))
-        .all();
+        .orderBy(desc(cards.updatedAt));
 
       return rows.map(serializeCard);
     }),
@@ -120,7 +119,7 @@ export const cardsRouter = router({
 
     const ygoDetails = await ygoCardDetailsByName(name);
 
-    const created = db
+    const [created] = await db
       .insert(cards)
       .values({
         name,
@@ -143,8 +142,7 @@ export const cardsRouter = router({
         createdAt: now,
         updatedAt: now,
       })
-      .returning()
-      .get();
+      .returning();
 
     try {
       const priced = await refreshEbayPricing(created);
@@ -157,7 +155,10 @@ export const cardsRouter = router({
   update: publicProcedure.input(updateCardSchema).mutation(async ({ input }) => {
     const now = new Date();
     const normalizedUrl = input.url ? normalizeUrl(input.url) : undefined;
-    const existing = db.select().from(cards).where(eq(cards.id, input.id)).get();
+    const [existing] = await db
+      .select()
+      .from(cards)
+      .where(eq(cards.id, input.id));
 
     if (!existing) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -165,7 +166,7 @@ export const cardsRouter = router({
 
     const ygoDetails = await ygoCardDetailsByName(input.name);
 
-    const updated = db
+    const [updated] = await db
       .update(cards)
       .set({
         name: input.name,
@@ -194,8 +195,7 @@ export const cardsRouter = router({
         updatedAt: now,
       })
       .where(eq(cards.id, input.id))
-      .returning()
-      .get();
+      .returning();
 
     try {
       const priced = await refreshEbayPricing(updated);
@@ -207,14 +207,17 @@ export const cardsRouter = router({
 
   setStatus: publicProcedure
     .input(z.object({ id: z.number().int().positive(), status: statusSchema }))
-    .mutation(({ input }) => {
-      const existing = db.select().from(cards).where(eq(cards.id, input.id)).get();
+    .mutation(async ({ input }) => {
+      const [existing] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, input.id));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
       }
 
-      const updated = db
+      const [updated] = await db
         .update(cards)
         .set({
           status: input.status,
@@ -226,8 +229,7 @@ export const cardsRouter = router({
           updatedAt: new Date(),
         })
         .where(eq(cards.id, input.id))
-        .returning()
-        .get();
+        .returning();
 
       return serializeCard(updated);
     }),
@@ -239,13 +241,12 @@ export const cardsRouter = router({
         chaseLevel: chaseLevelSchema,
       }),
     )
-    .mutation(({ input }) => {
-      const updated = db
+    .mutation(async ({ input }) => {
+      const [updated] = await db
         .update(cards)
         .set({ chaseLevel: input.chaseLevel ?? null, updatedAt: new Date() })
         .where(eq(cards.id, input.id))
-        .returning()
-        .get();
+        .returning();
 
       if (!updated) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -261,14 +262,17 @@ export const cardsRouter = router({
         paidPriceText: z.string().trim().optional(),
       }),
     )
-    .mutation(({ input }) => {
-      const existing = db.select().from(cards).where(eq(cards.id, input.id)).get();
+    .mutation(async ({ input }) => {
+      const [existing] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, input.id));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
       }
 
-      const updated = db
+      const [updated] = await db
         .update(cards)
         .set({
           paidPriceText: input.paidPriceText || null,
@@ -281,8 +285,7 @@ export const cardsRouter = router({
           updatedAt: new Date(),
         })
         .where(eq(cards.id, input.id))
-        .returning()
-        .get();
+        .returning();
 
       return serializeCard(updated);
     }),
@@ -290,7 +293,10 @@ export const cardsRouter = router({
   refreshMetadata: publicProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input }) => {
-      const existing = db.select().from(cards).where(eq(cards.id, input.id)).get();
+      const [existing] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, input.id));
 
       if (!existing?.url) {
         throw new TRPCError({
@@ -300,7 +306,7 @@ export const cardsRouter = router({
       }
 
       const metadata = await fetchLinkMetadata(existing.url);
-      const updated = db
+      const [updated] = await db
         .update(cards)
         .set({
           name: metadata.title || existing.name,
@@ -316,8 +322,7 @@ export const cardsRouter = router({
           updatedAt: new Date(),
         })
         .where(eq(cards.id, input.id))
-        .returning()
-        .get();
+        .returning();
 
       return serializeCard(updated);
     }),
@@ -325,7 +330,10 @@ export const cardsRouter = router({
   refreshPricing: publicProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input }) => {
-      const existing = db.select().from(cards).where(eq(cards.id, input.id)).get();
+      const [existing] = await db
+        .select()
+        .from(cards)
+        .where(eq(cards.id, input.id));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -337,8 +345,8 @@ export const cardsRouter = router({
 
   delete: publicProcedure
     .input(z.object({ id: z.number().int().positive() }))
-    .mutation(({ input }) => {
-      db.delete(cards).where(eq(cards.id, input.id)).run();
+    .mutation(async ({ input }) => {
+      await db.delete(cards).where(eq(cards.id, input.id));
       return { ok: true };
     }),
 });

@@ -10,7 +10,11 @@
     "price:ebay": "node scripts/price-ebay.mjs",
     "price:qcsr": "node scripts/price-qcsr-ebay.mjs",
     "cards:types": "node scripts/backfill-card-types.mjs",
-    "db:studio": "drizzle-kit studio"
+    "db:migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
+    "db:push": "drizzle-kit push --config drizzle.config.ts",
+    "db:studio": "drizzle-kit studio --config drizzle.config.ts",
+    "db:studio:pg": "drizzle-kit studio --config drizzle.config.ts",
+    "db:studio:sqlite": "drizzle-kit studio --config drizzle.sqlite.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.14",
@@ -23,6 +27,7 @@
     "lucide-react": "^1.17.0",
     "next": "16.2.6",
     "page-flip": "^2.0.7",
+    "pg": "^8.22.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "superjson": "^2.2.6",
@@ -32,6 +37,7 @@
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.10",

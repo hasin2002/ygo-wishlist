@@ -1,4 +1,6 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# YGO Wishlist
+
+A Next.js wishlist app backed by Postgres via Drizzle.
 
 ## Getting Started
 
@@ -31,6 +33,25 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+This app cannot use the old local SQLite `data/wishlist.sqlite` database on Vercel. Vercel runs the app from a read-only deployment directory, so production needs Postgres.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Required Vercel environment variables:
+
+```bash
+DATABASE_URL=postgres://...
+EBAY_CLIENT_ID=...
+EBAY_CLIENT_SECRET=...
+EBAY_MARKETPLACE_ID=EBAY_GB
+```
+
+Before deploying a fresh database, create/update the tables:
+
+```bash
+npm run db:push
+```
+
+If migrating existing local SQLite data, run:
+
+```bash
+npm run db:migrate:postgres
+```

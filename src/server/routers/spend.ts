@@ -24,13 +24,12 @@ function priceValue(priceText: string | null) {
 }
 
 export const spendRouter = router({
-  currentMonth: publicProcedure.query(() => {
+  currentMonth: publicProcedure.query(async () => {
     const month = currentMonthKey();
-    const rows = db
+    const rows = await db
       .select()
       .from(cards)
-      .where(and(eq(cards.status, "owned"), eq(cards.purchaseMonth, month)))
-      .all();
+      .where(and(eq(cards.status, "owned"), eq(cards.purchaseMonth, month)));
     const spendRows = rows
       .map((card) => priceValue(card.paidPriceText))
       .filter((value): value is number => value !== null);
@@ -43,8 +42,8 @@ export const spendRouter = router({
     };
   }),
 
-  monthlyFavourites: publicProcedure.query(() => {
-    const rows = db.select().from(monthlyFavorites).all();
+  monthlyFavourites: publicProcedure.query(async () => {
+    const rows = await db.select().from(monthlyFavorites);
 
     return rows.map((row) => ({
       cardId: row.cardId,
@@ -62,19 +61,18 @@ export const spendRouter = router({
         month: z.string().regex(/^\d{4}-\d{2}$/),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       if (input.cardId === null) {
-        db.delete(monthlyFavorites)
-          .where(eq(monthlyFavorites.month, input.month))
-          .run();
+        await db
+          .delete(monthlyFavorites)
+          .where(eq(monthlyFavorites.month, input.month));
         return { ok: true };
       }
 
-      const card = db
+      const [card] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.cardId))
-        .get();
+        .where(eq(cards.id, input.cardId));
 
       if (!card) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -88,26 +86,25 @@ export const spendRouter = router({
       }
 
       const now = new Date();
-      const existing = db
+      const [existing] = await db
         .select()
         .from(monthlyFavorites)
-        .where(eq(monthlyFavorites.month, input.month))
-        .get();
+        .where(eq(monthlyFavorites.month, input.month));
 
       if (existing) {
-        db.update(monthlyFavorites)
+        await db
+          .update(monthlyFavorites)
           .set({ cardId: input.cardId, updatedAt: now })
-          .where(eq(monthlyFavorites.month, input.month))
-          .run();
+          .where(eq(monthlyFavorites.month, input.month));
       } else {
-        db.insert(monthlyFavorites)
+        await db
+          .insert(monthlyFavorites)
           .values({
             cardId: input.cardId,
             createdAt: now,
             month: input.month,
             updatedAt: now,
-          })
-          .run();
+          });
       }
 
       return { ok: true };

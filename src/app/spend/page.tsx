@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { cards as cardsTable } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function serializeCard(card: typeof cardsTable.$inferSelect) {
   return {
@@ -13,13 +14,13 @@ function serializeCard(card: typeof cardsTable.$inferSelect) {
   };
 }
 
-export default function SpendPage() {
-  const initialCards = db
-    .select()
-    .from(cardsTable)
-    .where(eq(cardsTable.status, "owned"))
-    .all()
-    .map(serializeCard);
+export default async function SpendPage() {
+  const initialCards = (
+    await db
+      .select()
+      .from(cardsTable)
+      .where(eq(cardsTable.status, "owned"))
+  ).map(serializeCard);
 
   return <SpendApp initialCards={initialCards} />;
 }
