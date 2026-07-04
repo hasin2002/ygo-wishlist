@@ -24,6 +24,7 @@ import {
 import { PageFlip } from "page-flip";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
+import { DataLoadError } from "@/components/data-load-error";
 import {
   rarityAbbreviation,
   rarityAbbreviations,
@@ -1019,7 +1020,23 @@ export function BinderV2App() {
               onDragStart={handleSlotDragStart}
               onDrop={handleBookDrop}
             >
-              {(cardsQuery.isLoading || layoutQuery.isLoading) && (
+              {(cardsQuery.isError || layoutQuery.isError) && (
+                <div className="absolute inset-0 z-10 grid place-items-center bg-white/90 p-4">
+                  <DataLoadError
+                    className="w-full max-w-md"
+                    message={
+                      cardsQuery.error?.message ?? layoutQuery.error?.message
+                    }
+                    onRetry={() => {
+                      void cardsQuery.refetch();
+                      void layoutQuery.refetch();
+                    }}
+                    title="Could not load binder"
+                  />
+                </div>
+              )}
+              {(cardsQuery.isLoading || layoutQuery.isLoading) &&
+                !(cardsQuery.isError || layoutQuery.isError) && (
                 <div className="absolute inset-0 z-10 grid place-items-center bg-white/70">
                   <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
                 </div>

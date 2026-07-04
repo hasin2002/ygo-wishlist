@@ -14,6 +14,7 @@ import {
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
+import { DataLoadError } from "@/components/data-load-error";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -461,8 +462,8 @@ export function WheelApp() {
           }
         />
 
-        <section className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
-          <aside className="order-2 flex min-h-[520px] flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:order-1 xl:min-h-[640px]">
+        <section className="grid min-w-0 gap-5 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
+          <aside className="order-2 flex min-h-[520px] min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:order-1 xl:min-h-[640px]">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
@@ -629,8 +630,16 @@ export function WheelApp() {
             />
           </aside>
 
-          <section className="order-1 rounded-lg border border-zinc-300 bg-white p-4 shadow-sm xl:order-2">
+          <section className="order-1 min-w-0 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm sm:p-4 xl:order-2">
             <div className="flex flex-col items-center gap-5">
+              {wheelQuery.isError ? (
+                <DataLoadError
+                  className="w-full"
+                  message={wheelQuery.error.message}
+                  onRetry={() => void wheelQuery.refetch()}
+                  title="Could not load wheel"
+                />
+              ) : (
               <div className="relative grid aspect-square w-full max-w-[500px] place-items-center rounded-full">
                 <div className="absolute -top-2 z-10 h-0 w-0 border-l-[16px] border-r-[16px] border-t-[30px] border-l-transparent border-r-transparent border-t-[#8a1f2d] drop-shadow" />
                 <div
@@ -668,6 +677,7 @@ export function WheelApp() {
                   )}
                 </button>
               </div>
+              )}
 
               {winner ? (
                 <div className="w-full rounded-lg border border-[#8a1f2d]/25 bg-rose-50 p-4">
@@ -686,7 +696,7 @@ export function WheelApp() {
             </div>
           </section>
 
-          <aside className="order-3 flex min-h-[420px] flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:min-h-[640px]">
+          <aside className="order-3 flex min-h-[420px] min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:min-h-[640px]">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">

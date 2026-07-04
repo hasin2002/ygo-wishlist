@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { DataLoadError } from "@/components/data-load-error";
 import { trpc } from "@/trpc/client";
 
 const levels = [
@@ -80,7 +81,14 @@ export function AssignChaseApp() {
         <AppHeader eyebrow="Chase queue" title="Assign chase levels" />
 
         <div className="mx-auto flex w-full max-w-4xl flex-1">
-        {list.isLoading ? (
+        {list.isError ? (
+          <DataLoadError
+            className="flex-1"
+            message={list.error.message}
+            onRetry={() => void list.refetch()}
+            title="Could not load wishlist cards"
+          />
+        ) : list.isLoading ? (
           <section className="grid flex-1 place-items-center rounded-lg border border-zinc-300 bg-white">
             <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
           </section>
