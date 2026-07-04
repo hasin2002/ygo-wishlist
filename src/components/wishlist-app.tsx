@@ -1040,6 +1040,267 @@ function CardFilterModal({
   );
 }
 
+function AddCardForm({
+  createError,
+  form,
+  isPending,
+  onSubmit,
+  setForm,
+}: {
+  createError: { message: string } | null;
+  form: CardForm;
+  isPending: boolean;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  setForm: (updater: (current: CardForm) => CardForm) => void;
+}) {
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <label className="block">
+        <span className="text-sm font-medium text-zinc-700">
+          TCGplayer or eBay link
+        </span>
+        <input
+          autoFocus
+          className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+          onChange={(event) =>
+            setForm((current) => ({ ...current, url: event.target.value }))
+          }
+          placeholder="https://www.ebay.co.uk/itm/..."
+          type="url"
+          value={form.url}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-medium text-zinc-700">Card name</span>
+        <input
+          className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              name: event.target.value,
+            }))
+          }
+          placeholder="Blue-Eyes White Dragon"
+          value={form.name}
+        />
+      </label>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-sm font-medium text-zinc-700">
+            {form.status === "owned" ? "Paid price" : "Manual market price"}
+          </span>
+          <input
+            className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                priceText: event.target.value,
+              }))
+            }
+            placeholder={form.status === "owned" ? "12 or pulled from pack" : "£12.50"}
+            value={form.priceText}
+          />
+        </label>
+        <RarityCombobox
+          value={form.rarity}
+          onChange={(rarity) => setForm((current) => ({ ...current, rarity }))}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-sm font-medium text-zinc-700">Status</span>
+          <select
+            className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                chaseLevel:
+                  event.target.value === "owned" ? "" : current.chaseLevel,
+                purchaseMonth:
+                  event.target.value === "owned"
+                    ? current.purchaseMonth || currentMonthKey()
+                    : current.purchaseMonth,
+                status: event.target.value as "wishlist" | "owned",
+              }))
+            }
+            value={form.status}
+          >
+            <option value="wishlist">Wishlist</option>
+            <option value="owned">Owned</option>
+          </select>
+        </label>
+        {form.status === "wishlist" ? (
+          <label className="block">
+            <span className="text-sm font-medium text-zinc-700">Chase</span>
+            <select
+              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  chaseLevel: event.target.value,
+                }))
+              }
+              value={form.chaseLevel}
+            >
+              <option value="">None</option>
+              <option value="5">5 - next</option>
+              <option value="4">4</option>
+              <option value="3">3</option>
+              <option value="2">2</option>
+              <option value="1">1 - later</option>
+            </select>
+          </label>
+        ) : (
+          <label className="block">
+            <span className="text-sm font-medium text-zinc-700">
+              Bought month
+            </span>
+            <input
+              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  purchaseMonth: event.target.value,
+                }))
+              }
+              type="month"
+              value={form.purchaseMonth}
+            />
+          </label>
+        )}
+      </div>
+
+      <label className="block">
+        <span className="text-sm font-medium text-zinc-700">Image URL</span>
+        <input
+          className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              imageUrl: event.target.value,
+            }))
+          }
+          placeholder="Optional fallback image"
+          type="url"
+          value={form.imageUrl}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-medium text-zinc-700">Notes</span>
+        <textarea
+          className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              notes: event.target.value,
+            }))
+          }
+          placeholder="Set, condition, max price..."
+          value={form.notes}
+        />
+      </label>
+
+      {createError ? (
+        <p
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          role="alert"
+        >
+          {createError.message}
+        </p>
+      ) : null}
+
+      <button
+        className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:bg-zinc-300"
+        disabled={isPending || (!form.name && !form.url)}
+        type="submit"
+      >
+        {isPending ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Plus className="size-4" />
+        )}
+        Add to tracker
+      </button>
+    </form>
+  );
+}
+
+function AddCardDialog({
+  createError,
+  form,
+  isPending,
+  onClose,
+  onSubmit,
+  setForm,
+}: {
+  createError: { message: string } | null;
+  form: CardForm;
+  isPending: boolean;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  setForm: (updater: (current: CardForm) => CardForm) => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      aria-labelledby="add-card-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/40 px-0 pt-10 backdrop-blur-sm lg:items-center lg:px-4 lg:py-6"
+      role="dialog"
+    >
+      <section className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg border border-zinc-300 bg-white shadow-2xl lg:max-h-[90vh] lg:max-w-2xl lg:rounded-lg">
+        <div className="flex items-center justify-between gap-4 border-b border-zinc-200 p-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
+              Add card
+            </p>
+            <h2 className="mt-1 text-xl font-bold" id="add-card-title">
+              Add to tracker
+            </h2>
+          </div>
+          <button
+            aria-label="Close add card form"
+            className="grid size-10 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="overflow-auto p-4">
+          <AddCardForm
+            createError={createError}
+            form={form}
+            isPending={isPending}
+            onSubmit={onSubmit}
+            setForm={setForm}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
@@ -1053,6 +1314,7 @@ export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
   const [chaseFilters, setChaseFilters] = useState<ChaseFilter[]>([]);
   const [typeFilters, setTypeFilters] = useState<CardTypeFilter[]>([]);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
+  const [addFormOpen, setAddFormOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
@@ -1073,6 +1335,7 @@ export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
   const create = trpc.cards.create.useMutation({
     onSuccess: () => {
       setForm(emptyForm());
+      setAddFormOpen(false);
       invalidateCardsAndSpend();
     },
   });
@@ -1376,196 +1639,23 @@ export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
           }
         />
 
-        <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
-          <aside className="h-fit rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Add a card</h2>
-              <Plus className="size-5 text-[#8a1f2d]" aria-hidden="true" />
+        <section className="flex min-w-0 flex-col gap-4">
+          <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Cards</h2>
+              <p className="mt-1 text-sm font-medium text-zinc-500">
+                Track wishlist targets, owned cards, prices, and chase priority.
+              </p>
             </div>
-
-            <form className="space-y-4" onSubmit={submit}>
-              <label className="block">
-                <span className="text-sm font-medium text-zinc-700">
-                  TCGplayer or eBay link
-                </span>
-                <input
-                  value={form.url}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, url: event.target.value }))
-                  }
-                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                  placeholder="https://www.ebay.co.uk/itm/..."
-                  type="url"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-zinc-700">
-                  Card name
-                </span>
-                <input
-                  value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                  placeholder="Blue-Eyes White Dragon"
-                />
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-sm font-medium text-zinc-700">
-                    {form.status === "owned"
-                      ? "Paid price"
-                      : "Manual market price"}
-                  </span>
-                  <input
-                    value={form.priceText}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        priceText: event.target.value,
-                      }))
-                    }
-                    className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                    placeholder={
-                      form.status === "owned" ? "12 or pulled from pack" : "£12.50"
-                    }
-                  />
-                </label>
-                <RarityCombobox
-                  value={form.rarity}
-                  onChange={(rarity) =>
-                    setForm((current) => ({ ...current, rarity }))
-                  }
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-sm font-medium text-zinc-700">
-                    Status
-                  </span>
-                  <select
-                    value={form.status}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        chaseLevel:
-                          event.target.value === "owned" ? "" : current.chaseLevel,
-                        purchaseMonth:
-                          event.target.value === "owned"
-                            ? current.purchaseMonth || currentMonthKey()
-                            : current.purchaseMonth,
-                        status: event.target.value as "wishlist" | "owned",
-                      }))
-                    }
-                    className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                  >
-                    <option value="wishlist">Wishlist</option>
-                    <option value="owned">Owned</option>
-                  </select>
-                </label>
-                {form.status === "wishlist" ? (
-                  <label className="block">
-                    <span className="text-sm font-medium text-zinc-700">
-                      Chase
-                    </span>
-                    <select
-                      value={form.chaseLevel}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          chaseLevel: event.target.value,
-                        }))
-                      }
-                      className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                    >
-                      <option value="">None</option>
-                      <option value="5">5 - next</option>
-                      <option value="4">4</option>
-                      <option value="3">3</option>
-                      <option value="2">2</option>
-                      <option value="1">1 - later</option>
-                    </select>
-                  </label>
-                ) : (
-                  <label className="block">
-                    <span className="text-sm font-medium text-zinc-700">
-                      Bought month
-                    </span>
-                    <input
-                      className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          purchaseMonth: event.target.value,
-                        }))
-                      }
-                      type="month"
-                      value={form.purchaseMonth}
-                    />
-                  </label>
-                )}
-              </div>
-
-              <label className="block">
-                <span className="text-sm font-medium text-zinc-700">
-                  Image URL
-                </span>
-                <input
-                  value={form.imageUrl}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      imageUrl: event.target.value,
-                    }))
-                  }
-                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                  placeholder="Optional fallback image"
-                  type="url"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-zinc-700">Notes</span>
-                <textarea
-                  value={form.notes}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      notes: event.target.value,
-                    }))
-                  }
-                  className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                  placeholder="Set, condition, max price..."
-                />
-              </label>
-
-              {create.error ? (
-                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {create.error.message}
-                </p>
-              ) : null}
-
-              <button
-                type="submit"
-                disabled={create.isPending || (!form.name && !form.url)}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:bg-zinc-300"
-              >
-                {create.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Plus className="size-4" />
-                )}
-                Add to tracker
-              </button>
-            </form>
-          </aside>
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826]"
+              onClick={() => setAddFormOpen(true)}
+              type="button"
+            >
+              <Plus className="size-4" />
+              Add card
+            </button>
+          </div>
 
           <section className="flex min-w-0 flex-col gap-4">
             <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
@@ -1924,6 +2014,16 @@ export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
           </section>
         </section>
       </div>
+      {addFormOpen ? (
+        <AddCardDialog
+          createError={create.error}
+          form={form}
+          isPending={create.isPending}
+          onClose={() => setAddFormOpen(false)}
+          onSubmit={submit}
+          setForm={setForm}
+        />
+      ) : null}
       {deleteTarget ? (
         <div
           aria-labelledby="delete-card-title"
