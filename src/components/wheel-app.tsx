@@ -2,16 +2,26 @@
 
 import type { inferRouterOutputs } from "@trpc/server";
 import {
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Loader2,
   RotateCcw,
   Search,
+  ShoppingBag,
   Sparkles,
   X,
 } from "lucide-react";
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
@@ -51,6 +61,10 @@ type WheelSegment = {
   end: number;
   item?: WheelItem;
   start: number;
+};
+type PurchaseForm = {
+  paidPriceText: string;
+  purchaseMonth: string;
 };
 
 function formatCurrency(value: number | null) {
@@ -117,6 +131,30 @@ function parsePriceFilter(value: string) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function currentMonthKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function normalizePaidPrice(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const numeric = trimmed
+    .replace(/^paid\s+/i, "")
+    .replace(/^£/, "")
+    .replace(/,/g, "")
+    .trim();
+
+  if (/^\d+(?:\.\d{1,2})?$/.test(numeric)) {
+    return `£${Number(numeric).toFixed(2)}`;
+  }
+
+  return trimmed.replace(/^paid\s+/i, "");
 }
 
 function itemMatchesPriceFilter(
@@ -259,6 +297,16 @@ export function WheelApp() {
   const utils = trpc.useUtils();
   const wheelQuery = trpc.wheel.state.useQuery();
   const spinWheel = trpc.wheel.spin.useMutation();
+  const updateCard = trpc.cards.update.useMutation({
+    onSuccess: () => {
+      setPurchaseTarget(null);
+      setPurchaseForm({ paidPriceText: "", purchaseMonth: currentMonthKey() });
+      setPurchaseTouched(false);
+      void utils.wheel.state.invalidate();
+      void utils.cards.list.invalidate();
+      void utils.spend.currentMonth.invalidate();
+    },
+  });
   const resetWheel = trpc.wheel.reset.useMutation({
     onSuccess: () => void utils.wheel.state.invalidate(),
   });
@@ -272,6 +320,13 @@ export function WheelApp() {
   const [resetOpen, setResetOpen] = useState(false);
   const [activePage, setActivePage] = useState(1);
   const [pickedPage, setPickedPage] = useState(1);
+  const [mobileWheelDetailsOpen, setMobileWheelDetailsOpen] = useState(false);
+  const [purchaseTarget, setPurchaseTarget] = useState<WheelItem | null>(null);
+  const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>({
+    paidPriceText: "",
+    purchaseMonth: currentMonthKey(),
+  });
+  const [purchaseTouched, setPurchaseTouched] = useState(false);
   const [chaseFilters, setChaseFilters] = useState<ChaseFilterValue[]>([]);
   const [minPriceInput, setMinPriceInput] = useState("");
   const [maxPriceInput, setMaxPriceInput] = useState("");
@@ -323,7 +378,13 @@ export function WheelApp() {
     (total, item) => total + (item.priceValue ?? 0),
     0,
   );
-  const busy = wheelQuery.isLoading || spinWheel.isPending || resetWheel.isPending;
+  const purchasePaidPrice = normalizePaidPrice(purchaseForm.paidPriceText);
+  const showPurchasePriceError = purchaseTouched && !purchasePaidPrice;
+  const busy =
+    wheelQuery.isLoading ||
+    spinWheel.isPending ||
+    resetWheel.isPending ||
+    updateCard.isPending;
 
   useEffect(() => {
     return () => {
@@ -334,20 +395,21 @@ export function WheelApp() {
   }, []);
 
   useEffect(() => {
-    if (!selectedCardModal) {
+    if (!selectedCardModal && !purchaseTarget) {
       return;
     }
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setSelectedCardModal(null);
+        setPurchaseTarget(null);
         setTilt({ x: 0, y: 0 });
       }
     }
 
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedCardModal]);
+  }, [purchaseTarget, selectedCardModal]);
 
   async function spin() {
     if (busy || spinning || !filteredActive.length) {
@@ -410,6 +472,43 @@ export function WheelApp() {
     });
   }
 
+  function openPurchaseSheet(item: WheelItem) {
+    setSelectedCardModal(null);
+    setTilt({ x: 0, y: 0 });
+    setPurchaseTarget(item);
+    setPurchaseForm({
+      paidPriceText: item.card.paidPriceText ?? "",
+      purchaseMonth: item.card.purchaseMonth ?? currentMonthKey(),
+    });
+    setPurchaseTouched(false);
+  }
+
+  function submitPurchase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPurchaseTouched(true);
+
+    if (!purchaseTarget || !purchasePaidPrice) {
+      return;
+    }
+
+    updateCard.mutate({
+      id: purchaseTarget.card.id,
+      name: purchaseTarget.card.name,
+      url: purchaseTarget.card.url ?? undefined,
+      imageUrl: purchaseTarget.card.imageUrl ?? undefined,
+      priceText: purchaseTarget.card.priceText ?? undefined,
+      marketPriceText: purchaseTarget.card.marketPriceText ?? undefined,
+      paidPriceText: purchasePaidPrice,
+      purchaseMonth: purchaseForm.purchaseMonth || currentMonthKey(),
+      ebaySearchUrl: purchaseTarget.card.ebaySearchUrl ?? undefined,
+      ebayListingUrl: "",
+      rarity: purchaseTarget.card.rarity ?? undefined,
+      chaseLevel: null,
+      status: "owned",
+      notes: purchaseTarget.card.notes ?? undefined,
+    });
+  }
+
   function toggleChaseFilter(value: ChaseFilterValue) {
     setChaseFilters((current) =>
       current.includes(value)
@@ -448,186 +547,208 @@ export function WheelApp() {
           title="Spin for next card"
           actions={
             <div className="flex items-center gap-2">
-            <button
-              aria-label="Reset wheel"
-              className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
-              disabled={busy}
-              onClick={() => setResetOpen(true)}
-              title="Reset wheel"
-              type="button"
-            >
-              <RotateCcw className="size-4" />
-            </button>
-          </div>
+              <button
+                aria-label="Reset wheel"
+                className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
+                disabled={busy}
+                onClick={() => setResetOpen(true)}
+                title="Reset wheel"
+                type="button"
+              >
+                <RotateCcw className="size-4" />
+              </button>
+            </div>
           }
         />
 
         <section className="grid min-w-0 gap-5 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
-          <aside className="order-2 flex min-h-[520px] min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:order-1 xl:min-h-[640px]">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          <aside className="order-4 flex min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:order-1 xl:min-h-[640px]">
+            <button
+              aria-controls="wheel-card-details"
+              aria-expanded={mobileWheelDetailsOpen}
+              className="flex min-h-12 w-full items-center justify-between gap-3 text-left xl:pointer-events-none"
+              onClick={() => setMobileWheelDetailsOpen((open) => !open)}
+              type="button"
+            >
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
                   On wheel
                 </p>
                 <p className="text-lg font-bold">{filteredActive.length}</p>
               </div>
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-500">
-                {activePageCount} pages
+              <div className="flex items-center gap-2">
+                <div className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-500">
+                  {activePageCount} pages
+                </div>
+                <ChevronDown
+                  className={`size-4 text-zinc-500 transition xl:hidden ${
+                    mobileWheelDetailsOpen ? "rotate-180" : ""
+                  }`}
+                />
               </div>
-            </div>
+            </button>
 
-            <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-2">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-zinc-700">
-                  Chase filter
-                </p>
-                {chaseFilters.length ? (
-                  <button
-                    className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]"
-                    onClick={() => {
-                      setChaseFilters([]);
-                      setActivePage(1);
-                    }}
-                    type="button"
-                  >
-                    All chase
-                  </button>
-                ) : null}
-              </div>
-              <div className="grid grid-cols-3 gap-1.5">
-                {chaseFilterOptions.map((option) => {
-                  const selected = chaseFilters.includes(option.value);
-
-                  return (
+            <div
+              className={`min-h-0 flex-1 flex-col pt-3 xl:flex ${
+                mobileWheelDetailsOpen ? "flex" : "hidden"
+              }`}
+              id="wheel-card-details"
+            >
+              <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-zinc-700">
+                    Chase filter
+                  </p>
+                  {chaseFilters.length ? (
                     <button
-                      aria-pressed={selected}
-                      className={`h-8 rounded border text-xs font-bold transition ${
-                        selected
-                          ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]"
-                          : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"
-                      }`}
-                      key={option.value}
-                      onClick={() => toggleChaseFilter(option.value)}
+                      className="min-h-11 text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]"
+                      onClick={() => {
+                        setChaseFilters([]);
+                        setActivePage(1);
+                      }}
                       type="button"
                     >
-                      {option.label}
+                      All chase
                     </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-2">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-zinc-700">
-                  Price filter
-                </p>
-                {hasPriceFilter ? (
-                  <button
-                    className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]"
-                    onClick={() => {
-                      setMinPriceInput("");
-                      setMaxPriceInput("");
-                      setActivePage(1);
-                    }}
-                    type="button"
-                  >
-                    Any price
-                  </button>
-                ) : null}
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <label className="block">
-                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
-                    Min
-                  </span>
-                  <input
-                    className="h-9 w-full rounded border border-zinc-300 bg-white px-2 text-sm font-semibold text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/10"
-                    inputMode="decimal"
-                    min="0"
-                    onChange={(event) => updateMinPrice(event.target.value)}
-                    placeholder="£0"
-                    type="number"
-                    value={minPriceInput}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
-                    Max
-                  </span>
-                  <input
-                    className="h-9 w-full rounded border border-zinc-300 bg-white px-2 text-sm font-semibold text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/10"
-                    inputMode="decimal"
-                    min="0"
-                    onChange={(event) => updateMaxPrice(event.target.value)}
-                    placeholder="£50"
-                    type="number"
-                    value={maxPriceInput}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {filteredActive.length ? (
-                <div className="space-y-2">
-                  {paginatedActive.map((item, index) => {
-                    const colorIndex =
-                      (currentActivePage - 1) * listPageSize + index;
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {chaseFilterOptions.map((option) => {
+                    const selected = chaseFilters.includes(option.value);
 
                     return (
-                      <div
-                        className="flex gap-3 rounded-md border border-zinc-200 bg-white p-2"
-                        key={item.card.id}
+                      <button
+                        aria-pressed={selected}
+                        className={`h-11 rounded border text-xs font-bold transition ${
+                          selected
+                            ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]"
+                            : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"
+                        }`}
+                        key={option.value}
+                        onClick={() => toggleChaseFilter(option.value)}
+                        type="button"
                       >
-                        <div
-                          className="mt-1 size-3 shrink-0 rounded-full"
-                          style={{ background: colors[colorIndex % colors.length] }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-bold">
-                            {item.card.name}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                            <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-rose-700">
-                              {chaseLabel(item)}
-                            </span>
-                            <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
-                              {formatCurrency(item.priceValue)}
-                            </span>
-                            <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
-                              {item.weight}x
-                            </span>
-                            <CardNoteIndicator
-                              label={`View note for ${item.card.name}`}
-                              note={item.card.notes}
-                            />
-                          </div>
-                        </div>
-                      </div>
+                        {option.label}
+                      </button>
                     );
                   })}
                 </div>
-              ) : (
-                <div className="grid h-full place-items-center rounded-md border border-dashed border-zinc-300 p-6 text-center">
-                  <div>
-                    <Search className="mx-auto size-6 text-zinc-400" />
-                    <p className="mt-3 text-sm font-semibold text-zinc-600">
-                      {hasWheelFilters
-                        ? "No cards match these wheel filters."
-                        : "No wishlist cards left on the wheel."}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
+              </div>
 
-            <Pager
-              currentPage={currentActivePage}
-              label="wheel"
-              onChange={setActivePage}
-              pageCount={activePageCount}
-            />
+              <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-2">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-zinc-700">
+                    Price filter
+                  </p>
+                  {hasPriceFilter ? (
+                    <button
+                      className="min-h-11 text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]"
+                      onClick={() => {
+                        setMinPriceInput("");
+                        setMaxPriceInput("");
+                        setActivePage(1);
+                      }}
+                      type="button"
+                    >
+                      Any price
+                    </button>
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
+                      Min
+                    </span>
+                    <input
+                      className="h-11 w-full rounded border border-zinc-300 bg-white px-2 text-sm font-semibold text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/10"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) => updateMinPrice(event.target.value)}
+                      placeholder="£0"
+                      type="number"
+                      value={minPriceInput}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
+                      Max
+                    </span>
+                    <input
+                      className="h-11 w-full rounded border border-zinc-300 bg-white px-2 text-sm font-semibold text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/10"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) => updateMaxPrice(event.target.value)}
+                      placeholder="£50"
+                      type="number"
+                      value={maxPriceInput}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {filteredActive.length ? (
+                  <div className="space-y-2">
+                    {paginatedActive.map((item, index) => {
+                      const colorIndex =
+                        (currentActivePage - 1) * listPageSize + index;
+
+                      return (
+                        <div
+                          className="flex gap-3 rounded-md border border-zinc-200 bg-white p-2"
+                          key={item.card.id}
+                        >
+                          <div
+                            className="mt-1 size-3 shrink-0 rounded-full"
+                            style={{
+                              background: colors[colorIndex % colors.length],
+                            }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold">
+                              {item.card.name}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-rose-700">
+                                {chaseLabel(item)}
+                              </span>
+                              <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
+                                {formatCurrency(item.priceValue)}
+                              </span>
+                              <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
+                                {item.weight}x
+                              </span>
+                              <CardNoteIndicator
+                                label={`View note for ${item.card.name}`}
+                                note={item.card.notes}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid h-full place-items-center rounded-md border border-dashed border-zinc-300 p-6 text-center">
+                    <div>
+                      <Search className="mx-auto size-6 text-zinc-400" />
+                      <p className="mt-3 text-sm font-semibold text-zinc-600">
+                        {hasWheelFilters
+                          ? "No cards match these wheel filters."
+                          : "No wishlist cards left on the wheel."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Pager
+                currentPage={currentActivePage}
+                label="wheel"
+                onChange={setActivePage}
+                pageCount={activePageCount}
+              />
+            </div>
           </aside>
 
           <section className="order-1 min-w-0 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm sm:p-4 xl:order-2">
@@ -755,7 +876,7 @@ export function WheelApp() {
                           </span>
                           <a
                             aria-label={`Open eBay search for ${item.card.name}`}
-                            className="inline-flex items-center gap-1 rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                            className="inline-flex min-h-11 items-center gap-1 rounded border border-zinc-200 px-2 py-1 text-[10px] font-bold text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
                             href={ebaySearchUrl(item)}
                             rel="noreferrer"
                             target="_blank"
@@ -763,6 +884,15 @@ export function WheelApp() {
                             eBay
                             <ExternalLink className="size-3" />
                           </a>
+                          <button
+                            aria-label={`Add ${item.card.name} to owned cards`}
+                            className="inline-flex min-h-11 items-center gap-1 rounded border border-[#8a1f2d]/25 bg-rose-50 px-2 py-1 text-[10px] font-bold text-[#8a1f2d] transition hover:border-[#8a1f2d] hover:bg-white"
+                            onClick={() => openPurchaseSheet(item)}
+                            type="button"
+                          >
+                            <ShoppingBag className="size-3" />
+                            Own
+                          </button>
                           <CardNoteIndicator
                             align="right"
                             label={`View note for ${item.card.name}`}
@@ -895,7 +1025,186 @@ export function WheelApp() {
             <p className="mt-1 text-2xl font-bold text-white">
               {selectedCardModal.card.name}
             </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <a
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15"
+                href={ebaySearchUrl(selectedCardModal)}
+                rel="noreferrer"
+                target="_blank"
+              >
+                eBay
+                <ExternalLink className="size-4" />
+              </a>
+              <button
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-bold text-zinc-950 transition hover:bg-rose-50"
+                onClick={() => openPurchaseSheet(selectedCardModal)}
+                type="button"
+              >
+                <ShoppingBag className="size-4" />
+                Add to owned
+              </button>
+            </div>
           </div>
+        </div>
+      ) : null}
+
+      {purchaseTarget ? (
+        <div
+          aria-labelledby="purchase-card-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/45 px-0 pt-10 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
+          role="dialog"
+        >
+          <section className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg border border-zinc-300 bg-white shadow-2xl sm:max-w-lg sm:rounded-lg">
+            <div className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
+                  Add to owned
+                </p>
+                <h2
+                  className="mt-1 truncate text-xl font-bold"
+                  id="purchase-card-title"
+                >
+                  {purchaseTarget.card.name}
+                </h2>
+                {purchaseTarget.card.rarity ? (
+                  <p className="mt-1 text-sm font-semibold text-zinc-500">
+                    {purchaseTarget.card.rarity}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                aria-label="Close add to owned form"
+                className="grid size-10 shrink-0 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
+                onClick={() => setPurchaseTarget(null)}
+                type="button"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <form className="space-y-4 overflow-auto p-4" onSubmit={submitPurchase}>
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
+                      Status
+                    </p>
+                    <p className="mt-1 flex items-center gap-1 font-bold text-zinc-950">
+                      <Check className="size-4 text-[#8a1f2d]" />
+                      Owned
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
+                      Estimate
+                    </p>
+                    <p className="mt-1 font-bold text-zinc-950">
+                      {formatCurrency(purchaseTarget.priceValue)}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {purchaseTarget.card.url ? (
+                    <a
+                      className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
+                      href={purchaseTarget.card.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Open saved link
+                      <ExternalLink className="size-4" />
+                    </a>
+                  ) : null}
+                  <a
+                    className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
+                    href={ebaySearchUrl(purchaseTarget)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Open eBay search
+                    <ExternalLink className="size-4" />
+                  </a>
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-700">
+                  Paid price <span className="text-[#8a1f2d]">*</span>
+                </span>
+                <input
+                  autoFocus
+                  aria-describedby={
+                    showPurchasePriceError ? "purchase-paid-error" : undefined
+                  }
+                  aria-invalid={showPurchasePriceError}
+                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition placeholder:text-zinc-400 focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10"
+                  inputMode="decimal"
+                  onBlur={() => setPurchaseTouched(true)}
+                  onChange={(event) =>
+                    setPurchaseForm((current) => ({
+                      ...current,
+                      paidPriceText: event.target.value,
+                    }))
+                  }
+                  placeholder="£12.50 or pulled from pack"
+                  value={purchaseForm.paidPriceText}
+                />
+                {showPurchasePriceError ? (
+                  <p
+                    className="mt-1 text-sm font-semibold text-red-700"
+                    id="purchase-paid-error"
+                    role="alert"
+                  >
+                    Enter what you paid before moving this card to owned.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs font-medium text-zinc-500">
+                    This is the only required field.
+                  </p>
+                )}
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-700">
+                  Bought month
+                </span>
+                <input
+                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10"
+                  onChange={(event) =>
+                    setPurchaseForm((current) => ({
+                      ...current,
+                      purchaseMonth: event.target.value,
+                    }))
+                  }
+                  type="month"
+                  value={purchaseForm.purchaseMonth}
+                />
+              </label>
+
+              {updateCard.error ? (
+                <p
+                  className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  role="alert"
+                >
+                  {updateCard.error.message}
+                </p>
+              ) : null}
+
+              <button
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:bg-zinc-300"
+                disabled={updateCard.isPending || !purchasePaidPrice}
+                type="submit"
+              >
+                {updateCard.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ShoppingBag className="size-4" />
+                )}
+                Move to owned
+              </button>
+            </form>
+          </section>
         </div>
       ) : null}
     </main>
