@@ -24,7 +24,12 @@ const pool =
   globalThis.ygoWishlistPgPool ??
   new Pool({
     connectionString: databaseUrl,
+    connectionTimeoutMillis: 8_000,
+    idleTimeoutMillis: 30_000,
     max: poolMax,
+    maxUses: 500,
+    query_timeout: 12_000,
+    statement_timeout: 12_000,
   });
 
 if (process.env.NODE_ENV !== "production") {

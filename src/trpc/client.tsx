@@ -8,6 +8,7 @@ import type { AppRouter } from "@/server/root";
 import { useState, type ReactNode } from "react";
 
 export const trpc = createTRPCReact<AppRouter>();
+const requestTimeoutMs = 15_000;
 
 function getBaseUrl() {
   if (typeof window !== "undefined") {
@@ -18,11 +19,38 @@ function getBaseUrl() {
 }
 
 export function TrpcProvider({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 1,
+            staleTime: 10_000,
+          },
+        },
+      }),
+  );
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [
         httpBatchLink({
+          fetch(url, options) {
+            const controller = new AbortController();
+            const timeout = window.setTimeout(
+              () => controller.abort(),
+              requestTimeoutMs,
+            );
+
+            options?.signal?.addEventListener(
+              "abort",
+              () => controller.abort(),
+              { once: true },
+            );
+
+            return fetch(url, { ...options, signal: controller.signal }).finally(
+              () => window.clearTimeout(timeout),
+            );
+          },
           headers: {
             "ngrok-skip-browser-warning": "true",
           },
