@@ -7,12 +7,14 @@ type CardNoteIndicatorProps = {
   align?: "left" | "right";
   label?: string;
   note: string | null | undefined;
+  size?: "default" | "compact";
 };
 
 export function CardNoteIndicator({
   align = "left",
   label = "View card note",
   note,
+  size = "default",
 }: CardNoteIndicatorProps) {
   const tooltipId = useId();
   const cleanNote = note?.trim();
@@ -31,7 +33,11 @@ export function CardNoteIndicator({
       <button
         aria-describedby={tooltipId}
         aria-label={label}
-        className="inline-flex size-8 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:border-amber-300 hover:bg-amber-100 hover:text-amber-800 focus-visible:bg-amber-100"
+        className={
+          size === "compact"
+            ? "relative inline-flex size-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 shadow-[0_1px_0_rgba(0,0,0,0.02)] transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-800 focus-visible:bg-zinc-50"
+            : "inline-flex size-8 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:border-amber-300 hover:bg-amber-100 hover:text-amber-800 focus-visible:bg-amber-100"
+        }
         title="View note"
         type="button"
       >

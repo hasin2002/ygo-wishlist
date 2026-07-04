@@ -876,7 +876,7 @@ export function WheelApp() {
                           </span>
                           <a
                             aria-label={`Open eBay search for ${item.card.name}`}
-                            className="inline-flex min-h-11 items-center gap-1 rounded border border-zinc-200 px-2 py-1 text-[10px] font-bold text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                            className="relative inline-flex h-8 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 text-[10px] font-bold text-zinc-600 shadow-[0_1px_0_rgba(0,0,0,0.02)] transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
                             href={ebaySearchUrl(item)}
                             rel="noreferrer"
                             target="_blank"
@@ -886,17 +886,18 @@ export function WheelApp() {
                           </a>
                           <button
                             aria-label={`Add ${item.card.name} to owned cards`}
-                            className="inline-flex min-h-11 items-center gap-1 rounded border border-[#8a1f2d]/25 bg-rose-50 px-2 py-1 text-[10px] font-bold text-[#8a1f2d] transition hover:border-[#8a1f2d] hover:bg-white"
+                            className="relative inline-flex size-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 shadow-[0_1px_0_rgba(0,0,0,0.02)] transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:border-[#8a1f2d]/30 hover:bg-rose-50 hover:text-[#8a1f2d]"
                             onClick={() => openPurchaseSheet(item)}
+                            title="Add to owned"
                             type="button"
                           >
                             <ShoppingBag className="size-3" />
-                            Own
                           </button>
                           <CardNoteIndicator
                             align="right"
                             label={`View note for ${item.card.name}`}
                             note={item.card.notes}
+                            size="compact"
                           />
                         </div>
                       </div>
