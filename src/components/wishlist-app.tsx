@@ -1301,7 +1301,7 @@ function AddCardDialog({
   );
 }
 
-export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
+export function WishlistApp({ initialCards }: WishlistAppProps) {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortOption>("updated");
@@ -1328,7 +1328,8 @@ export function WishlistApp({ initialCards = [] }: WishlistAppProps) {
   const list = trpc.cards.list.useQuery(
     { status: "all", query },
     {
-      initialData: query ? undefined : initialCards,
+      initialData:
+        query || initialCards === undefined ? undefined : initialCards,
       staleTime: 30_000,
     },
   );

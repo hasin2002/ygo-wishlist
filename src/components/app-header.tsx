@@ -3,7 +3,7 @@
 import { Wallet } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { trpc } from "@/trpc/client";
 
 const navItems = [
@@ -43,11 +43,29 @@ export function AppHeader({
   title: string;
 }) {
   const pathname = usePathname();
+  const utils = trpc.useUtils();
   const currentMonth = trpc.spend.currentMonth.useQuery(undefined, {
     staleTime: 60_000,
   });
   const monthlyTotal = currentMonth.data?.total ?? 0;
   const monthlyLabel = currentMonth.data?.label ?? "This month";
+
+  useEffect(() => {
+    if (pathname === "/") {
+      return;
+    }
+
+    const prefetchTracker = () => {
+      void utils.cards.list.prefetch(
+        { status: "all", query: "" },
+        { staleTime: 30_000 },
+      );
+    };
+
+    const timeoutId = window.setTimeout(prefetchTracker, 750);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pathname, utils]);
 
   return (
     <header className="border-b border-zinc-300/80 pb-5">
