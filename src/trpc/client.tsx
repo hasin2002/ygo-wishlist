@@ -1,6 +1,8 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import { httpBatchLink } from "@trpc/client";
 import { createTRPCReact } from "@trpc/react-query";
 import superjson from "superjson";
@@ -9,6 +11,8 @@ import { useState, type ReactNode } from "react";
 
 export const trpc = createTRPCReact<AppRouter>();
 const requestTimeoutMs = 15_000;
+const queryCacheMaxAgeMs = 15 * 60 * 1_000;
+const queryCacheStorageKey = "ygo-wishlist:query-cache:v1";
 
 function getBaseUrl() {
   if (typeof window !== "undefined") {
@@ -24,11 +28,19 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
+            gcTime: queryCacheMaxAgeMs,
             retry: 1,
             staleTime: 10_000,
           },
         },
       }),
+  );
+  const [persister] = useState(() =>
+    createSyncStoragePersister({
+      key: queryCacheStorageKey,
+      storage: typeof window === "undefined" ? undefined : window.sessionStorage,
+      throttleTime: 1_000,
+    }),
   );
   const [trpcClient] = useState(() =>
     trpc.createClient({
@@ -64,7 +76,16 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          buster: "v1",
+          maxAge: queryCacheMaxAgeMs,
+          persister,
+        }}
+      >
+        {children}
+      </PersistQueryClientProvider>
     </trpc.Provider>
   );
 }
