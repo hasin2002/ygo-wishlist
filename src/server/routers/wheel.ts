@@ -77,9 +77,14 @@ function matchesPriceFilter(
 
 function serializeCard(card: typeof cards.$inferSelect) {
   return {
-    ...card,
-    createdAt: card.createdAt.toISOString(),
-    updatedAt: card.updatedAt.toISOString(),
+    chaseLevel: card.chaseLevel,
+    ebaySearchUrl: card.ebaySearchUrl,
+    id: card.id,
+    imageUrl: card.imageUrl,
+    name: card.name,
+    notes: card.notes,
+    rarity: card.rarity,
+    url: card.url,
   };
 }
 

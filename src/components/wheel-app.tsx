@@ -297,13 +297,17 @@ export function WheelApp() {
   const utils = trpc.useUtils();
   const wheelQuery = trpc.wheel.state.useQuery();
   const spinWheel = trpc.wheel.spin.useMutation();
-  const updateCard = trpc.cards.update.useMutation({
+  const markOwned = trpc.cards.markOwned.useMutation({
     onSuccess: () => {
       setPurchaseTarget(null);
       setPurchaseForm({ paidPriceText: "", purchaseMonth: currentMonthKey() });
       setPurchaseTouched(false);
       void utils.wheel.state.invalidate();
+      void utils.cards.binderList.invalidate();
+      void utils.cards.chaseQueue.invalidate();
       void utils.cards.list.invalidate();
+      void utils.cards.summary.invalidate();
+      void utils.cards.trackerPage.invalidate();
       void utils.spend.currentMonth.invalidate();
     },
   });
@@ -384,7 +388,7 @@ export function WheelApp() {
     wheelQuery.isLoading ||
     spinWheel.isPending ||
     resetWheel.isPending ||
-    updateCard.isPending;
+    markOwned.isPending;
 
   useEffect(() => {
     return () => {
@@ -477,8 +481,8 @@ export function WheelApp() {
     setTilt({ x: 0, y: 0 });
     setPurchaseTarget(item);
     setPurchaseForm({
-      paidPriceText: item.card.paidPriceText ?? "",
-      purchaseMonth: item.card.purchaseMonth ?? currentMonthKey(),
+      paidPriceText: "",
+      purchaseMonth: currentMonthKey(),
     });
     setPurchaseTouched(false);
   }
@@ -491,21 +495,10 @@ export function WheelApp() {
       return;
     }
 
-    updateCard.mutate({
+    markOwned.mutate({
       id: purchaseTarget.card.id,
-      name: purchaseTarget.card.name,
-      url: purchaseTarget.card.url ?? undefined,
-      imageUrl: purchaseTarget.card.imageUrl ?? undefined,
-      priceText: purchaseTarget.card.priceText ?? undefined,
-      marketPriceText: purchaseTarget.card.marketPriceText ?? undefined,
       paidPriceText: purchasePaidPrice,
       purchaseMonth: purchaseForm.purchaseMonth || currentMonthKey(),
-      ebaySearchUrl: purchaseTarget.card.ebaySearchUrl ?? undefined,
-      ebayListingUrl: "",
-      rarity: purchaseTarget.card.rarity ?? undefined,
-      chaseLevel: null,
-      status: "owned",
-      notes: purchaseTarget.card.notes ?? undefined,
     });
   }
 
@@ -1183,21 +1176,21 @@ export function WheelApp() {
                 />
               </label>
 
-              {updateCard.error ? (
+              {markOwned.error ? (
                 <p
                   className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
                   role="alert"
                 >
-                  {updateCard.error.message}
+                  {markOwned.error.message}
                 </p>
               ) : null}
 
               <button
                 className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:bg-zinc-300"
-                disabled={updateCard.isPending || !purchasePaidPrice}
+                disabled={markOwned.isPending || !purchasePaidPrice}
                 type="submit"
               >
-                {updateCard.isPending ? (
+                {markOwned.isPending ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
                   <ShoppingBag className="size-4" />

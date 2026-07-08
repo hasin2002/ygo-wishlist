@@ -36,6 +36,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - For larger UI, routing, data, or deployment-related changes, also run `npm run build`.
 - Report any checks that were skipped or failed.
 
+# Dev Server Cleanup
+
+- If you start a dev server for testing or any other reason, stop it completely when you are done using it.
+- Before finishing, make sure any server process you started has been killed and is no longer running.
+
 # Database, Environment, and Deployment Safety
 
 - Do not run database migrations, `npm run db:push`, deployment commands, or production-affecting commands without explicit approval.

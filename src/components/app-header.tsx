@@ -1,7 +1,7 @@
 "use client";
 
 import { Wallet } from "lucide-react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { trpc } from "@/trpc/client";
@@ -33,6 +33,19 @@ function isActive(pathname: string, href: string) {
   return pathname.startsWith(href);
 }
 
+function NavPendingIndicator() {
+  const { pending } = useLinkStatus();
+
+  return (
+    <span
+      aria-hidden
+      className={`ml-1 inline-block size-1.5 rounded-full bg-[#8a1f2d] align-middle transition-opacity ${
+        pending ? "opacity-100" : "opacity-0"
+      }`}
+    />
+  );
+}
+
 export function AppHeader({
   actions,
   eyebrow,
@@ -51,18 +64,43 @@ export function AppHeader({
   const monthlyLabel = currentMonth.data?.label ?? "This month";
 
   useEffect(() => {
-    if (pathname === "/") {
-      return;
-    }
-
-    const prefetchTracker = () => {
+    const prefetchLikelyRoutes = () => {
       void utils.cards.list.prefetch(
-        { status: "all", query: "" },
+        { status: "owned", query: "" },
         { staleTime: 30_000 },
       );
+      void utils.spend.monthlyFavourites.prefetch(undefined, {
+        staleTime: 30_000,
+      });
+
+      if (pathname !== "/") {
+        void utils.cards.trackerPage.prefetch(
+          {
+            chaseFilters: [],
+            page: 1,
+            pageSize: 8,
+            priceMax: "",
+            priceMin: "",
+            priceSignalFilters: [],
+            query: "",
+            rarityFilters: [],
+            sort: "updated",
+            status: "all",
+            typeFilters: [],
+          },
+          { staleTime: 30_000 },
+        );
+      }
+
+      if (pathname !== "/assign-chase") {
+        void utils.cards.chaseQueue.prefetch(undefined, { staleTime: 30_000 });
+      }
+
+      // Binder and Wheel payloads are intentionally not prefetched here; they are
+      // larger planner views and can compete with the Spend data users expect fast.
     };
 
-    const timeoutId = window.setTimeout(prefetchTracker, 750);
+    const timeoutId = window.setTimeout(prefetchLikelyRoutes, 750);
 
     return () => window.clearTimeout(timeoutId);
   }, [pathname, utils]);
@@ -96,6 +134,7 @@ export function AppHeader({
                   key={item.href}
                 >
                   {item.label}
+                  <NavPendingIndicator />
                 </Link>
               );
             })}
