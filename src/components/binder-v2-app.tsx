@@ -32,7 +32,7 @@ import {
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
-type Card = inferRouterOutputs<AppRouter>["cards"]["list"][number];
+type Card = inferRouterOutputs<AppRouter>["cards"]["binderList"][number];
 type CardTypeFilter =
   | "monster"
   | "normal"
@@ -389,7 +389,9 @@ export function BinderV2App() {
   const [pageInput, setPageInput] = useState("1");
   const currentPageRef = useRef(0);
   const utils = trpc.useUtils();
-  const cardsQuery = trpc.cards.list.useQuery({ status: "all", query: "" });
+  const cardsQuery = trpc.cards.binderList.useQuery(undefined, {
+    staleTime: 30_000,
+  });
   const layoutQuery = trpc.binder.layout.useQuery();
   const setSlot = trpc.binder.setSlot.useMutation({
     onSuccess: () => void utils.binder.layout.invalidate(),

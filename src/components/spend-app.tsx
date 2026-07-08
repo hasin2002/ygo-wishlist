@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
+import { DataLoadError } from "@/components/data-load-error";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -494,7 +495,56 @@ function PurchaseRow({
   );
 }
 
-export function SpendApp({ initialCards = [] }: { initialCards?: Card[] }) {
+function SpendSkeleton() {
+  return (
+    <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_392px]">
+      <div className="flex min-w-0 flex-col gap-5">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {["In view", "All time", "Average", "Highest"].map((label) => (
+            <div
+              className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm"
+              key={label}
+            >
+              <div className="mb-4 h-3 w-24 rounded bg-zinc-200" />
+              <div className="h-8 w-28 rounded bg-zinc-200" />
+              <div className="mt-3 h-4 w-36 rounded bg-zinc-100" />
+            </div>
+          ))}
+        </div>
+        <div className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
+          <div className="h-5 w-40 rounded bg-zinc-200" />
+          <div className="mt-5 grid gap-2">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div className="flex items-center gap-3" key={index}>
+                <div className="h-4 w-12 rounded bg-zinc-100" />
+                <div className="h-8 flex-1 rounded bg-zinc-100" />
+                <div className="h-4 w-16 rounded bg-zinc-100" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
+          <div className="h-5 w-28 rounded bg-zinc-200" />
+          <div className="mt-5 grid gap-3">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div className="h-16 rounded-md bg-zinc-100" key={index} />
+            ))}
+          </div>
+        </div>
+      </div>
+      <aside className="h-fit rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
+        <div className="h-5 w-28 rounded bg-zinc-200" />
+        <div className="mt-5 grid gap-3">
+          {Array.from({ length: 4 }, (_, index) => (
+            <div className="h-16 rounded-md bg-zinc-100" key={index} />
+          ))}
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
   const currentMonth = currentMonthKey();
   const currentYear = Number(currentMonth.slice(0, 4));
   const utils = trpc.useUtils();
@@ -509,7 +559,7 @@ export function SpendApp({ initialCards = [] }: { initialCards?: Card[] }) {
   const list = trpc.cards.list.useQuery(
     { status: "owned", query: "" },
     {
-      initialData: initialCards,
+      initialData: initialCards === undefined ? undefined : initialCards,
       staleTime: 30_000,
     },
   );
@@ -700,11 +750,22 @@ export function SpendApp({ initialCards = [] }: { initialCards?: Card[] }) {
     setPurchasePage(1);
   }
 
+  const waitingForInitialCards = list.isLoading && !list.data;
+
   return (
     <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <AppHeader eyebrow="Spend tracker" title="Card spending" />
 
+        {list.isError ? (
+          <DataLoadError
+            message={list.error.message}
+            onRetry={() => void list.refetch()}
+            title="Could not load spending data"
+          />
+        ) : waitingForInitialCards ? (
+          <SpendSkeleton />
+        ) : (
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_392px]">
           <div className="flex min-w-0 flex-col gap-5">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1049,6 +1110,7 @@ export function SpendApp({ initialCards = [] }: { initialCards?: Card[] }) {
             </div>
           </aside>
         </section>
+        )}
       </div>
     </main>
   );

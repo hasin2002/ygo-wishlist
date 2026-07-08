@@ -29,6 +29,7 @@ import {
 } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
+import { DataLoadError } from "@/components/data-load-error";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -57,11 +58,8 @@ type CardTypeFilter =
   | "spell"
   | "trap"
   | "token";
-type Card = inferRouterOutputs<AppRouter>["cards"]["list"][number];
+type Card = inferRouterOutputs<AppRouter>["cards"]["trackerPage"]["items"][number];
 type CardStatus = "wishlist" | "owned";
-type WishlistAppProps = {
-  initialCards?: Card[];
-};
 type CardForm = {
   name: string;
   url: string;
@@ -170,56 +168,6 @@ const cardTypeFilters: { value: CardTypeFilter; label: string }[] = [
   { value: "trap", label: "Trap" },
   { value: "token", label: "Token" },
 ];
-
-function cardMatchesType(card: Card, typeFilter: CardTypeFilter) {
-  const type = card.cardType?.toLowerCase() ?? "";
-
-  if (!type) {
-    return false;
-  }
-
-  if (typeFilter === "monster") {
-    return type.includes("monster");
-  }
-
-  if (typeFilter === "spell") {
-    return type.includes("spell");
-  }
-
-  if (typeFilter === "trap") {
-    return type.includes("trap");
-  }
-
-  return type.includes(typeFilter);
-}
-
-function cardMatchesTypes(card: Card, typeFilters: CardTypeFilter[]) {
-  if (!typeFilters.length) {
-    return true;
-  }
-
-  return typeFilters.some((typeFilter) => cardMatchesType(card, typeFilter));
-}
-
-function priceValue(priceText: string | null) {
-  const match = priceText?.match(/\d+(?:[,.]\d{1,2})?/);
-  return match ? Number(match[0].replace(",", "")) : null;
-}
-
-function filterNumber(value: string) {
-  if (!value.trim()) {
-    return null;
-  }
-
-  const normalized = value.replace(/^£/, "").replace(/,/g, "").trim();
-  const parsed = Number(normalized);
-
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function marketValue(card: Card) {
-  return priceValue(card.marketPriceText) ?? priceValue(card.priceText);
-}
 
 function normalizeMarketPrice(value: string) {
   const trimmed = value.trim();
@@ -1301,7 +1249,7 @@ function AddCardDialog({
   );
 }
 
-export function WishlistApp({ initialCards }: WishlistAppProps) {
+export function WishlistApp() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortOption>("updated");
@@ -1321,18 +1269,47 @@ export function WishlistApp({ initialCards }: WishlistAppProps) {
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const utils = trpc.useUtils();
   function invalidateCardsAndSpend() {
+    void utils.cards.binderList.invalidate();
+    void utils.cards.chaseQueue.invalidate();
     void utils.cards.list.invalidate();
+    void utils.cards.summary.invalidate();
+    void utils.cards.trackerPage.invalidate();
+    void utils.binder.layout.invalidate();
     void utils.spend.currentMonth.invalidate();
+    void utils.spend.monthlyFavourites.invalidate();
+    void utils.wheel.state.invalidate();
   }
 
-  const list = trpc.cards.list.useQuery(
-    { status: "all", query },
-    {
-      initialData:
-        query || initialCards === undefined ? undefined : initialCards,
-      staleTime: 30_000,
-    },
+  const trackerInput = useMemo(
+    () => ({
+      chaseFilters,
+      page,
+      pageSize,
+      priceMax,
+      priceMin,
+      priceSignalFilters,
+      query,
+      rarityFilters,
+      sort,
+      status: filter,
+      typeFilters,
+    }),
+    [
+      chaseFilters,
+      filter,
+      page,
+      priceMax,
+      priceMin,
+      priceSignalFilters,
+      query,
+      rarityFilters,
+      sort,
+      typeFilters,
+    ],
   );
+  const list = trpc.cards.trackerPage.useQuery(trackerInput, {
+    staleTime: 30_000,
+  });
   const create = trpc.cards.create.useMutation({
     onSuccess: () => {
       setForm(emptyForm());
@@ -1344,7 +1321,7 @@ export function WishlistApp({ initialCards }: WishlistAppProps) {
     onSuccess: invalidateCardsAndSpend,
   });
   const refreshPricing = trpc.cards.refreshPricing.useMutation({
-    onSuccess: () => void utils.cards.list.invalidate(),
+    onSuccess: invalidateCardsAndSpend,
   });
   const deleteCard = trpc.cards.delete.useMutation({
     onSuccess: invalidateCardsAndSpend,
@@ -1356,13 +1333,9 @@ export function WishlistApp({ initialCards }: WishlistAppProps) {
     },
   });
 
-  const allCards = useMemo<Card[]>(() => list.data ?? [], [list.data]);
   const rarityOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(allCards.map((card) => card.rarity).filter(Boolean) as string[]),
-      ).sort((a, b) => a.localeCompare(b)),
-    [allCards],
+    () => list.data?.rarityOptions ?? [],
+    [list.data?.rarityOptions],
   );
   const activeFilterCount = useMemo(
     () =>
@@ -1380,152 +1353,15 @@ export function WishlistApp({ initialCards }: WishlistAppProps) {
       typeFilters.length,
     ],
   );
-  const cards = useMemo(() => {
-    const minPrice = filterNumber(priceMin);
-    const maxPrice = filterNumber(priceMax);
-    const filtered = allCards.filter((card) => {
-      const cardMarketValue = marketValue(card);
-
-      if (filter !== "all" && card.status !== filter) {
-        return false;
-      }
-
-      if (!cardMatchesTypes(card, typeFilters)) {
-        return false;
-      }
-
-      if (
-        rarityFilters.length &&
-        (!card.rarity || !rarityFilters.includes(card.rarity))
-      ) {
-        return false;
-      }
-
-      if (priceSignalFilters.length) {
-        const matchesPriceSignal = priceSignalFilters.some((priceSignal) => {
-          if (priceSignal === "estimated") {
-            return cardMarketValue !== null;
-          }
-
-          if (priceSignal === "unpriced") {
-            return cardMarketValue === null;
-          }
-
-          return Boolean(card.paidPriceText);
-        });
-
-        if (!matchesPriceSignal) {
-          return false;
-        }
-      }
-
-      if (minPrice !== null || maxPrice !== null) {
-        if (cardMarketValue === null) {
-          return false;
-        }
-
-        if (minPrice !== null && cardMarketValue < minPrice) {
-          return false;
-        }
-
-        if (maxPrice !== null && cardMarketValue > maxPrice) {
-          return false;
-        }
-      }
-
-      if (chaseFilters.length) {
-        const cardChase = card.chaseLevel
-          ? (String(card.chaseLevel) as ChaseFilter)
-          : "unset";
-
-        if (!chaseFilters.includes(cardChase)) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    return filtered.sort((a, b) => {
-      if (sort === "name") {
-        return a.name.localeCompare(b.name);
-      }
-
-      if (sort === "rarity") {
-        return (a.rarity ?? "").localeCompare(b.rarity ?? "");
-      }
-
-      if (sort === "price-high" || sort === "price-low") {
-        const aPrice = marketValue(a);
-        const bPrice = marketValue(b);
-
-        if (aPrice === null && bPrice === null) {
-          return 0;
-        }
-
-        if (aPrice === null) {
-          return 1;
-        }
-
-        if (bPrice === null) {
-          return -1;
-        }
-
-        return sort === "price-high" ? bPrice - aPrice : aPrice - bPrice;
-      }
-
-      if (sort === "chase-next") {
-        return (b.chaseLevel ?? 0) - (a.chaseLevel ?? 0);
-      }
-
-      if (sort === "chase-relaxed") {
-        return (a.chaseLevel ?? 6) - (b.chaseLevel ?? 6);
-      }
-
-      return (
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      );
-    });
-  }, [
-    allCards,
-    chaseFilters,
-    filter,
-    priceMax,
-    priceMin,
-    priceSignalFilters,
-    rarityFilters,
-    sort,
-    typeFilters,
-  ]);
-  const totalPages = Math.max(1, Math.ceil(cards.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const paginatedCards = useMemo(
-    () => cards.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [cards, currentPage],
-  );
-  const firstVisibleCard = cards.length ? (currentPage - 1) * pageSize + 1 : 0;
-  const lastVisibleCard = Math.min(currentPage * pageSize, cards.length);
-  const counts = useMemo(
-    () => ({
-      wishlist: cards.filter((card) => card.status === "wishlist").length,
-      owned: cards.filter((card) => card.status === "owned").length,
-      total: cards.length,
-    }),
-    [cards],
-  );
-  const values = useMemo(() => {
-    const wishlist = cards
-      .filter((card) => card.status === "wishlist")
-      .reduce((sum, card) => sum + (marketValue(card) ?? 0), 0);
-    const owned = cards
-      .filter((card) => card.status === "owned")
-      .reduce((sum, card) => sum + (marketValue(card) ?? 0), 0);
-    const paid = cards
-      .filter((card) => card.status === "owned")
-      .reduce((sum, card) => sum + (priceValue(card.paidPriceText) ?? 0), 0);
-
-    return { owned, paid, wishlist };
-  }, [cards]);
+  const cards = list.data?.items ?? [];
+  const totalCards = list.data?.total ?? 0;
+  const totalPages = list.data?.totalPages ?? 1;
+  const currentPage = list.data?.page ?? Math.min(page, totalPages);
+  const paginatedCards = cards;
+  const firstVisibleCard = totalCards ? (currentPage - 1) * pageSize + 1 : 0;
+  const lastVisibleCard = Math.min(currentPage * pageSize, totalCards);
+  const counts = list.data?.counts ?? { owned: 0, total: 0, wishlist: 0 };
+  const values = list.data?.values ?? { owned: 0, paid: 0, wishlist: 0 };
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1742,7 +1578,13 @@ export function WishlistApp({ initialCards }: WishlistAppProps) {
               </div>
             </div>
 
-            {list.isLoading ? (
+            {list.isError ? (
+              <DataLoadError
+                message={list.error.message}
+                onRetry={() => void list.refetch()}
+                title="Could not load cards"
+              />
+            ) : list.isLoading ? (
               <div className="grid min-h-80 place-items-center rounded-lg border border-zinc-300 bg-white">
                 <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
               </div>
