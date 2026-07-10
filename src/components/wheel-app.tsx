@@ -253,6 +253,68 @@ function pageCountFor(items: unknown[]) {
   return Math.max(1, Math.ceil(items.length / listPageSize));
 }
 
+function isDatabaseErrorMessage(message: string) {
+  const normalized = message.toLowerCase();
+
+  return [
+    "failed query",
+    "select \"",
+    " from \"",
+    "params:",
+    "column ",
+    "relation ",
+    "does not exist",
+    "syntax error",
+  ].some((pattern) => normalized.includes(pattern));
+}
+
+function wheelLoadErrorMessage(message?: string) {
+  if (!message) {
+    return "Try again. If this keeps happening, the wheel data may need a database schema sync after approval.";
+  }
+
+  if (isDatabaseErrorMessage(message)) {
+    return "The wheel could not load because the deployed database schema may be out of date. After this change is reviewed, approve a database schema sync before testing production again.";
+  }
+
+  return message;
+}
+
+function resetErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : "The reset request did not complete.";
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror")
+  ) {
+    return "The reset request could not reach the app. Check the connection, then try again.";
+  }
+
+  if (normalized.includes("abort")) {
+    return "The reset request timed out. Try again.";
+  }
+
+  if (isDatabaseErrorMessage(message)) {
+    return "The wheel reset did not complete because the database rejected the request. Try again after the database has been checked.";
+  }
+
+  return message;
+}
+
+function resetSuccessMessage(resetCount: number) {
+  if (resetCount === 0) {
+    return "Wheel was already reset.";
+  }
+
+  if (resetCount === 1) {
+    return "1 picked card was put back on the wheel.";
+  }
+
+  return `${resetCount} picked cards were put back on the wheel.`;
+}
+
 function Pager({
   currentPage,
   label,
@@ -311,9 +373,7 @@ export function WheelApp() {
       void utils.spend.currentMonth.invalidate();
     },
   });
-  const resetWheel = trpc.wheel.reset.useMutation({
-    onSuccess: () => void utils.wheel.state.invalidate(),
-  });
+  const resetWheel = trpc.wheel.reset.useMutation();
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [winner, setWinner] = useState<WheelItem | null>(null);
@@ -322,6 +382,8 @@ export function WheelApp() {
   );
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const [resetOpen, setResetOpen] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetStatus, setResetStatus] = useState("");
   const [activePage, setActivePage] = useState(1);
   const [pickedPage, setPickedPage] = useState(1);
   const [mobileWheelDetailsOpen, setMobileWheelDetailsOpen] = useState(false);
@@ -399,6 +461,16 @@ export function WheelApp() {
   }, []);
 
   useEffect(() => {
+    if (!resetStatus) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setResetStatus(""), 5_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [resetStatus]);
+
+  useEffect(() => {
     if (!selectedCardModal && !purchaseTarget) {
       return;
     }
@@ -461,19 +533,29 @@ export function WheelApp() {
     }, 2300);
   }
 
-  function reset() {
-    setWinner(null);
-    setRotation(0);
-    resetWheel.mutate(undefined, {
-      onSuccess: () => {
-        setResetOpen(false);
-        setSelectedCardModal(null);
-        setTilt({ x: 0, y: 0 });
-        setActivePage(1);
-        setPickedPage(1);
-        void utils.wheel.state.invalidate();
-      },
-    });
+  async function reset() {
+    if (resetWheel.isPending) {
+      return;
+    }
+
+    setResetError(null);
+    setResetStatus("");
+
+    try {
+      const result = await resetWheel.mutateAsync();
+
+      setWinner(null);
+      setRotation(0);
+      setResetOpen(false);
+      setSelectedCardModal(null);
+      setTilt({ x: 0, y: 0 });
+      setActivePage(1);
+      setPickedPage(1);
+      setResetStatus(resetSuccessMessage(result.resetCount));
+      void utils.wheel.state.invalidate();
+    } catch (error) {
+      setResetError(resetErrorMessage(error));
+    }
   }
 
   function openPurchaseSheet(item: WheelItem) {
@@ -544,7 +626,10 @@ export function WheelApp() {
                 aria-label="Reset wheel"
                 className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
                 disabled={busy}
-                onClick={() => setResetOpen(true)}
+                onClick={() => {
+                  setResetError(null);
+                  setResetOpen(true);
+                }}
                 title="Reset wheel"
                 type="button"
               >
@@ -553,6 +638,15 @@ export function WheelApp() {
             </div>
           }
         />
+
+        <div aria-atomic="true" aria-live="polite">
+          {resetStatus ? (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
+              <Check className="size-4 shrink-0" />
+              <span>{resetStatus}</span>
+            </div>
+          ) : null}
+        </div>
 
         <section className="grid min-w-0 gap-5 xl:grid-cols-[300px_minmax(0,1fr)_300px]">
           <aside className="order-4 flex min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm xl:order-1 xl:min-h-[640px]">
@@ -749,7 +843,7 @@ export function WheelApp() {
               {wheelQuery.isError ? (
                 <DataLoadError
                   className="w-full"
-                  message={wheelQuery.error.message}
+                  message={wheelLoadErrorMessage(wheelQuery.error.message)}
                   onRetry={() => void wheelQuery.refetch()}
                   title="Could not load wheel"
                 />
@@ -921,6 +1015,7 @@ export function WheelApp() {
 
       {resetOpen ? (
         <div
+          aria-busy={resetWheel.isPending}
           aria-labelledby="reset-wheel-title"
           aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
@@ -940,21 +1035,40 @@ export function WheelApp() {
               This clears the picked history and rebuilds the wheel from your
               current wishlist cards.
             </p>
+            {resetError ? (
+              <div
+                className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold leading-5 text-rose-900"
+                role="alert"
+              >
+                {resetError}
+              </div>
+            ) : null}
             <div className="mt-5 flex justify-end gap-2">
               <button
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-                onClick={() => setResetOpen(false)}
+                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-60"
+                disabled={resetWheel.isPending}
+                onClick={() => {
+                  setResetError(null);
+                  setResetOpen(false);
+                }}
                 type="button"
               >
                 Cancel
               </button>
               <button
-                className="rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
+                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
                 disabled={resetWheel.isPending}
                 onClick={reset}
                 type="button"
               >
-                Reset wheel
+                {resetWheel.isPending ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Resetting...
+                  </>
+                ) : (
+                  "Reset wheel"
+                )}
               </button>
             </div>
           </div>

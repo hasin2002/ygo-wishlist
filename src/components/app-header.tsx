@@ -39,7 +39,7 @@ function NavPendingIndicator() {
   return (
     <span
       aria-hidden
-      className={`ml-1 inline-block size-1.5 rounded-full bg-[#8a1f2d] align-middle transition-opacity ${
+      className={`absolute right-2 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-[#8a1f2d] transition-opacity ${
         pending ? "opacity-100" : "opacity-0"
       }`}
     />
@@ -117,7 +117,7 @@ export function AppHeader({
           </h1>
           <nav
             aria-label="Primary"
-            className="mt-4 grid w-[580px] max-w-[calc(100vw-2rem)] grid-cols-5 items-center gap-2 pb-1"
+            className="mt-4 flex w-full max-w-[640px] flex-wrap items-center gap-2 pb-1"
           >
             {navItems.map((item) => {
               const active = isActive(pathname, item.href);
@@ -125,15 +125,15 @@ export function AppHeader({
               return (
                 <Link
                   aria-current={active ? "page" : undefined}
-                  className={`rounded-md border px-2 py-2 text-center text-sm font-semibold transition ${
+                  className={`relative inline-flex h-11 min-w-[112px] items-center justify-center rounded-md px-3 text-center text-sm font-semibold leading-none transition active:scale-[0.98] ${
                     active
-                      ? "border-zinc-300 bg-white text-zinc-950 shadow-sm"
-                      : "border-transparent text-zinc-500 hover:border-zinc-300 hover:bg-white hover:text-zinc-950"
+                      ? "bg-white text-zinc-950 shadow-sm after:absolute after:inset-x-3 after:bottom-1 after:h-0.5 after:rounded-full after:bg-[#8a1f2d]"
+                      : "text-zinc-500 hover:bg-white/60 hover:text-zinc-950"
                   }`}
                   href={item.href}
                   key={item.href}
                 >
-                  {item.label}
+                  <span className="whitespace-nowrap">{item.label}</span>
                   <NavPendingIndicator />
                 </Link>
               );

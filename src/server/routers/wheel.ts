@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { asc, desc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { cards, wheelEntries } from "@/db/schema";
@@ -116,7 +116,7 @@ async function syncWishlistEntries() {
     .orderBy(asc(cards.name));
   const existingEntries = await db.select().from(wheelEntries);
   const existingIds = new Set(existingEntries.map((entry) => entry.cardId));
-  let nextSortOrder =
+  const nextSortOrder =
     existingEntries.reduce(
       (highest, entry) => Math.max(highest, entry.sortOrder),
       -1,
@@ -130,19 +130,14 @@ async function syncWishlistEntries() {
 
   const now = new Date();
 
-  await db.transaction(async (tx) => {
-    for (const card of missingCards) {
-      await tx
-        .insert(wheelEntries)
-        .values({
-          cardId: card.id,
-          sortOrder: nextSortOrder,
-          createdAt: now,
-          updatedAt: now,
-        });
-      nextSortOrder += 1;
-    }
-  });
+  await db.insert(wheelEntries).values(
+    missingCards.map((card, index) => ({
+      cardId: card.id,
+      sortOrder: nextSortOrder + index,
+      createdAt: now,
+      updatedAt: now,
+    })),
+  );
 }
 
 function wheelRows() {
@@ -254,26 +249,39 @@ export const wheelRouter = router({
   reset: publicProcedure.mutation(async () => {
     await syncWishlistEntries();
 
-    const wishlistRows = await db
-      .select({ entry: wheelEntries })
+    const resettableRows = await db
+      .select({ id: wheelEntries.id })
       .from(wheelEntries)
       .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-      .where(eq(cards.status, "wishlist"));
-    const now = new Date();
+      .where(
+        and(
+          eq(cards.status, "wishlist"),
+          or(
+            isNotNull(wheelEntries.selectedAt),
+            isNotNull(wheelEntries.selectedOrder),
+          ),
+        ),
+      );
 
-    await db.transaction(async (tx) => {
-      for (const { entry } of wishlistRows) {
-        await tx
-          .update(wheelEntries)
-          .set({
-            selectedAt: null,
-            selectedOrder: null,
-            updatedAt: now,
-          })
-          .where(eq(wheelEntries.id, entry.id));
-      }
-    });
+    if (!resettableRows.length) {
+      return { ok: true, resetCount: 0 };
+    }
 
-    return { ok: true };
+    const updated = await db
+      .update(wheelEntries)
+      .set({
+        selectedAt: null,
+        selectedOrder: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        inArray(
+          wheelEntries.id,
+          resettableRows.map((row) => row.id),
+        ),
+      )
+      .returning({ id: wheelEntries.id });
+
+    return { ok: true, resetCount: updated.length };
   }),
 });
