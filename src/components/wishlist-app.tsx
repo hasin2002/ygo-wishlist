@@ -27,6 +27,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
@@ -171,6 +172,89 @@ const cardTypeFilters: { value: CardTypeFilter; label: string }[] = [
   { value: "trap", label: "Trap" },
   { value: "token", label: "Token" },
 ];
+
+type TrackerUrlState = {
+  chaseFilters: ChaseFilter[];
+  filter: StatusFilter;
+  page: number;
+  priceMax: string;
+  priceMin: string;
+  priceSignalFilters: PriceSignalFilter[];
+  query: string;
+  rarityFilters: string[];
+  sort: SortOption;
+  typeFilters: CardTypeFilter[];
+};
+
+type TrackerUrlParam =
+  | "chase"
+  | "maxPrice"
+  | "minPrice"
+  | "page"
+  | "priceSignal"
+  | "q"
+  | "rarity"
+  | "sort"
+  | "status"
+  | "type";
+
+type SearchParamsReader = Pick<URLSearchParams, "get" | "getAll">;
+
+function optionValue<T extends string>(
+  value: string | null,
+  options: readonly { value: T }[],
+  fallback: T,
+) {
+  return options.some((option) => option.value === value)
+    ? (value as T)
+    : fallback;
+}
+
+function optionValues<T extends string>(
+  searchParams: SearchParamsReader,
+  key: string,
+  options: readonly { value: T }[],
+) {
+  const allowedValues = new Set(options.map((option) => option.value));
+
+  return Array.from(new Set(searchParams.getAll(key))).filter(
+    (value): value is T => allowedValues.has(value as T),
+  );
+}
+
+function stringValues(searchParams: SearchParamsReader, key: string) {
+  return Array.from(
+    new Set(searchParams.getAll(key).map((value) => value.trim()).filter(Boolean)),
+  );
+}
+
+function pageValue(value: string | null) {
+  if (!value || !/^\d+$/.test(value)) {
+    return 1;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function trackerUrlState(searchParams: SearchParamsReader): TrackerUrlState {
+  return {
+    chaseFilters: optionValues(searchParams, "chase", chaseFilterOptions),
+    filter: optionValue(searchParams.get("status"), filters, "all"),
+    page: pageValue(searchParams.get("page")),
+    priceMax: searchParams.get("maxPrice") ?? "",
+    priceMin: searchParams.get("minPrice") ?? "",
+    priceSignalFilters: optionValues(
+      searchParams,
+      "priceSignal",
+      priceSignalFilterOptions,
+    ),
+    query: searchParams.get("q") ?? "",
+    rarityFilters: stringValues(searchParams, "rarity"),
+    sort: optionValue(searchParams.get("sort"), sortOptions, "updated"),
+    typeFilters: optionValues(searchParams, "type", cardTypeFilters),
+  };
+}
 
 function normalizeMarketPrice(value: string) {
   const trimmed = value.trim();
@@ -1349,25 +1433,56 @@ function CardImagePreviewDialog({
 }
 
 export function WishlistApp() {
-  const [filter, setFilter] = useState<StatusFilter>("all");
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortOption>("updated");
-  const [rarityFilters, setRarityFilters] = useState<string[]>([]);
-  const [priceSignalFilters, setPriceSignalFilters] = useState<
-    PriceSignalFilter[]
-  >([]);
-  const [priceMin, setPriceMin] = useState("");
-  const [priceMax, setPriceMax] = useState("");
-  const [chaseFilters, setChaseFilters] = useState<ChaseFilter[]>([]);
-  const [typeFilters, setTypeFilters] = useState<CardTypeFilter[]>([]);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const {
+    chaseFilters,
+    filter,
+    page,
+    priceMax,
+    priceMin,
+    priceSignalFilters,
+    query,
+    rarityFilters,
+    sort,
+    typeFilters,
+  } = useMemo(() => trackerUrlState(searchParams), [searchParams]);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [addFormOpen, setAddFormOpen] = useState(false);
-  const [page, setPage] = useState(1);
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [imagePreviewCard, setImagePreviewCard] = useState<Card | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const utils = trpc.useUtils();
+
+  function updateTrackerUrl(
+    updates: Partial<
+      Record<TrackerUrlParam, string | string[] | null | undefined>
+    >,
+    { replace = false }: { replace?: boolean } = {},
+  ) {
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+
+    for (const [key, value] of Object.entries(updates)) {
+      nextSearchParams.delete(key);
+
+      if (Array.isArray(value)) {
+        value.forEach((item) => nextSearchParams.append(key, item));
+      } else if (value) {
+        nextSearchParams.set(key, value);
+      }
+    }
+
+    const queryString = nextSearchParams.toString();
+    const href = queryString ? `${pathname}?${queryString}` : pathname;
+
+    if (replace) {
+      window.history.replaceState(null, "", href);
+    } else {
+      window.history.pushState(null, "", href);
+    }
+  }
+
   function invalidateCardsAndSpend() {
     void utils.cards.binderList.invalidate();
     void utils.cards.chaseQueue.invalidate();
@@ -1495,13 +1610,15 @@ export function WishlistApp() {
   }
 
   function clearFilters() {
-    setRarityFilters([]);
-    setPriceSignalFilters([]);
-    setPriceMin("");
-    setPriceMax("");
-    setChaseFilters([]);
-    setTypeFilters([]);
-    setPage(1);
+    updateTrackerUrl({
+      chase: null,
+      maxPrice: null,
+      minPrice: null,
+      page: null,
+      priceSignal: null,
+      rarity: null,
+      type: null,
+    });
   }
 
   function openCardEditor(event: MouseEvent<HTMLElement>, card: Card) {
@@ -1635,8 +1752,10 @@ export function WishlistApp() {
                     <button
                       key={item.value}
                       onClick={() => {
-                        setFilter(item.value);
-                        setPage(1);
+                        updateTrackerUrl({
+                          page: null,
+                          status: item.value === "all" ? null : item.value,
+                        });
                       }}
                       className={`h-9 rounded px-3 text-sm font-semibold transition ${
                         filter === item.value
@@ -1655,8 +1774,10 @@ export function WishlistApp() {
                   <input
                     value={query}
                     onChange={(event) => {
-                      setQuery(event.target.value);
-                      setPage(1);
+                      updateTrackerUrl(
+                        { page: null, q: event.target.value || null },
+                        { replace: true },
+                      );
                     }}
                     className="h-10 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
                     placeholder="Search cards, rarity, notes"
@@ -1669,8 +1790,11 @@ export function WishlistApp() {
                   aria-label="Sort cards"
                   className="h-10 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none transition focus:border-[#8a1f2d] focus:bg-white sm:w-56"
                   onChange={(event) => {
-                    setSort(event.target.value as SortOption);
-                    setPage(1);
+                    const nextSort = event.target.value as SortOption;
+                    updateTrackerUrl({
+                      page: null,
+                      sort: nextSort === "updated" ? null : nextSort,
+                    });
                   }}
                   value={sort}
                 >
@@ -1967,9 +2091,12 @@ export function WishlistApp() {
                         aria-label="Previous page"
                         className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40"
                         disabled={currentPage === 1}
-                        onClick={() =>
-                          setPage((current) => Math.max(1, current - 1))
-                        }
+                        onClick={() => {
+                          const previousPage = Math.max(1, currentPage - 1);
+                          updateTrackerUrl({
+                            page: previousPage === 1 ? null : String(previousPage),
+                          });
+                        }}
                         type="button"
                       >
                         <ChevronLeft className="size-4" />
@@ -1982,7 +2109,9 @@ export function WishlistApp() {
                         className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40"
                         disabled={currentPage === totalPages}
                         onClick={() =>
-                          setPage((current) => Math.min(totalPages, current + 1))
+                          updateTrackerUrl({
+                            page: String(Math.min(totalPages, currentPage + 1)),
+                          })
                         }
                         type="button"
                       >
@@ -2082,28 +2211,28 @@ export function WishlistApp() {
           rarityFilters={rarityFilters}
           rarityOptions={rarityOptions}
           setChaseFilters={(value) => {
-            setChaseFilters(value);
-            setPage(1);
+            updateTrackerUrl({ chase: value, page: null });
           }}
           setPriceMax={(value) => {
-            setPriceMax(value);
-            setPage(1);
+            updateTrackerUrl(
+              { maxPrice: value || null, page: null },
+              { replace: true },
+            );
           }}
           setPriceMin={(value) => {
-            setPriceMin(value);
-            setPage(1);
+            updateTrackerUrl(
+              { minPrice: value || null, page: null },
+              { replace: true },
+            );
           }}
           setPriceSignalFilters={(value) => {
-            setPriceSignalFilters(value);
-            setPage(1);
+            updateTrackerUrl({ page: null, priceSignal: value });
           }}
           setRarityFilters={(value) => {
-            setRarityFilters(value);
-            setPage(1);
+            updateTrackerUrl({ page: null, rarity: value });
           }}
           setTypeFilters={(value) => {
-            setTypeFilters(value);
-            setPage(1);
+            updateTrackerUrl({ page: null, type: value });
           }}
           typeFilters={typeFilters}
         />
