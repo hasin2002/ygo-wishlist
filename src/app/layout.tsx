@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -12,6 +13,14 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
+const themeInitializer = `
+  try {
+    if (window.localStorage.getItem("ygo-theme") === "dark") {
+      document.documentElement.classList.add("dark-mode");
+    }
+  } catch (_) {}
+`;
 
 export const metadata: Metadata = {
   title: "Yu-Gi-Oh! Wishlist",
@@ -32,9 +41,13 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>
+        <Script id="theme-initializer" strategy="beforeInteractive">
+          {themeInitializer}
+        </Script>
       </body>
     </html>
   );

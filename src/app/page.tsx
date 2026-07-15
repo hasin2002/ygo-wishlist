@@ -1,10 +1,5 @@
-import { Suspense } from "react";
-import { WishlistApp } from "@/components/wishlist-app";
+import { WishlistClientApp } from "@/components/wishlist-client-app";
 
 export default function Home() {
-  return (
-    <Suspense fallback={null}>
-      <WishlistApp />
-    </Suspense>
-  );
+  return <WishlistClientApp />;
 }

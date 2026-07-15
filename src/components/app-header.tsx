@@ -10,6 +10,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  ShieldCheck,
   Sparkles,
   Wallet,
   X,
@@ -18,6 +19,7 @@ import {
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useState, type ReactNode } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { authClient, useSession } from "@/lib/auth-client";
 import { clearPersistedQueryCache, trpc } from "@/trpc/client";
 
@@ -151,6 +153,7 @@ export function AppHeader({
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(true);
   const { data: session, isPending: sessionPending } = useSession();
   const isAuthenticated = Boolean(session);
+  const isAdmin = session?.user.role === "admin";
   const visibleNavItems = isAuthenticated
     ? navItems
     : navItems.filter((item) => item.href === "/" || item.href === "/binder-v2");
@@ -305,7 +308,8 @@ export function AppHeader({
           ))}
         </nav>
 
-        <div className="mt-4 border-t border-zinc-200 pt-3">
+        <div className="mt-4 flex flex-col gap-2 border-t border-zinc-200 pt-3">
+          <ThemeToggle expanded={desktopMenuOpen} />
           {isAuthenticated ? (
             <button
               className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 ${
@@ -368,9 +372,20 @@ export function AppHeader({
           <div className="min-w-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8a1f2d]">
-                  {eyebrow}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#8a1f2d]">
+                    {eyebrow}
+                  </p>
+                  {isAdmin ? (
+                    <span
+                      aria-label="Signed in as administrator"
+                      className="inline-flex items-center gap-1 rounded-full border border-[#8a1f2d]/30 bg-rose-50 px-2 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.12em] text-[#8a1f2d]"
+                    >
+                      <ShieldCheck aria-hidden className="size-3" />
+                      Admin
+                    </span>
+                  ) : null}
+                </div>
                 <h1 className="mt-2 text-3xl font-bold leading-none tracking-normal text-zinc-950 sm:text-5xl">
                   {title}
                 </h1>
@@ -409,9 +424,10 @@ export function AppHeader({
                 />
               ))}
               <div className="mt-1 border-t border-zinc-200 pt-2">
+                <ThemeToggle mobile />
                 {isAuthenticated ? (
                   <button
-                    className="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950"
+                    className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950"
                     onClick={() => void signOut()}
                     type="button"
                   >
@@ -420,7 +436,7 @@ export function AppHeader({
                   </button>
                 ) : sessionPending ? null : (
                   <Link
-                    className="flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950"
+                    className="mt-2 flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950"
                     href="/login"
                     onClick={() => setMobileMenuOpen(false)}
                   >
