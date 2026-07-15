@@ -30,6 +30,9 @@ import {
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
+import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
+import { RarityGuidePopover } from "@/components/rarity-guide-popover";
+import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -237,15 +240,6 @@ function normalizePaidPrice(value: string) {
   }
 
   return trimmed.replace(/^paid\s+/i, "");
-}
-
-function paidDisplay(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = normalizePaidPrice(value);
-  return normalized.startsWith("£") ? `Paid ${normalized}` : normalized;
 }
 
 function editFormFromCard(card: Card): EditForm {
@@ -1249,6 +1243,107 @@ function AddCardDialog({
   );
 }
 
+function CardImagePreviewDialog({
+  card,
+  onClose,
+}: {
+  card: Card;
+  onClose: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  function updateTilt(event: MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width - 0.5;
+    const y = (event.clientY - rect.top) / rect.height - 0.5;
+
+    setTilt({
+      x: Number((-y * 10).toFixed(2)),
+      y: Number((x * 12).toFixed(2)),
+    });
+  }
+
+  return (
+    <div
+      aria-labelledby="card-image-preview-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/70 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+    >
+      <div className="relative w-full max-w-md text-center">
+        <button
+          aria-label="Close card image"
+          className="absolute right-0 top-0 z-10 grid size-10 translate-x-3 -translate-y-3 place-items-center rounded-md border border-zinc-700 bg-zinc-950/80 text-zinc-300 shadow-sm transition hover:border-white hover:text-white"
+          onClick={onClose}
+          ref={closeButtonRef}
+          title="Close card image"
+          type="button"
+        >
+          <X className="size-4" />
+        </button>
+        <div
+          className="mx-auto w-[min(82vw,360px)]"
+          onMouseLeave={() => setTilt({ x: 0, y: 0 })}
+          onMouseMove={updateTilt}
+          style={{ perspective: "1200px" }}
+        >
+          <div
+            className="rounded-xl bg-zinc-950 p-3 shadow-2xl transition-transform duration-150"
+            style={{
+              transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
+              transformStyle: "preserve-3d",
+            }}
+          >
+            <HolographicCardCanvas
+              alt={card.name}
+              className="aspect-[59/86] overflow-hidden rounded-lg border border-white/15 bg-zinc-900"
+              imageUrl={card.imageUrl}
+              rarity={card.rarity}
+              tilt={tilt}
+            />
+          </div>
+        </div>
+        <h2
+          className="mt-4 text-2xl font-bold leading-tight text-white"
+          id="card-image-preview-title"
+        >
+          {card.name}
+        </h2>
+        <div className="mt-4 flex justify-center">
+          <a
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15"
+            href={ebaySearchUrl(card)}
+            rel="noreferrer"
+            target="_blank"
+          >
+            eBay
+            <ExternalLink className="size-4" />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WishlistApp() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
@@ -1266,6 +1361,7 @@ export function WishlistApp() {
   const [page, setPage] = useState(1);
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [imagePreviewCard, setImagePreviewCard] = useState<Card | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const utils = trpc.useUtils();
   function invalidateCardsAndSpend() {
@@ -1320,7 +1416,7 @@ export function WishlistApp() {
   const setStatus = trpc.cards.setStatus.useMutation({
     onSuccess: invalidateCardsAndSpend,
   });
-  const refreshPricing = trpc.cards.refreshPricing.useMutation({
+  const refreshAllPricing = trpc.cards.refreshAllPricing.useMutation({
     onSuccess: invalidateCardsAndSpend,
   });
   const deleteCard = trpc.cards.delete.useMutation({
@@ -1436,7 +1532,7 @@ export function WishlistApp() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <AppHeader
           eyebrow="Local collection tracker"
@@ -1484,14 +1580,32 @@ export function WishlistApp() {
                 Track wishlist targets, owned cards, prices, and chase priority.
               </p>
             </div>
-            <button
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826]"
-              onClick={() => setAddFormOpen(true)}
-              type="button"
-            >
-              <Plus className="size-4" />
-              Add card
-            </button>
+            <div className="flex items-center gap-2">
+              <RarityGuidePopover />
+              <button
+                aria-label="Refresh prices for all cards"
+                className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
+                disabled={refreshAllPricing.isPending}
+                onClick={() => refreshAllPricing.mutate()}
+                title="Refresh prices for all cards"
+                type="button"
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className={`size-4 ${
+                    refreshAllPricing.isPending ? "animate-spin" : ""
+                  }`}
+                />
+              </button>
+              <button
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826]"
+                onClick={() => setAddFormOpen(true)}
+                type="button"
+              >
+                <Plus className="size-4" />
+                Add card
+              </button>
+            </div>
           </div>
 
           <section className="flex min-w-0 flex-col gap-4">
@@ -1601,31 +1715,45 @@ export function WishlistApp() {
               </div>
             ) : (
               <>
-                <div className="grid gap-3">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                   {paginatedCards.map((card: Card) => (
                     <article
                       key={card.id}
-                      className="group grid min-h-[164px] cursor-pointer grid-cols-[104px_minmax(0,1fr)] overflow-visible rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md sm:grid-cols-[116px_minmax(0,1fr)]"
+                      className="group flex h-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md"
                       onClick={(event) => openCardEditor(event, card)}
                     >
-                      <div className="grid place-items-center rounded-l-lg border-r border-zinc-200 bg-[#f7f6f2] p-2">
+                      <div className="grid aspect-[4/5] w-full place-items-center border-b border-zinc-200 bg-[#f7f6f2] p-3">
                         {card.imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            alt={card.name}
-                            className="aspect-[59/86] h-[140px] max-h-full w-auto max-w-full rounded-sm object-contain shadow-sm sm:h-[148px]"
-                            loading="lazy"
-                            src={card.imageUrl}
-                          />
+                          <button
+                            aria-label={`Open larger image of ${card.name}`}
+                            className="group/image relative grid h-full w-full cursor-zoom-in place-items-center rounded-md transition hover:bg-zinc-100 focus-visible:bg-zinc-100"
+                            onClick={() => setImagePreviewCard(card)}
+                            title="Open larger image"
+                            type="button"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              alt={card.name}
+                              className="aspect-[59/86] h-full max-h-full w-auto max-w-full rounded-sm object-contain shadow-sm transition duration-200 group-hover/image:scale-[1.03] group-focus-visible/image:scale-[1.03]"
+                              loading="lazy"
+                              src={card.imageUrl}
+                            />
+                            <span
+                              aria-hidden
+                              className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-md border border-white/20 bg-zinc-950/75 text-white opacity-0 shadow-sm transition group-hover/image:opacity-100 group-focus-visible/image:opacity-100"
+                            >
+                              <Search className="size-3.5" />
+                            </span>
+                          </button>
                         ) : (
-                          <div className="grid aspect-[59/86] h-[140px] place-items-center rounded border border-dashed border-zinc-300 px-3 text-center text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500 sm:h-[148px]">
+                          <div className="grid aspect-[59/86] h-full max-w-full place-items-center rounded border border-dashed border-zinc-300 px-3 text-center text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
                             No image
                           </div>
                         )}
                       </div>
 
-                      <div className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
-                        <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex min-w-0 flex-1 flex-col gap-3 p-3">
+                        <div className="flex min-w-0 items-start gap-2">
                           <div className="min-w-0 flex-1">
                             <h3
                               className="line-clamp-2 text-[17px] font-bold leading-[1.2] text-zinc-950 sm:text-lg"
@@ -1667,9 +1795,12 @@ export function WishlistApp() {
                           ) : null}
 
                           <div className="flex flex-wrap items-center gap-1.5">
-                            {card.rarity ? (
-                              <span className="max-w-full truncate rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700">
-                                {card.rarity}
+                            {rarityAbbreviation(card.rarity) ? (
+                              <span
+                                className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold uppercase tracking-[0.08em] text-zinc-700"
+                                title={card.rarity ?? undefined}
+                              >
+                                {rarityAbbreviation(card.rarity)}
                               </span>
                             ) : null}
                             {card.status === "wishlist" && card.chaseLevel ? (
@@ -1679,12 +1810,12 @@ export function WishlistApp() {
                             ) : null}
                             {card.status === "owned" && card.paidPriceText ? (
                               <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                                {paidDisplay(card.paidPriceText)}
+                                {normalizePaidPrice(card.paidPriceText)}
                               </span>
                             ) : null}
                             {card.status === "owned" && card.purchaseMonth ? (
                               <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-600">
-                                Bought {monthLabel(card.purchaseMonth)}
+                                {monthLabel(card.purchaseMonth)}
                               </span>
                             ) : null}
                             <CardNoteIndicator
@@ -1695,7 +1826,7 @@ export function WishlistApp() {
                           </div>
                         </div>
 
-                        <div className="mt-auto flex flex-col gap-2 border-t border-zinc-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="mt-auto flex flex-col gap-2 border-t border-zinc-100 pt-3">
                           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                             {isTcgplayerUrl(card.url) ? (
                               <a
@@ -1757,21 +1888,7 @@ export function WishlistApp() {
                             ) : null}
                           </div>
 
-                          <div className="flex items-center gap-1.5 sm:justify-end">
-                            <button
-                              aria-label={`Refresh pricing for ${card.name}`}
-                              className="grid size-8 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-500 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
-                              disabled={refreshPricing.isPending}
-                              onClick={() => refreshPricing.mutate({ id: card.id })}
-                              title="Refresh pricing"
-                              type="button"
-                            >
-                              <RefreshCw
-                                className={`size-4 ${
-                                  refreshPricing.isPending ? "animate-spin" : ""
-                                }`}
-                              />
-                            </button>
+                          <div className="flex items-center gap-1.5">
                             <button
                               aria-label={`Edit ${card.name}`}
                               className="grid size-8 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-500 transition hover:border-zinc-950 hover:bg-zinc-50 hover:text-zinc-950"
@@ -1800,7 +1917,7 @@ export function WishlistApp() {
                                     card.status === "owned" ? "wishlist" : "owned",
                                 })
                               }
-                              className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-bold transition disabled:opacity-50 ${
+                              className={`inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-bold transition disabled:opacity-50 ${
                                 card.status === "owned"
                                   ? "border border-zinc-300 bg-white text-zinc-800 hover:border-zinc-950"
                                   : "bg-zinc-950 text-white hover:bg-zinc-800"
@@ -1857,6 +1974,12 @@ export function WishlistApp() {
           </section>
         </section>
       </div>
+      {imagePreviewCard ? (
+        <CardImagePreviewDialog
+          card={imagePreviewCard}
+          onClose={() => setImagePreviewCard(null)}
+        />
+      ) : null}
       {addFormOpen ? (
         <AddCardDialog
           createError={create.error}
