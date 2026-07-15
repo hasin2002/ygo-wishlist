@@ -60,6 +60,12 @@ export const auth = betterAuth({
         required: false,
         type: "boolean",
       },
+      role: {
+        defaultValue: "user",
+        input: false,
+        required: true,
+        type: "string",
+      },
     },
   },
 });

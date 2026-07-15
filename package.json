@@ -11,6 +11,7 @@
     "price:qcsr": "node scripts/price-qcsr-ebay.mjs",
     "cards:types": "node scripts/backfill-card-types.mjs",
     "auth:create-user": "node scripts/create-auth-user.mjs",
+    "auth:set-role": "node scripts/set-auth-role.mjs",
     "db:migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "db:push": "drizzle-kit push --config drizzle.config.ts",
     "db:studio": "drizzle-kit studio --config drizzle.config.ts",

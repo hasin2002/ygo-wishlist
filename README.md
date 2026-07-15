@@ -67,7 +67,7 @@ After the database schema is updated, create the first account and assign the
 existing collection to it:
 
 ```bash
-npm run auth:create-user -- --username your-name --name "Your name" --public --claim-existing
+npm run auth:create-user -- --username your-name --name "Your name" --admin --public --claim-existing
 ```
 
 The command asks for the password privately. Use `--email you@example.com` if
@@ -75,4 +75,14 @@ you want to keep a real email on the account; otherwise it creates a private
 placeholder email because the authentication library requires one internally.
 
 To add a separate private collection later, run the command again without
-`--public --claim-existing`.
+`--admin --public --claim-existing`. New accounts have the `user` role by
+default and can only manage their own collection.
+
+To promote an existing account to administrator from the command line:
+
+```bash
+npm run auth:set-role -- --username account-name --role admin
+```
+
+Use `--role user` to remove administrator access. The command refuses to demote
+the last administrator so the site cannot be left without one.

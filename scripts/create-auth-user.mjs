@@ -27,7 +27,7 @@ function usage(message) {
   }
 
   console.error(
-    "Usage: npm run auth:create-user -- --username <name> [--name <display name>] [--email <email>] [--public] [--claim-existing]",
+    "Usage: npm run auth:create-user -- --username <name> [--name <display name>] [--email <email>] [--admin] [--public] [--claim-existing]",
   );
   process.exit(1);
 }
@@ -106,6 +106,7 @@ if (!name) {
 }
 
 const password = await promptForPassword();
+const role = hasFlag("--admin") ? "admin" : "user";
 
 if (password.length < 12 || password.length > 128) {
   usage("Password must be between 12 and 128 characters.");
@@ -135,9 +136,9 @@ try {
   }
 
   await client.query(
-    `insert into users (id, name, email, email_verified, username, display_username, public_collection, created_at, updated_at)
-     values ($1, $2, $3, false, $4, $5, $6, $7, $7)`,
-    [userId, name, email, username, name, publicCollection, now],
+    `insert into users (id, name, email, email_verified, username, display_username, role, public_collection, created_at, updated_at)
+     values ($1, $2, $3, false, $4, $5, $6, $7, $8, $8)`,
+    [userId, name, email, username, name, role, publicCollection, now],
   );
 
   await client.query(
@@ -154,7 +155,11 @@ try {
   }
 
   await client.query("COMMIT");
-  console.log(`Created ${username}${publicCollection ? " as the public collection owner" : ""}.`);
+  const description = [
+    role === "admin" ? "administrator" : null,
+    publicCollection ? "public collection owner" : null,
+  ].filter(Boolean);
+  console.log(`Created ${username}${description.length ? ` as ${description.join(" and ")}` : ""}.`);
 } catch (error) {
   await client.query("ROLLBACK");
   throw error;

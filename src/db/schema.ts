@@ -20,6 +20,9 @@ export const users = pgTable(
     image: text("image"),
     username: text("username"),
     displayUsername: text("display_username"),
+    role: text("role", { enum: ["user", "admin"] })
+      .notNull()
+      .default("user"),
     publicCollection: boolean("public_collection").notNull().default(false),
     createdAt: timestamp("created_at", { mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
