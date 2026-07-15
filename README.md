@@ -42,6 +42,8 @@ DATABASE_URL=postgres://...
 EBAY_CLIENT_ID=...
 EBAY_CLIENT_SECRET=...
 EBAY_MARKETPLACE_ID=EBAY_GB
+BETTER_AUTH_SECRET=<a new random secret>
+BETTER_AUTH_URL=https://your-site.example
 ```
 
 Before deploying a fresh database, create/update the tables:
@@ -55,3 +57,22 @@ If migrating existing local SQLite data, run:
 ```bash
 npm run db:migrate:postgres
 ```
+
+## Authentication setup
+
+The tracker and binder stay public and read-only. Wheel, spend, chase assignment,
+and every edit require a username and password.
+
+After the database schema is updated, create the first account and assign the
+existing collection to it:
+
+```bash
+npm run auth:create-user -- --username your-name --name "Your name" --public --claim-existing
+```
+
+The command asks for the password privately. Use `--email you@example.com` if
+you want to keep a real email on the account; otherwise it creates a private
+placeholder email because the authentication library requires one internally.
+
+To add a separate private collection later, run the command again without
+`--public --claim-existing`.

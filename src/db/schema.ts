@@ -1,4 +1,7 @@
 import {
+  bigint,
+  boolean,
+  index,
   integer,
   pgTable,
   serial,
@@ -7,8 +10,97 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    username: text("username"),
+    displayUsername: text("display_username"),
+    publicCollection: boolean("public_collection").notNull().default(false),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("users_email_unique").on(table.email),
+    uniqueIndex("users_username_unique").on(table.username),
+  ],
+);
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    token: text("token").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    uniqueIndex("sessions_token_unique").on(table.token),
+    index("sessions_user_id_idx").on(table.userId),
+  ],
+);
+
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { mode: "date" }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+      mode: "date",
+    }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [index("accounts_user_id_idx").on(table.userId)],
+);
+
+export const verifications = pgTable(
+  "verifications",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [index("verifications_identifier_idx").on(table.identifier)],
+);
+
+export const authRateLimits = pgTable(
+  "auth_rate_limits",
+  {
+    id: text("id").primaryKey(),
+    key: text("key").notNull(),
+    count: integer("count").notNull(),
+    lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+  },
+  (table) => [uniqueIndex("auth_rate_limits_key_unique").on(table.key)],
+);
+
 export const cards = pgTable("cards", {
   id: serial("id").primaryKey(),
+  ownerId: text("owner_id").references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   url: text("url"),
   source: text("source", { enum: ["tcgplayer", "ebay", "other", "manual"] })
@@ -36,6 +128,7 @@ export const binderSlots = pgTable(
   "binder_slots",
   {
     id: serial("id").primaryKey(),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "cascade" }),
     pageIndex: integer("page_index").notNull(),
     slotIndex: integer("slot_index").notNull(),
     cardId: integer("card_id")
@@ -44,11 +137,12 @@ export const binderSlots = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [
-    uniqueIndex("binder_slots_page_slot_unique").on(
+    uniqueIndex("binder_slots_owner_page_slot_unique").on(
+      table.ownerId,
       table.pageIndex,
       table.slotIndex,
     ),
-    uniqueIndex("binder_slots_card_unique").on(table.cardId),
+    uniqueIndex("binder_slots_owner_card_unique").on(table.ownerId, table.cardId),
   ],
 );
 
@@ -56,6 +150,7 @@ export const wheelEntries = pgTable(
   "wheel_entries",
   {
     id: serial("id").primaryKey(),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "cascade" }),
     cardId: integer("card_id")
       .notNull()
       .references(() => cards.id, { onDelete: "cascade" }),
@@ -65,13 +160,16 @@ export const wheelEntries = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
-  (table) => [uniqueIndex("wheel_entries_card_unique").on(table.cardId)],
+  (table) => [
+    uniqueIndex("wheel_entries_owner_card_unique").on(table.ownerId, table.cardId),
+  ],
 );
 
 export const monthlyFavorites = pgTable(
   "monthly_favorites",
   {
     id: serial("id").primaryKey(),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
     cardId: integer("card_id")
       .notNull()
@@ -79,7 +177,12 @@ export const monthlyFavorites = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
-  (table) => [uniqueIndex("monthly_favorites_month_unique").on(table.month)],
+  (table) => [
+    uniqueIndex("monthly_favorites_owner_month_unique").on(
+      table.ownerId,
+      table.month,
+    ),
+  ],
 );
 
 export type Card = typeof cards.$inferSelect;
@@ -87,3 +190,4 @@ export type NewCard = typeof cards.$inferInsert;
 export type BinderSlot = typeof binderSlots.$inferSelect;
 export type WheelEntry = typeof wheelEntries.$inferSelect;
 export type MonthlyFavorite = typeof monthlyFavorites.$inferSelect;
+export type User = typeof users.$inferSelect;

@@ -611,6 +611,7 @@ function EditCardModal({
 
 function CardFilterModal({
   activeFilterCount,
+  canFilterPaid,
   chaseFilters,
   onClear,
   onClose,
@@ -628,6 +629,7 @@ function CardFilterModal({
   typeFilters,
 }: {
   activeFilterCount: number;
+  canFilterPaid: boolean;
   chaseFilters: ChaseFilter[];
   onClear: () => void;
   onClose: () => void;
@@ -861,30 +863,32 @@ function CardFilterModal({
               ) : null}
             </div>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              {priceSignalFilterOptions.map((option) => {
-                const selected = selectedPriceSignalFilters.includes(option.value);
+              {priceSignalFilterOptions
+                .filter((option) => canFilterPaid || option.value !== "paid")
+                .map((option) => {
+                  const selected = selectedPriceSignalFilters.includes(option.value);
 
-                return (
-                  <button
-                    aria-pressed={selected}
-                    className={`rounded-md border px-3 py-2 text-left transition ${
-                      selected
-                        ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]"
-                        : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"
-                    }`}
-                    key={option.value}
-                    onClick={() => togglePriceSignal(option.value)}
-                    type="button"
-                  >
-                    <span className="block text-sm font-bold">
-                      {option.label}
-                    </span>
-                    <span className="mt-0.5 block text-xs font-semibold opacity-70">
-                      {option.hint}
-                    </span>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      aria-pressed={selected}
+                      className={`rounded-md border px-3 py-2 text-left transition ${
+                        selected
+                          ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]"
+                          : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"
+                      }`}
+                      key={option.value}
+                      onClick={() => togglePriceSignal(option.value)}
+                      type="button"
+                    >
+                      <span className="block text-sm font-bold">
+                        {option.label}
+                      </span>
+                      <span className="mt-0.5 block text-xs font-semibold opacity-70">
+                        {option.hint}
+                      </span>
+                    </button>
+                  );
+                })}
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <label className="block">
@@ -1458,9 +1462,14 @@ export function WishlistApp() {
   const lastVisibleCard = Math.min(currentPage * pageSize, totalCards);
   const counts = list.data?.counts ?? { owned: 0, total: 0, wishlist: 0 };
   const values = list.data?.values ?? { owned: 0, paid: 0, wishlist: 0 };
+  const canEdit = list.data?.canEdit ?? false;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!canEdit) {
+      return;
+    }
     const isOwned = form.status === "owned";
 
     create.mutate({
@@ -1496,6 +1505,10 @@ export function WishlistApp() {
   }
 
   function openCardEditor(event: MouseEvent<HTMLElement>, card: Card) {
+    if (!canEdit) {
+      return;
+    }
+
     const target = event.target as HTMLElement;
 
     if (target.closest("a,button,input,select,textarea")) {
@@ -1565,7 +1578,9 @@ export function WishlistApp() {
               </p>
               <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-xs font-semibold leading-4 text-zinc-400">
                 <span>Worth {formatCurrency(values.owned)}</span>
-                {values.paid ? <span>Paid {formatCurrency(values.paid)}</span> : null}
+                {canEdit && values.paid ? (
+                  <span>Paid {formatCurrency(values.paid)}</span>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1582,29 +1597,33 @@ export function WishlistApp() {
             </div>
             <div className="flex items-center gap-2">
               <RarityGuidePopover />
-              <button
-                aria-label="Refresh prices for all cards"
-                className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
-                disabled={refreshAllPricing.isPending}
-                onClick={() => refreshAllPricing.mutate()}
-                title="Refresh prices for all cards"
-                type="button"
-              >
-                <RefreshCw
-                  aria-hidden="true"
-                  className={`size-4 ${
-                    refreshAllPricing.isPending ? "animate-spin" : ""
-                  }`}
-                />
-              </button>
-              <button
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826]"
-                onClick={() => setAddFormOpen(true)}
-                type="button"
-              >
-                <Plus className="size-4" />
-                Add card
-              </button>
+              {canEdit ? (
+                <>
+                  <button
+                    aria-label="Refresh prices for all cards"
+                    className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
+                    disabled={refreshAllPricing.isPending}
+                    onClick={() => refreshAllPricing.mutate()}
+                    title="Refresh prices for all cards"
+                    type="button"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className={`size-4 ${
+                        refreshAllPricing.isPending ? "animate-spin" : ""
+                      }`}
+                    />
+                  </button>
+                  <button
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826]"
+                    onClick={() => setAddFormOpen(true)}
+                    type="button"
+                  >
+                    <Plus className="size-4" />
+                    Add card
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
 
@@ -1719,8 +1738,10 @@ export function WishlistApp() {
                   {paginatedCards.map((card: Card) => (
                     <article
                       key={card.id}
-                      className="group flex h-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md"
-                      onClick={(event) => openCardEditor(event, card)}
+                      className={`group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md ${
+                        canEdit ? "cursor-pointer" : ""
+                      }`}
+                      onClick={canEdit ? (event) => openCardEditor(event, card) : undefined}
                     >
                       <div className="grid aspect-[4/5] w-full place-items-center border-b border-zinc-200 bg-[#f7f6f2] p-3">
                         {card.imageUrl ? (
@@ -1862,7 +1883,7 @@ export function WishlistApp() {
                                 >
                                   <ShoppingBag className="size-4" />
                                 </a>
-                              ) : (
+                              ) : canEdit ? (
                                 <button
                                   aria-label={`Add saved eBay listing for ${card.name}`}
                                   className="inline-flex size-8 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white text-zinc-400 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
@@ -1872,7 +1893,7 @@ export function WishlistApp() {
                                 >
                                   <ShoppingBag className="size-4" />
                                 </button>
-                              )
+                              ) : null
                             ) : null}
                             {card.url && !isTcgplayerUrl(card.url) ? (
                               <a
@@ -1888,8 +1909,9 @@ export function WishlistApp() {
                             ) : null}
                           </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <button
+                          {canEdit ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
                               aria-label={`Edit ${card.name}`}
                               className="grid size-8 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-500 transition hover:border-zinc-950 hover:bg-zinc-50 hover:text-zinc-950"
                               onClick={() => setEditForm(editFormFromCard(card))}
@@ -1926,8 +1948,9 @@ export function WishlistApp() {
                             >
                               <Check className="size-3.5" />
                               {card.status === "owned" ? "Want" : "Own"}
-                            </button>
-                          </div>
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </article>
@@ -1990,7 +2013,7 @@ export function WishlistApp() {
           setForm={setForm}
         />
       ) : null}
-      {deleteTarget ? (
+      {canEdit && deleteTarget ? (
         <div
           aria-labelledby="delete-card-title"
           aria-modal="true"
@@ -2036,7 +2059,7 @@ export function WishlistApp() {
           </div>
         </div>
       ) : null}
-      {editForm ? (
+      {canEdit && editForm ? (
         <EditCardModal
           form={editForm}
           onClose={() => setEditForm(null)}
@@ -2050,6 +2073,7 @@ export function WishlistApp() {
       {filterModalOpen ? (
         <CardFilterModal
           activeFilterCount={activeFilterCount}
+          canFilterPaid={canEdit}
           chaseFilters={chaseFilters}
           onClear={clearFilters}
           onClose={() => setFilterModalOpen(false)}

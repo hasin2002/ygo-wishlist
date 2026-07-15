@@ -10,6 +10,7 @@
     "price:ebay": "node scripts/price-ebay.mjs",
     "price:qcsr": "node scripts/price-qcsr-ebay.mjs",
     "cards:types": "node scripts/backfill-card-types.mjs",
+    "auth:create-user": "node scripts/create-auth-user.mjs",
     "db:migrate:postgres": "node scripts/migrate-sqlite-to-postgres.mjs",
     "db:push": "drizzle-kit push --config drizzle.config.ts",
     "db:studio": "drizzle-kit studio --config drizzle.config.ts",
@@ -17,12 +18,14 @@
     "db:studio:sqlite": "drizzle-kit studio --config drizzle.sqlite.config.ts"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "^1.6.23",
     "@tanstack/query-sync-storage-persister": "^5.101.2",
     "@tanstack/react-query": "^5.100.14",
     "@tanstack/react-query-persist-client": "^5.101.2",
     "@trpc/client": "^11.17.0",
     "@trpc/react-query": "^11.17.0",
     "@trpc/server": "^11.17.0",
+    "better-auth": "^1.6.23",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.2",
