@@ -1,7 +1,10 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
-import { auth, type AuthSession } from "@/lib/auth";
-import { getPublicCollectionOwnerId } from "@/server/session";
+import type { AuthSession } from "@/lib/auth";
+import {
+  getPublicCollectionOwnerId,
+  getSessionFromHeaders,
+} from "@/server/session";
 
 export type TRPCContext = {
   collectionOwnerId: string | null;
@@ -9,7 +12,7 @@ export type TRPCContext = {
 };
 
 export async function createTRPCContext(request: Request): Promise<TRPCContext> {
-  const session = await auth.api.getSession({ headers: request.headers });
+  const session = await getSessionFromHeaders(request.headers);
 
   return {
     collectionOwnerId: session?.user.id ?? (await getPublicCollectionOwnerId()),

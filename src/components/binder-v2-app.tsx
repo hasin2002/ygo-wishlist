@@ -1022,14 +1022,11 @@ export function BinderV2App() {
                 <div className="absolute inset-0 z-10 grid place-items-center bg-white/90 p-4">
                   <DataLoadError
                     className="w-full max-w-md"
-                    message={
-                      cardsQuery.error?.message ?? layoutQuery.error?.message
-                    }
                     onRetry={() => {
                       void cardsQuery.refetch();
                       void layoutQuery.refetch();
                     }}
-                    title="Could not load binder"
+                    title="We couldn’t open the binder"
                   />
                 </div>
               )}
