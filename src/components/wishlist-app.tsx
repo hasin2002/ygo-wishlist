@@ -1713,9 +1713,8 @@ export function WishlistApp() {
 
             {list.isError ? (
               <DataLoadError
-                message={list.error.message}
                 onRetry={() => void list.refetch()}
-                title="Could not load cards"
+                title="We couldn’t open the collection"
               />
             ) : list.isLoading ? (
               <div className="grid min-h-80 place-items-center rounded-lg border border-zinc-300 bg-white">

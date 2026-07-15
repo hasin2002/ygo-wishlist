@@ -7,8 +7,21 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { auth } from "@/lib/auth";
 
+const sessionCookiePattern =
+  /(?:^|;\s*)(?:__Secure-)?better-auth\.session_token(?:\.|=)/;
+
+export async function getSessionFromHeaders(requestHeaders: Headers) {
+  // Public requests have no session cookie. Avoid invoking the auth library for
+  // them so the public tracker and binder are independent of sign-in state.
+  if (!sessionCookiePattern.test(requestHeaders.get("cookie") ?? "")) {
+    return null;
+  }
+
+  return auth.api.getSession({ headers: requestHeaders });
+}
+
 export const getCurrentSession = cache(async () =>
-  auth.api.getSession({ headers: await headers() }),
+  getSessionFromHeaders(await headers()),
 );
 
 export async function getPublicCollectionOwnerId() {
