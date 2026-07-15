@@ -687,6 +687,29 @@ export const cardsRouter = router({
       return serializeCard(updated ?? existing);
     }),
 
+  refreshAllPricing: publicProcedure.mutation(async () => {
+    const allCards = await db.select().from(cards);
+    let failed = 0;
+    let refreshed = 0;
+
+    for (let index = 0; index < allCards.length; index += 3) {
+      const batch = allCards.slice(index, index + 3);
+      const results = await Promise.allSettled(
+        batch.map((card) => refreshEbayPricing(card)),
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          refreshed += 1;
+        } else {
+          failed += 1;
+        }
+      }
+    }
+
+    return { failed, refreshed };
+  }),
+
   delete: publicProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input }) => {

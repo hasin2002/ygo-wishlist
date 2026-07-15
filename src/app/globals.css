@@ -3,6 +3,7 @@
 :root {
   --background: #f6f4ef;
   --foreground: #171717;
+  --app-nav-width: 256px;
 }
 
 @theme inline {
@@ -16,6 +17,16 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+.app-page-shell {
+  transition: padding-left 200ms ease;
+}
+
+@media (min-width: 1024px) {
+  .app-page-shell {
+    padding-left: calc(1rem + var(--app-nav-width) + 1.5rem);
+  }
 }
 
 html,

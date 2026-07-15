@@ -25,6 +25,7 @@ import {
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
+import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -615,7 +616,7 @@ export function WheelApp() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <AppHeader
           eyebrow="Wishlist decider"
@@ -1108,20 +1109,13 @@ export function WheelApp() {
                   transformStyle: "preserve-3d",
                 }}
               >
-                <div className="aspect-[59/86] overflow-hidden rounded-lg border border-white/15 bg-zinc-900">
-                  {selectedCardModal.card.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      alt={selectedCardModal.card.name}
-                      className="h-full w-full object-cover"
-                      src={selectedCardModal.card.imageUrl}
-                    />
-                  ) : (
-                    <div className="grid h-full place-items-center p-6 text-sm font-semibold text-zinc-500">
-                      No image
-                    </div>
-                  )}
-                </div>
+                <HolographicCardCanvas
+                  alt={selectedCardModal.card.name}
+                  className="aspect-[59/86] overflow-hidden rounded-lg border border-white/15 bg-zinc-900"
+                  imageUrl={selectedCardModal.card.imageUrl}
+                  rarity={selectedCardModal.card.rarity}
+                  tilt={tilt}
+                />
               </div>
             </div>
             <p

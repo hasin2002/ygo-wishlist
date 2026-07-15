@@ -85,7 +85,7 @@ export function AssignChaseApp() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex min-h-[calc(100vh-40px)] w-full max-w-7xl flex-col gap-5">
         <AppHeader eyebrow="Chase queue" title="Assign chase levels" />
 

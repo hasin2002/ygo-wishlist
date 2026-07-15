@@ -6,7 +6,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Info,
   Loader2,
   RotateCcw,
   Search,
@@ -25,9 +24,9 @@ import { PageFlip } from "page-flip";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
+import { RarityGuidePopover } from "@/components/rarity-guide-popover";
 import {
   rarityAbbreviation,
-  rarityAbbreviations,
 } from "@/lib/rarity-abbreviations";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
@@ -322,44 +321,6 @@ function PageValuePills({
         Wishlist {formatMoney(wishlist)}
       </span>
     </div>
-  );
-}
-
-function RarityLegendPopover() {
-  return (
-    <span className="group/rarity relative z-30 inline-flex">
-      <button
-        aria-label="View rarity abbreviation guide"
-        className="inline-flex size-9 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:border-amber-300 hover:bg-amber-100 hover:text-amber-800 focus-visible:bg-amber-100"
-        title="Rarity abbreviation guide"
-        type="button"
-      >
-        <Info aria-hidden="true" className="size-3.5" />
-      </button>
-      <span
-        className="pointer-events-none absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-zinc-200 bg-white p-3 text-left opacity-0 shadow-xl ring-1 ring-black/5 transition duration-150 group-hover/rarity:pointer-events-auto group-hover/rarity:translate-y-0 group-hover/rarity:opacity-100 group-focus-within/rarity:pointer-events-auto group-focus-within/rarity:translate-y-0 group-focus-within/rarity:opacity-100"
-        role="tooltip"
-      >
-        <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-[#8a1f2d]">
-          Rarity guide
-        </span>
-        <span className="mt-2 grid max-h-72 grid-cols-1 gap-1 overflow-y-auto pr-1 sm:grid-cols-2">
-          {rarityAbbreviations.map((entry) => (
-            <span
-              className="flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1"
-              key={entry.rarity}
-            >
-              <span className="min-w-12 rounded bg-zinc-950 px-1.5 py-1 text-center text-[10px] font-black uppercase tracking-[0.08em] text-white">
-                {entry.abbreviation}
-              </span>
-              <span className="min-w-0 truncate text-xs font-semibold text-zinc-700">
-                {entry.rarity}
-              </span>
-            </span>
-          ))}
-        </span>
-      </span>
-    </span>
   );
 }
 
@@ -922,7 +883,7 @@ export function BinderV2App() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <AppHeader
           eyebrow="Binder planner"
@@ -1100,7 +1061,7 @@ export function BinderV2App() {
                   <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
                     Staging
                   </p>
-                  <RarityLegendPopover />
+                  <RarityGuidePopover />
                 </div>
                 <p className="text-lg font-bold">{stagingCards.length}</p>
               </div>

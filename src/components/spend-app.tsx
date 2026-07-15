@@ -753,7 +753,7 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
   const waitingForInitialCards = list.isLoading && !list.data;
 
   return (
-    <main className="min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <AppHeader eyebrow="Spend tracker" title="Card spending" />
 
