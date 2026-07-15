@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, isNull, like, or } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { cards } from "@/db/schema";
@@ -135,14 +135,14 @@ function queryFilters(query: string, includeSpend = true) {
   const pattern = `%${query}%`;
   return [
     or(
-      like(cards.name, pattern),
-      like(cards.notes, pattern),
-      like(cards.priceText, pattern),
-      like(cards.marketPriceText, pattern),
-      ...(includeSpend ? [like(cards.purchaseMonth, pattern)] : []),
-      like(cards.rarity, pattern),
-      like(cards.cardType, pattern),
-      like(cards.ebayListingUrl, pattern),
+      ilike(cards.name, pattern),
+      ilike(cards.notes, pattern),
+      ilike(cards.priceText, pattern),
+      ilike(cards.marketPriceText, pattern),
+      ...(includeSpend ? [ilike(cards.purchaseMonth, pattern)] : []),
+      ilike(cards.rarity, pattern),
+      ilike(cards.cardType, pattern),
+      ilike(cards.ebayListingUrl, pattern),
     ),
   ];
 }
