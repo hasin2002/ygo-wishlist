@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { cards, monthlyFavorites } from "@/db/schema";
-import { publicProcedure, router } from "@/server/trpc";
+import { authenticatedProcedure, router } from "@/server/trpc";
 
 function currentMonthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -24,12 +24,18 @@ function priceValue(priceText: string | null) {
 }
 
 export const spendRouter = router({
-  currentMonth: publicProcedure.query(async () => {
+  currentMonth: authenticatedProcedure.query(async ({ ctx }) => {
     const month = currentMonthKey();
     const rows = await db
       .select()
       .from(cards)
-      .where(and(eq(cards.status, "owned"), eq(cards.purchaseMonth, month)));
+      .where(
+        and(
+          eq(cards.ownerId, ctx.collectionOwnerId),
+          eq(cards.status, "owned"),
+          eq(cards.purchaseMonth, month),
+        ),
+      );
     const spendRows = rows
       .map((card) => priceValue(card.paidPriceText))
       .filter((value): value is number => value !== null);
@@ -42,8 +48,11 @@ export const spendRouter = router({
     };
   }),
 
-  monthlyFavourites: publicProcedure.query(async () => {
-    const rows = await db.select().from(monthlyFavorites);
+  monthlyFavourites: authenticatedProcedure.query(async ({ ctx }) => {
+    const rows = await db
+      .select()
+      .from(monthlyFavorites)
+      .where(eq(monthlyFavorites.ownerId, ctx.collectionOwnerId));
 
     return rows.map((row) => ({
       cardId: row.cardId,
@@ -54,25 +63,30 @@ export const spendRouter = router({
     }));
   }),
 
-  setMonthlyFavourite: publicProcedure
+  setMonthlyFavourite: authenticatedProcedure
     .input(
       z.object({
         cardId: z.number().int().positive().nullable(),
         month: z.string().regex(/^\d{4}-\d{2}$/),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       if (input.cardId === null) {
         await db
           .delete(monthlyFavorites)
-          .where(eq(monthlyFavorites.month, input.month));
+          .where(
+            and(
+              eq(monthlyFavorites.month, input.month),
+              eq(monthlyFavorites.ownerId, ctx.collectionOwnerId),
+            ),
+          );
         return { ok: true };
       }
 
       const [card] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.cardId));
+        .where(and(eq(cards.id, input.cardId), eq(cards.ownerId, ctx.collectionOwnerId)));
 
       if (!card) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -89,13 +103,23 @@ export const spendRouter = router({
       const [existing] = await db
         .select()
         .from(monthlyFavorites)
-        .where(eq(monthlyFavorites.month, input.month));
+        .where(
+          and(
+            eq(monthlyFavorites.month, input.month),
+            eq(monthlyFavorites.ownerId, ctx.collectionOwnerId),
+          ),
+        );
 
       if (existing) {
         await db
           .update(monthlyFavorites)
           .set({ cardId: input.cardId, updatedAt: now })
-          .where(eq(monthlyFavorites.month, input.month));
+          .where(
+            and(
+              eq(monthlyFavorites.month, input.month),
+              eq(monthlyFavorites.ownerId, ctx.collectionOwnerId),
+            ),
+          );
       } else {
         await db
           .insert(monthlyFavorites)
@@ -103,6 +127,7 @@ export const spendRouter = router({
             cardId: input.cardId,
             createdAt: now,
             month: input.month,
+            ownerId: ctx.collectionOwnerId,
             updatedAt: now,
           });
       }

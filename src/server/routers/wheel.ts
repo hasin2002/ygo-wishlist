@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { cards, wheelEntries } from "@/db/schema";
-import { publicProcedure, router } from "@/server/trpc";
+import { authenticatedProcedure, router } from "@/server/trpc";
 
 const chaseWeights: Record<number, number> = {
   1: 1,
@@ -95,10 +95,13 @@ function serializeWheelItem({
   card: typeof cards.$inferSelect;
   entry: typeof wheelEntries.$inferSelect;
 }) {
+  const { ownerId, ...serializedEntry } = entry;
+  void ownerId;
+
   return {
     card: serializeCard(card),
     entry: {
-      ...entry,
+      ...serializedEntry,
       createdAt: entry.createdAt.toISOString(),
       selectedAt: entry.selectedAt?.toISOString() ?? null,
       updatedAt: entry.updatedAt.toISOString(),
@@ -108,13 +111,16 @@ function serializeWheelItem({
   };
 }
 
-async function syncWishlistEntries() {
+async function syncWishlistEntries(ownerId: string) {
   const wishlistCards = await db
     .select()
     .from(cards)
-    .where(eq(cards.status, "wishlist"))
+    .where(and(eq(cards.ownerId, ownerId), eq(cards.status, "wishlist")))
     .orderBy(asc(cards.name));
-  const existingEntries = await db.select().from(wheelEntries);
+  const existingEntries = await db
+    .select()
+    .from(wheelEntries)
+    .where(eq(wheelEntries.ownerId, ownerId));
   const existingIds = new Set(existingEntries.map((entry) => entry.cardId));
   const nextSortOrder =
     existingEntries.reduce(
@@ -133,6 +139,7 @@ async function syncWishlistEntries() {
   await db.insert(wheelEntries).values(
     missingCards.map((card, index) => ({
       cardId: card.id,
+      ownerId,
       sortOrder: nextSortOrder + index,
       createdAt: now,
       updatedAt: now,
@@ -140,20 +147,26 @@ async function syncWishlistEntries() {
   );
 }
 
-function wheelRows() {
+function wheelRows(ownerId: string) {
   return db
     .select({ card: cards, entry: wheelEntries })
     .from(wheelEntries)
     .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-    .where(eq(cards.status, "wishlist"))
+    .where(
+      and(
+        eq(cards.ownerId, ownerId),
+        eq(wheelEntries.ownerId, ownerId),
+        eq(cards.status, "wishlist"),
+      ),
+    )
     .orderBy(asc(wheelEntries.sortOrder));
 }
 
 export const wheelRouter = router({
-  state: publicProcedure.query(async () => {
-    await syncWishlistEntries();
+  state: authenticatedProcedure.query(async ({ ctx }) => {
+    await syncWishlistEntries(ctx.collectionOwnerId);
 
-    const rows = await wheelRows();
+    const rows = await wheelRows(ctx.collectionOwnerId);
 
     return {
       active: rows
@@ -168,7 +181,7 @@ export const wheelRouter = router({
     };
   }),
 
-  spin: publicProcedure
+  spin: authenticatedProcedure
     .input(
       z
         .object({
@@ -178,15 +191,21 @@ export const wheelRouter = router({
         })
         .optional(),
     )
-    .mutation(async ({ input }) => {
-      await syncWishlistEntries();
+    .mutation(async ({ ctx, input }) => {
+      await syncWishlistEntries(ctx.collectionOwnerId);
 
       const activeRows = (
         await db
           .select({ card: cards, entry: wheelEntries })
           .from(wheelEntries)
           .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-          .where(eq(cards.status, "wishlist"))
+          .where(
+            and(
+              eq(cards.ownerId, ctx.collectionOwnerId),
+              eq(wheelEntries.ownerId, ctx.collectionOwnerId),
+              eq(cards.status, "wishlist"),
+            ),
+          )
           .orderBy(asc(wheelEntries.sortOrder))
       ).filter(
         ({ card, entry }) =>
@@ -227,7 +246,12 @@ export const wheelRouter = router({
       const selectedRows = await db
         .select()
         .from(wheelEntries)
-        .where(isNotNull(wheelEntries.selectedAt))
+        .where(
+          and(
+            eq(wheelEntries.ownerId, ctx.collectionOwnerId),
+            isNotNull(wheelEntries.selectedAt),
+          ),
+        )
         .orderBy(desc(wheelEntries.selectedOrder));
       const selectedOrder = (selectedRows[0]?.selectedOrder ?? 0) + 1;
 
@@ -246,8 +270,8 @@ export const wheelRouter = router({
       };
     }),
 
-  reset: publicProcedure.mutation(async () => {
-    await syncWishlistEntries();
+  reset: authenticatedProcedure.mutation(async ({ ctx }) => {
+    await syncWishlistEntries(ctx.collectionOwnerId);
 
     const resettableRows = await db
       .select({ id: wheelEntries.id })
@@ -256,6 +280,8 @@ export const wheelRouter = router({
       .where(
         and(
           eq(cards.status, "wishlist"),
+          eq(cards.ownerId, ctx.collectionOwnerId),
+          eq(wheelEntries.ownerId, ctx.collectionOwnerId),
           or(
             isNotNull(wheelEntries.selectedAt),
             isNotNull(wheelEntries.selectedOrder),
@@ -275,9 +301,12 @@ export const wheelRouter = router({
         updatedAt: new Date(),
       })
       .where(
-        inArray(
-          wheelEntries.id,
-          resettableRows.map((row) => row.id),
+        and(
+          eq(wheelEntries.ownerId, ctx.collectionOwnerId),
+          inArray(
+            wheelEntries.id,
+            resettableRows.map((row) => row.id),
+          ),
         ),
       )
       .returning({ id: wheelEntries.id });

@@ -12,7 +12,13 @@ import { useState, type ReactNode } from "react";
 export const trpc = createTRPCReact<AppRouter>();
 const requestTimeoutMs = 15_000;
 const queryCacheMaxAgeMs = 15 * 60 * 1_000;
-const queryCacheStorageKey = "ygo-wishlist:query-cache:v1";
+export const queryCacheStorageKey = "ygo-wishlist:query-cache:v1";
+
+export function clearPersistedQueryCache() {
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem(queryCacheStorageKey);
+  }
+}
 
 function getBaseUrl() {
   if (typeof window !== "undefined") {

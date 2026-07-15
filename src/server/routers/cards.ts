@@ -9,7 +9,7 @@ import {
   normalizeUrl,
   ygoCardDetailsByName,
 } from "@/server/metadata";
-import { publicProcedure, router } from "@/server/trpc";
+import { authenticatedProcedure, publicProcedure, router } from "@/server/trpc";
 
 const statusSchema = z.enum(["wishlist", "owned"]);
 const statusFilterSchema = z.enum(["all", "wishlist", "owned"]);
@@ -84,10 +84,18 @@ const trackerPageSchema = z.object({
   typeFilters: z.array(trackerCardTypeFilterSchema).default([]),
 });
 
-function serializeCard(card: typeof cards.$inferSelect) {
+function serializeCard(
+  card: typeof cards.$inferSelect,
+  includeSpend = true,
+) {
+  const { ownerId, ...serializedCard } = card;
+  void ownerId;
+
   return {
-    ...card,
+    ...serializedCard,
     createdAt: card.createdAt.toISOString(),
+    paidPriceText: includeSpend ? card.paidPriceText : null,
+    purchaseMonth: includeSpend ? card.purchaseMonth : null,
     updatedAt: card.updatedAt.toISOString(),
   };
 }
@@ -119,7 +127,7 @@ function serializeChaseQueueCard(card: typeof cards.$inferSelect) {
 
 type SerializedCard = ReturnType<typeof serializeCard>;
 
-function queryFilters(query: string) {
+function queryFilters(query: string, includeSpend = true) {
   if (!query) {
     return [];
   }
@@ -131,7 +139,7 @@ function queryFilters(query: string) {
       like(cards.notes, pattern),
       like(cards.priceText, pattern),
       like(cards.marketPriceText, pattern),
-      like(cards.purchaseMonth, pattern),
+      ...(includeSpend ? [like(cards.purchaseMonth, pattern)] : []),
       like(cards.rarity, pattern),
       like(cards.cardType, pattern),
       like(cards.ebayListingUrl, pattern),
@@ -302,7 +310,7 @@ function sortTrackerCards(
   });
 }
 
-function trackerStats(filteredCards: SerializedCard[]) {
+function trackerStats(filteredCards: SerializedCard[], includeSpend = true) {
   const wishlistCards = filteredCards.filter((card) => card.status === "wishlist");
   const ownedCards = filteredCards.filter((card) => card.status === "owned");
 
@@ -314,10 +322,12 @@ function trackerStats(filteredCards: SerializedCard[]) {
     },
     values: {
       owned: ownedCards.reduce((sum, card) => sum + (marketValue(card) ?? 0), 0),
-      paid: ownedCards.reduce(
-        (sum, card) => sum + (priceValue(card.paidPriceText) ?? 0),
-        0,
-      ),
+      paid: includeSpend
+        ? ownedCards.reduce(
+            (sum, card) => sum + (priceValue(card.paidPriceText) ?? 0),
+            0,
+          )
+        : 0,
       wishlist: wishlistCards.reduce(
         (sum, card) => sum + (marketValue(card) ?? 0),
         0,
@@ -339,15 +349,15 @@ async function metadataFromUrl(url: string | undefined) {
 }
 
 export const cardsRouter = router({
-  list: publicProcedure
+  list: authenticatedProcedure
     .input(
       z.object({
         status: statusFilterSchema.default("all"),
         query: z.string().trim().default(""),
       }),
     )
-    .query(async ({ input }) => {
-      const filters = queryFilters(input.query);
+    .query(async ({ ctx, input }) => {
+      const filters = [eq(cards.ownerId, ctx.collectionOwnerId), ...queryFilters(input.query)];
 
       if (input.status !== "all") {
         filters.push(eq(cards.status, input.status));
@@ -359,15 +369,43 @@ export const cardsRouter = router({
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(desc(cards.updatedAt));
 
-      return rows.map(serializeCard);
+      return rows.map((card) => serializeCard(card));
     }),
 
-  trackerPage: publicProcedure.input(trackerPageSchema).query(async ({ input }) => {
+  trackerPage: publicProcedure.input(trackerPageSchema).query(async ({ ctx, input }) => {
+    if (!ctx.collectionOwnerId) {
+      return {
+        canEdit: false,
+        items: [],
+        page: 1,
+        pageSize: input.pageSize,
+        rarityOptions: [],
+        total: 0,
+        totalPages: 1,
+        values: { owned: 0, paid: 0, wishlist: 0 },
+        counts: { owned: 0, total: 0, wishlist: 0 },
+      };
+    }
+
+    const includeSpend = Boolean(ctx.session);
+    const safeInput = includeSpend
+      ? input
+      : {
+          ...input,
+          priceSignalFilters: input.priceSignalFilters.filter(
+            (filter) => filter !== "paid",
+          ),
+        };
     const rows = await db
       .select()
       .from(cards)
-      .where(queryFilters(input.query).length ? and(...queryFilters(input.query)) : undefined);
-    const queryMatchedCards = rows.map(serializeCard);
+      .where(
+        and(
+          eq(cards.ownerId, ctx.collectionOwnerId),
+          ...queryFilters(input.query, includeSpend),
+        ),
+      );
+    const queryMatchedCards = rows.map((card) => serializeCard(card, includeSpend));
     const rarityOptions = Array.from(
       new Set(
         queryMatchedCards
@@ -375,8 +413,8 @@ export const cardsRouter = router({
           .filter((rarity): rarity is string => Boolean(rarity)),
       ),
     ).sort((a, b) => a.localeCompare(b));
-    const filteredCards = filteredTrackerCards(queryMatchedCards, input);
-    const sortedCards = sortTrackerCards(filteredCards, input.sort);
+    const filteredCards = filteredTrackerCards(queryMatchedCards, safeInput);
+    const sortedCards = sortTrackerCards(filteredCards, safeInput.sort);
     const safePage = Math.min(
       input.page,
       Math.max(1, Math.ceil(sortedCards.length / input.pageSize)),
@@ -384,37 +422,55 @@ export const cardsRouter = router({
     const offset = (safePage - 1) * input.pageSize;
 
     return {
+      canEdit: includeSpend,
       items: sortedCards.slice(offset, offset + input.pageSize),
       page: safePage,
       pageSize: input.pageSize,
       rarityOptions,
       total: sortedCards.length,
       totalPages: Math.max(1, Math.ceil(sortedCards.length / input.pageSize)),
-      ...trackerStats(sortedCards),
+      ...trackerStats(sortedCards, includeSpend),
     };
   }),
 
-  summary: publicProcedure.query(async () => {
-    const rows = await db.select().from(cards);
-    return trackerStats(rows.map(serializeCard));
-  }),
-
-  binderList: publicProcedure.query(async () => {
-    const rows = await db.select().from(cards).orderBy(desc(cards.updatedAt));
-    return rows.map(serializeBinderCard);
-  }),
-
-  chaseQueue: publicProcedure.query(async () => {
+  summary: authenticatedProcedure.query(async ({ ctx }) => {
     const rows = await db
       .select()
       .from(cards)
-      .where(and(eq(cards.status, "wishlist"), isNull(cards.chaseLevel)))
+      .where(eq(cards.ownerId, ctx.collectionOwnerId));
+    return trackerStats(rows.map((card) => serializeCard(card)));
+  }),
+
+  binderList: publicProcedure.query(async ({ ctx }) => {
+    if (!ctx.collectionOwnerId) {
+      return [];
+    }
+
+    const rows = await db
+      .select()
+      .from(cards)
+      .where(eq(cards.ownerId, ctx.collectionOwnerId))
+      .orderBy(desc(cards.updatedAt));
+    return rows.map(serializeBinderCard);
+  }),
+
+  chaseQueue: authenticatedProcedure.query(async ({ ctx }) => {
+    const rows = await db
+      .select()
+      .from(cards)
+      .where(
+        and(
+          eq(cards.ownerId, ctx.collectionOwnerId),
+          eq(cards.status, "wishlist"),
+          isNull(cards.chaseLevel),
+        ),
+      )
       .orderBy(desc(cards.updatedAt));
 
     return rows.map(serializeChaseQueueCard);
   }),
 
-  create: publicProcedure.input(createCardSchema).mutation(async ({ input }) => {
+  create: authenticatedProcedure.input(createCardSchema).mutation(async ({ ctx, input }) => {
     const now = new Date();
     const normalizedUrl = input.url ? normalizeUrl(input.url) : undefined;
     const metadata = await metadataFromUrl(normalizedUrl);
@@ -432,6 +488,7 @@ export const cardsRouter = router({
     const [created] = await db
       .insert(cards)
       .values({
+        ownerId: ctx.collectionOwnerId,
         name,
         url: normalizedUrl,
         source: metadata?.source ?? (normalizedUrl ? "other" : "manual"),
@@ -462,13 +519,13 @@ export const cardsRouter = router({
     }
   }),
 
-  update: publicProcedure.input(updateCardSchema).mutation(async ({ input }) => {
+  update: authenticatedProcedure.input(updateCardSchema).mutation(async ({ ctx, input }) => {
     const now = new Date();
     const normalizedUrl = input.url ? normalizeUrl(input.url) : undefined;
     const [existing] = await db
       .select()
       .from(cards)
-      .where(eq(cards.id, input.id));
+      .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
 
     if (!existing) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -504,7 +561,7 @@ export const cardsRouter = router({
         notes: input.notes || null,
         updatedAt: now,
       })
-      .where(eq(cards.id, input.id))
+      .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)))
       .returning();
 
     try {
@@ -515,13 +572,13 @@ export const cardsRouter = router({
     }
   }),
 
-  setStatus: publicProcedure
+  setStatus: authenticatedProcedure
     .input(z.object({ id: z.number().int().positive(), status: statusSchema }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [existing] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.id));
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -538,13 +595,13 @@ export const cardsRouter = router({
               : null,
           updatedAt: new Date(),
         })
-        .where(eq(cards.id, input.id))
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)))
         .returning();
 
       return serializeCard(updated);
     }),
 
-  markOwned: publicProcedure
+  markOwned: authenticatedProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
@@ -552,11 +609,11 @@ export const cardsRouter = router({
         purchaseMonth: purchaseMonthSchema,
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [existing] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.id));
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -572,24 +629,24 @@ export const cardsRouter = router({
           status: "owned",
           updatedAt: new Date(),
         })
-        .where(eq(cards.id, input.id))
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)))
         .returning();
 
       return serializeCard(updated);
     }),
 
-  setChaseLevel: publicProcedure
+  setChaseLevel: authenticatedProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
         chaseLevel: chaseLevelSchema,
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [updated] = await db
         .update(cards)
         .set({ chaseLevel: input.chaseLevel ?? null, updatedAt: new Date() })
-        .where(eq(cards.id, input.id))
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)))
         .returning();
 
       if (!updated) {
@@ -599,18 +656,18 @@ export const cardsRouter = router({
       return serializeCard(updated);
     }),
 
-  setPaidPrice: publicProcedure
+  setPaidPrice: authenticatedProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
         paidPriceText: z.string().trim().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [existing] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.id));
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -628,19 +685,19 @@ export const cardsRouter = router({
               : existing.purchaseMonth,
           updatedAt: new Date(),
         })
-        .where(eq(cards.id, input.id))
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)))
         .returning();
 
       return serializeCard(updated);
     }),
 
-  refreshMetadata: publicProcedure
+  refreshMetadata: authenticatedProcedure
     .input(z.object({ id: z.number().int().positive() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [existing] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.id));
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
 
       if (!existing?.url) {
         throw new TRPCError({
@@ -665,19 +722,19 @@ export const cardsRouter = router({
           rarity: metadata.rarity || existing.rarity,
           updatedAt: new Date(),
         })
-        .where(eq(cards.id, input.id))
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)))
         .returning();
 
       return serializeCard(updated);
     }),
 
-  refreshPricing: publicProcedure
+  refreshPricing: authenticatedProcedure
     .input(z.object({ id: z.number().int().positive() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const [existing] = await db
         .select()
         .from(cards)
-        .where(eq(cards.id, input.id));
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
 
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -687,8 +744,11 @@ export const cardsRouter = router({
       return serializeCard(updated ?? existing);
     }),
 
-  refreshAllPricing: publicProcedure.mutation(async () => {
-    const allCards = await db.select().from(cards);
+  refreshAllPricing: authenticatedProcedure.mutation(async ({ ctx }) => {
+    const allCards = await db
+      .select()
+      .from(cards)
+      .where(eq(cards.ownerId, ctx.collectionOwnerId));
     let failed = 0;
     let refreshed = 0;
 
@@ -710,10 +770,12 @@ export const cardsRouter = router({
     return { failed, refreshed };
   }),
 
-  delete: publicProcedure
+  delete: authenticatedProcedure
     .input(z.object({ id: z.number().int().positive() }))
-    .mutation(async ({ input }) => {
-      await db.delete(cards).where(eq(cards.id, input.id));
+    .mutation(async ({ ctx, input }) => {
+      await db
+        .delete(cards)
+        .where(and(eq(cards.id, input.id), eq(cards.ownerId, ctx.collectionOwnerId)));
       return { ok: true };
     }),
 });

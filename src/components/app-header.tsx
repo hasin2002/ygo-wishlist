@@ -4,6 +4,9 @@ import {
   BookOpen,
   CircleDot,
   ListChecks,
+  LockKeyhole,
+  LogIn,
+  LogOut,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -15,7 +18,8 @@ import {
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { trpc } from "@/trpc/client";
+import { authClient, useSession } from "@/lib/auth-client";
+import { clearPersistedQueryCache, trpc } from "@/trpc/client";
 
 const navItems = [
   { href: "/", icon: ListChecks, label: "Tracker" },
@@ -145,14 +149,24 @@ export function AppHeader({
   const desktopNavId = useId();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(true);
+  const { data: session, isPending: sessionPending } = useSession();
+  const isAuthenticated = Boolean(session);
+  const visibleNavItems = isAuthenticated
+    ? navItems
+    : navItems.filter((item) => item.href === "/" || item.href === "/binder-v2");
   const utils = trpc.useUtils();
   const currentMonth = trpc.spend.currentMonth.useQuery(undefined, {
+    enabled: isAuthenticated,
     staleTime: 60_000,
   });
   const monthlyTotal = currentMonth.data?.total ?? 0;
   const monthlyLabel = currentMonth.data?.label ?? "This month";
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
     const prefetchLikelyRoutes = () => {
       void utils.cards.list.prefetch(
         { status: "owned", query: "" },
@@ -192,7 +206,13 @@ export function AppHeader({
     const timeoutId = window.setTimeout(prefetchLikelyRoutes, 750);
 
     return () => window.clearTimeout(timeoutId);
-  }, [pathname, utils]);
+  }, [isAuthenticated, pathname, utils]);
+
+  async function signOut() {
+    await authClient.signOut();
+    clearPersistedQueryCache();
+    window.location.assign("/");
+  }
 
   useEffect(() => {
     const root = document.documentElement;
@@ -275,7 +295,7 @@ export function AppHeader({
           className="mt-5 flex flex-1 flex-col gap-1.5"
           id={desktopNavId}
         >
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <PrimaryNavLink
               active={isActive(pathname, item.href)}
               expanded={desktopMenuOpen}
@@ -286,24 +306,60 @@ export function AppHeader({
         </nav>
 
         <div className="mt-4 border-t border-zinc-200 pt-3">
-          {desktopMenuOpen ? (
-            <SpendSummaryLink
-              className="w-full justify-between"
-              monthlyLabel={monthlyLabel}
-              monthlyTotal={monthlyTotal}
-            />
-          ) : (
-            <Link
-              aria-label={`Spend for ${monthlyLabel}: ${formatCurrency(
-                monthlyTotal,
-              )}`}
-              className="inline-flex size-12 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
-              href="/spend"
-              title={`Spend for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}
+          {isAuthenticated ? (
+            <button
+              className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 ${
+                desktopMenuOpen ? "w-full px-3" : "size-12 justify-center"
+              }`}
+              onClick={() => void signOut()}
+              title="Sign out"
+              type="button"
             >
-              <Wallet className="size-4" />
+              <LogOut className="size-4 shrink-0" />
+              {desktopMenuOpen ? (
+                <span>Sign out</span>
+              ) : (
+                <span className="sr-only">Sign out</span>
+              )}
+            </button>
+          ) : sessionPending ? null : (
+            <Link
+              aria-label="Owner sign in"
+              className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] ${
+                desktopMenuOpen ? "w-full px-3" : "size-12 justify-center"
+              }`}
+              href="/login"
+              title="Owner sign in"
+            >
+              <LogIn className="size-4 shrink-0" />
+              {desktopMenuOpen ? (
+                <span>Owner sign in</span>
+              ) : (
+                <span className="sr-only">Owner sign in</span>
+              )}
             </Link>
           )}
+
+          {isAuthenticated ? (
+            desktopMenuOpen ? (
+              <SpendSummaryLink
+                className="mt-3 w-full justify-between"
+                monthlyLabel={monthlyLabel}
+                monthlyTotal={monthlyTotal}
+              />
+            ) : (
+              <Link
+                aria-label={`Spend for ${monthlyLabel}: ${formatCurrency(
+                  monthlyTotal,
+                )}`}
+                className="mt-3 inline-flex size-12 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                href="/spend"
+                title={`Spend for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}
+              >
+                <Wallet className="size-4" />
+              </Link>
+            )
+          ) : null}
         </div>
       </aside>
 
@@ -343,23 +399,52 @@ export function AppHeader({
               }`}
               id={mobileNavId}
             >
-              {navItems.map((item) => (
+              {visibleNavItems.map((item) => (
                 <PrimaryNavLink
                   active={isActive(pathname, item.href)}
-                item={item}
-                key={item.href}
-                mobile
-                onSelect={() => setMobileMenuOpen(false)}
-              />
-            ))}
+                  item={item}
+                  key={item.href}
+                  mobile
+                  onSelect={() => setMobileMenuOpen(false)}
+                />
+              ))}
+              <div className="mt-1 border-t border-zinc-200 pt-2">
+                {isAuthenticated ? (
+                  <button
+                    className="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950"
+                    onClick={() => void signOut()}
+                    type="button"
+                  >
+                    <LogOut className="size-4" />
+                    Sign out
+                  </button>
+                ) : sessionPending ? null : (
+                  <Link
+                    className="flex min-h-12 items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950"
+                    href="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <LogIn className="size-4" />
+                    Owner sign in
+                  </Link>
+                )}
+              </div>
             </nav>
           </div>
           <div className="flex w-full shrink-0 flex-col items-start gap-3 lg:w-auto lg:items-end">
-            <SpendSummaryLink
-              className="w-full justify-between lg:hidden"
-              monthlyLabel={monthlyLabel}
-              monthlyTotal={monthlyTotal}
-            />
+            {isAuthenticated ? (
+              <SpendSummaryLink
+                className="w-full justify-between lg:hidden"
+                monthlyLabel={monthlyLabel}
+                monthlyTotal={monthlyTotal}
+              />
+            ) : null}
+            {!isAuthenticated && !sessionPending ? (
+              <p className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-500">
+                <LockKeyhole className="size-4" />
+                Public read-only view
+              </p>
+            ) : null}
             {actions ? <div className="w-full lg:w-auto">{actions}</div> : null}
           </div>
         </div>

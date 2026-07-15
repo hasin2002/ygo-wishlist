@@ -28,6 +28,7 @@ import { RarityGuidePopover } from "@/components/rarity-guide-popover";
 import {
   rarityAbbreviation,
 } from "@/lib/rarity-abbreviations";
+import { useSession } from "@/lib/auth-client";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -194,6 +195,7 @@ function buildBlankPageElement() {
 
 function buildPageElement({
   cardById,
+  canEdit,
   dimWishlistCards,
   highlightedCardId,
   layout,
@@ -201,6 +203,7 @@ function buildPageElement({
   pageTotals,
 }: {
   cardById: Map<number, Card>;
+  canEdit: boolean;
   dimWishlistCards: boolean;
   highlightedCardId: number | null;
   layout: Map<string, { cardId: number }>;
@@ -225,6 +228,7 @@ function buildPageElement({
     slot.className = "binder-v2-pocket";
     slot.dataset.pageIndex = String(pageIndex);
     slot.dataset.slotIndex = String(slotIndex);
+    slot.disabled = !canEdit;
     slot.type = "button";
 
     const label = document.createElement("span");
@@ -237,7 +241,7 @@ function buildPageElement({
 
     if (card) {
       slot.dataset.cardId = String(card.id);
-      slot.draggable = true;
+      slot.draggable = canEdit;
       slot.classList.add("is-filled");
 
       if (dimWishlistCards && card.status === "wishlist") {
@@ -349,6 +353,8 @@ export function BinderV2App() {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageInput, setPageInput] = useState("1");
   const currentPageRef = useRef(0);
+  const { data: session } = useSession();
+  const canEdit = Boolean(session);
   const utils = trpc.useUtils();
   const cardsQuery = trpc.cards.binderList.useQuery(undefined, {
     staleTime: 30_000,
@@ -507,6 +513,7 @@ export function BinderV2App() {
       ...Array.from({ length: pageCount }, (_, pageIndex) =>
         buildPageElement({
           cardById,
+          canEdit,
           dimWishlistCards,
           highlightedCardId,
           layout,
@@ -574,6 +581,7 @@ export function BinderV2App() {
     };
   }, [
     cardById,
+    canEdit,
     cardsQuery.isLoading,
     closed,
     dimWishlistCards,
@@ -586,12 +594,16 @@ export function BinderV2App() {
   ]);
 
   function placeCard(pageIndex: number, slotIndex: number, cardId: number) {
+    if (!canEdit) {
+      return;
+    }
+
     setSlot.mutate({ cardId, pageIndex, slotIndex });
     setSelectedCardId(null);
   }
 
   function removeCardFromBinder(cardId: number | null = draggedCardId) {
-    if (!cardId) {
+    if (!canEdit || !cardId) {
       return;
     }
 
@@ -646,6 +658,10 @@ export function BinderV2App() {
   }
 
   function handleSlotClick(event: MouseEvent<HTMLDivElement>) {
+    if (!canEdit) {
+      return;
+    }
+
     const slot = (event.target as HTMLElement).closest<HTMLButtonElement>(
       "[data-page-index][data-slot-index]",
     );
@@ -669,6 +685,10 @@ export function BinderV2App() {
   }
 
   function handleSlotDragStart(event: DragEvent<HTMLDivElement>) {
+    if (!canEdit) {
+      return;
+    }
+
     const slot = (event.target as HTMLElement).closest<HTMLButtonElement>(
       "[data-card-id]",
     );
@@ -682,6 +702,10 @@ export function BinderV2App() {
   }
 
   function handleBookDrop(event: DragEvent<HTMLDivElement>) {
+    if (!canEdit) {
+      return;
+    }
+
     event.preventDefault();
     const slot = (event.target as HTMLElement).closest<HTMLButtonElement>(
       "[data-page-index][data-slot-index]",
@@ -696,6 +720,10 @@ export function BinderV2App() {
   }
 
   function clearBinder() {
+    if (!canEdit) {
+      return;
+    }
+
     clearAll.mutate();
     setSelectedCardId(null);
     setResetModalOpen(false);
@@ -830,7 +858,8 @@ export function BinderV2App() {
         data-card-id={card?.id}
         data-page-index={currentPage}
         data-slot-index={slotIndex}
-        draggable={Boolean(card)}
+        disabled={!canEdit}
+        draggable={canEdit && Boolean(card)}
         key={slotIndex}
         type="button"
       >
@@ -888,7 +917,7 @@ export function BinderV2App() {
         <AppHeader
           eyebrow="Binder planner"
           title="Page-flip binder"
-          actions={
+          actions={canEdit ? (
             <div className="flex items-center gap-2">
               <button
                 aria-label="Clear binder"
@@ -901,10 +930,14 @@ export function BinderV2App() {
                 <RotateCcw className="size-4" />
               </button>
             </div>
-          }
+          ) : undefined}
         />
 
-        <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section
+          className={`grid min-w-0 gap-5 ${
+            canEdit ? "xl:grid-cols-[minmax(0,1fr)_380px]" : ""
+          }`}
+        >
           <section className="min-w-0 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
             <div className="mb-3 flex items-center justify-between gap-3">
               <button
@@ -954,15 +987,17 @@ export function BinderV2App() {
                     Go
                   </button>
                 </form>
-                <button
-                  className="mt-1 inline-flex min-h-11 items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
-                  disabled={binderBusy}
-                  onClick={openSwapModal}
-                  type="button"
-                >
-                  <ArrowLeftRight className="size-3.5" />
-                  Swap pages
-                </button>
+                {canEdit ? (
+                  <button
+                    className="mt-1 inline-flex min-h-11 items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
+                    disabled={binderBusy}
+                    onClick={openSwapModal}
+                    type="button"
+                  >
+                    <ArrowLeftRight className="size-3.5" />
+                    Swap pages
+                  </button>
+                ) : null}
               </div>
               <button
                 aria-label={closed ? "Open binder" : "Next pages"}
@@ -1047,6 +1082,7 @@ export function BinderV2App() {
             </div>
           </section>
 
+          {canEdit ? (
           <aside
             className="flex min-h-[680px] min-w-0 flex-col rounded-lg border border-zinc-300 bg-white p-3 shadow-sm"
             onDragOver={(event) => event.preventDefault()}
@@ -1322,6 +1358,7 @@ export function BinderV2App() {
               </button>
             </div>
           </aside>
+          ) : null}
         </section>
       </div>
 
