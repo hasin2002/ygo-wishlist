@@ -1,0 +1,140 @@
+.wall {
+  --card-wall-gap: clamp(12px, 1.4vw, 24px);
+  background:
+    radial-gradient(circle at 62% 42%, rgba(138, 31, 45, 0.2), transparent 34%),
+    #0b0b10;
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.canvas {
+  align-items: flex-start;
+  display: flex;
+  inset: -32%;
+  justify-content: center;
+  overflow: hidden;
+  position: absolute;
+  transform: rotate(var(--card-wall-rotation));
+  transform-origin: center;
+}
+
+.grid {
+  display: grid;
+  gap: var(--card-wall-gap);
+  grid-template-columns: repeat(var(--card-wall-column-count), minmax(0, 1fr));
+  padding-block: 16%;
+  width: min(78%, 1120px);
+}
+
+.column {
+  min-width: 0;
+  transform: translate3d(0, -9rem, 0);
+}
+
+.column:nth-child(2) {
+  transform: translate3d(0, -2rem, 0);
+}
+
+.column:nth-child(3) {
+  transform: translate3d(0, -13rem, 0);
+}
+
+.column:nth-child(4) {
+  transform: translate3d(0, -5rem, 0);
+}
+
+.column:nth-child(5) {
+  transform: translate3d(0, -16rem, 0);
+}
+
+.track {
+  animation: card-wall-up var(--card-wall-duration) linear infinite;
+  animation-play-state: var(--card-wall-play-state);
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+
+.column:nth-child(even) .track {
+  animation-name: card-wall-down;
+}
+
+.sequence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-wall-gap);
+  padding-bottom: var(--card-wall-gap);
+}
+
+.card {
+  aspect-ratio: 412 / 600;
+  border-radius: 10px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.52);
+  flex: none;
+  position: relative;
+  transform: translateZ(0);
+  transform-origin: center;
+  transition: transform 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  z-index: 0;
+}
+
+.image {
+  border-radius: inherit;
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.sheen {
+  background: linear-gradient(
+    115deg,
+    transparent 12%,
+    rgba(255, 255, 255, 0.08) 38%,
+    transparent 56%
+  );
+  border-radius: inherit;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+@keyframes card-wall-up {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(0, -50%, 0);
+  }
+}
+
+@keyframes card-wall-down {
+  from {
+    transform: translate3d(0, -50%, 0);
+  }
+
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .card:hover {
+    transform: scale(var(--card-wall-hover-scale));
+    z-index: 10;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track,
+  .column:nth-child(even) .track {
+    animation: none;
+    transform: translate3d(0, -8%, 0);
+    will-change: auto;
+  }
+
+  .card {
+    transition: none;
+  }
+}
