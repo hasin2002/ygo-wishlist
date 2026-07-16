@@ -65,6 +65,7 @@ export type RecordEntry = {
   date: string;
   title: string;
   source: string;
+  listingUrl: string | null;
   amountPence: number;
   notes: string;
   lines: RecordLine[];
@@ -127,6 +128,7 @@ export type PurchaseLineInput = {
   allocationPence: number | null;
   setName?: string;
   setCode?: string;
+  tcgplayerUrl?: string;
   category?: SupplyCategory;
   estimatedQuantity?: number | null;
 };
@@ -134,6 +136,7 @@ export type PurchaseLineInput = {
 export type PurchaseInput = {
   date: string;
   source: string;
+  listingUrl: string;
   totalPence: number;
   notes: string;
   lines: PurchaseLineInput[];

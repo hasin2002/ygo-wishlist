@@ -141,6 +141,7 @@ function seededSnapshot(): RecordsSnapshot {
       date: "2026-07-12",
       title: "Mixed eBay order",
       source: "eBay",
+      listingUrl: null,
       amountPence: 7250,
       notes: "Two singles, a tin, and sleeves in one delivered total.",
       createdAt: "2026-07-12T18:20:00.000Z",
@@ -182,6 +183,7 @@ function seededSnapshot(): RecordsSnapshot {
       date: "2026-07-13",
       title: "Opened Dueling Heroes tin",
       source: "Collection",
+      listingUrl: null,
       amountPence: 0,
       notes: "The product cost remains on the original purchase.",
       createdAt: "2026-07-13T19:15:00.000Z",
@@ -205,6 +207,7 @@ function seededSnapshot(): RecordsSnapshot {
       date: "2026-07-08",
       title: "Marketplace childhood collection",
       source: "Facebook Marketplace",
+      listingUrl: null,
       amountPence: 3800,
       notes: "Bought as one lot; contents were not known at purchase time.",
       createdAt: "2026-07-08T12:00:00.000Z",
@@ -228,6 +231,7 @@ function seededSnapshot(): RecordsSnapshot {
       date: "2026-07-09",
       title: "Itemized childhood collection box",
       source: "Collection",
+      listingUrl: null,
       amountPence: 0,
       notes: "12 useful cards identified. No additional spend recorded.",
       createdAt: "2026-07-09T20:30:00.000Z",
@@ -251,6 +255,7 @@ function seededSnapshot(): RecordsSnapshot {
       date: "2026-07-15",
       title: "Sold Ash Blossom & Joyous Spring",
       source: "eBay",
+      listingUrl: null,
       amountPence: 1650,
       notes: "Net after fees and postage.",
       createdAt: "2026-07-15T17:40:00.000Z",
@@ -450,6 +455,7 @@ export function createPreviewSnapshot(legacyCards: LegacyCard[]): RecordsSnapsho
         date: isoDate(card.purchaseMonth, card.createdAt),
         title: `Imported ${card.name}`,
         source: "Legacy Library",
+        listingUrl: null,
         amountPence: paidPence ?? 0,
         notes: paidPence === null ? "Cost missing; review after migration." : "Imported from the current owned-card row.",
         lines: [
@@ -480,8 +486,9 @@ function clone(snapshot: RecordsSnapshot) {
 
 function findOrCreatePrinting(
   snapshot: RecordsSnapshot,
-  input: { name: string; setName: string; setCode: string },
+  input: { name: string; setName: string; setCode: string; tcgplayerUrl?: string },
 ) {
+  const tcgplayerUrl = input.tcgplayerUrl?.trim() || null;
   let target = snapshot.targets.find((item) => normalized(item.name) === normalized(input.name));
 
   if (!target) {
@@ -492,10 +499,12 @@ function findOrCreatePrinting(
       edition: "Unknown edition",
       desiredQuantity: 1,
       imageUrl: null,
-      tcgplayerUrl: null,
+      tcgplayerUrl,
       marketPricePence: null,
     };
     snapshot.targets.push(target);
+  } else if (tcgplayerUrl && !target.tcgplayerUrl) {
+    target.tcgplayerUrl = tcgplayerUrl;
   }
 
   let printing = snapshot.printings.find(
@@ -508,10 +517,12 @@ function findOrCreatePrinting(
       targetId: target.id,
       setName: input.setName || "Unknown set",
       setCode: input.setCode || "Unknown code",
-      tcgplayerUrl: target.tcgplayerUrl,
+      tcgplayerUrl: tcgplayerUrl || target.tcgplayerUrl,
       imageUrl: target.imageUrl,
     };
     snapshot.printings.push(printing);
+  } else if (tcgplayerUrl && !printing.tcgplayerUrl) {
+    printing.tcgplayerUrl = tcgplayerUrl;
   }
 
   return printing;
@@ -519,7 +530,7 @@ function findOrCreatePrinting(
 
 function addCopies(
   snapshot: RecordsSnapshot,
-  input: { name: string; setName: string; setCode: string; quantity: number },
+  input: { name: string; setName: string; setCode: string; quantity: number; tcgplayerUrl?: string },
   recordId: string,
 ) {
   const printing = findOrCreatePrinting(snapshot, input);
@@ -559,6 +570,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
           quantity: inputLine.quantity,
           setName: inputLine.setName || "Unknown set",
           setCode: inputLine.setCode || "Unknown code",
+          tcgplayerUrl: inputLine.tcgplayerUrl,
         },
         id,
       );
@@ -611,6 +623,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
     date: input.date,
     title: input.lines.length === 1 ? `Purchased ${input.lines[0].name}` : `Mixed purchase · ${input.lines.length} lines`,
     source: input.source || "Manual entry",
+    listingUrl: input.listingUrl.trim() || null,
     amountPence: input.totalPence,
     notes: input.notes,
     lines,
@@ -640,6 +653,7 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
     date: input.date,
     title: `Opened ${sealed.name}`,
     source: "Collection",
+    listingUrl: null,
     amountPence: 0,
     notes: input.notes,
     lines,
@@ -673,6 +687,7 @@ export function applySale(snapshot: RecordsSnapshot, input: SaleInput) {
     date: input.date,
     title: grouped.size === 1 ? `Sold ${Array.from(grouped.values())[0].name}` : `Sold ${copies.length} card copies`,
     source: input.source || "Manual entry",
+    listingUrl: null,
     amountPence: input.netProceedsPence,
     notes: input.notes,
     lines: Array.from(grouped.values()).map((group) => recordLine("card", group.name, group.ids.length, group.ids, null, group.detail)),
@@ -706,6 +721,7 @@ export function applyAdjustment(snapshot: RecordsSnapshot, input: AdjustmentInpu
     date: input.date,
     title: `${input.direction === "add" ? "Added" : "Removed"} ${input.quantity} × ${input.name}`,
     source: "Manual correction",
+    listingUrl: null,
     amountPence: 0,
     notes: `${input.reason}${input.notes ? ` · ${input.notes}` : ""}`,
     lines: [recordLine("card", input.name, input.quantity, ids, null, `${input.setCode || "Unknown code"} · ${input.reason}`)],
@@ -733,6 +749,7 @@ export function applyBulkItemization(snapshot: RecordsSnapshot, input: BulkItemi
     date: input.date,
     title: `Itemized ${lot.name}`,
     source: "Collection",
+    listingUrl: null,
     amountPence: 0,
     notes: input.notes,
     lines,

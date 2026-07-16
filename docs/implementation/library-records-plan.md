@@ -62,6 +62,17 @@ separation decision in ADR 0001 are normative.
   itemization.
 - Purchase supports mixed lines (cards, sealed products, bulk lots, supplies),
   one all-in amount, and optional allocations that never add cashflow.
+- Purchase uses four stages: purchase details, item-type choice, item details,
+  and review. Adding another item returns to the visual type choice so one
+  purchase can still mix singles, sealed products, bulk lots, and supplies.
+- Purchase details include an optional source listing URL and a source selector.
+  Choosing `Other` reveals a required free-text source name.
+- Item type is selected with labeled, icon-backed buttons rather than a compact
+  dropdown. Card and sealed item details accept an optional TCGplayer product
+  URL; a missing URL remains visible as incomplete metadata rather than blocking
+  manual entry.
+- Entering the Review stage never creates a record. Review shows the purchase
+  facts and every item, and creation requires a separate explicit confirmation.
 - Opening records sealed product opened and resulting pulled copies.
 - Bulk itemization attaches discovered contents to an existing lot with zero new
   spend.
@@ -110,8 +121,9 @@ or feedback and update this plan before Phase 2.
   proceeds; allocations are optional descriptions only.
 - Match targets on normalized Card Name + Rarity + Edition. Nest exact printings
   and copies.
-- Require TCGplayer product URLs for new targets and physical cards. Reuse target
-  metadata only when the set also matches.
+- Accept TCGplayer product URLs for new targets and physical cards without
+  requiring them during manual entry. Missing links remain attention items.
+  Reuse target metadata only when the set also matches.
 - Resolve printing metadata through the current link parser and YGOPRODeck set
   data without depending on unavailable TCGplayer credentials.
 - Replace the preview data source with a tRPC adapter satisfying the same
@@ -163,3 +175,4 @@ Review complete real-data behavior before deployment or landing on `main`.
 | --- | --- | --- | --- | --- |
 | 2026-07-16 | None | Initial approved specification recorded | Implementation start | None |
 | 2026-07-16 | Long entry pages with all sections visible | Progressive multi-step entry flows with subtle reduced-motion-safe transitions | User feedback: the forms felt potentially overwhelming | P1.3 |
+| 2026-07-17 | Purchase combined item entry and type selection in one dropdown-driven page; the future model required TCGplayer links | Four-stage repeatable type selection with visual buttons, optional listing/product URLs, controlled source choice, and a non-mutating review that requires explicit confirmation | G1 feedback showed that the scaffold did not yet communicate the purchase workflow or confirmation boundary clearly | P1.3, P1.5, Phase 2 URL rule |

@@ -1,6 +1,6 @@
 # Library and Records implementation progress
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 ## Session resume protocol
 
@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | done | Entry workflows | Progressive Purchase, opening, sale, adjustment, and bulk itemization; drafts and preview submission verified |
+| P1.3 | done | Entry workflows | Purchase is now a four-stage flow with visual item-type selection, source/listing metadata, optional TCGplayer links, a mixed-item loop, and explicit review confirmation; opening, sale, adjustment, and bulk-itemization remain walkable |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | done | Scaffold verification | Lint/build pass; desktop, phone, dark mode and interactions reviewed; dev server stopped |
+| P1.5 | done | Scaffold verification | Revised purchase flow passed TypeScript, lint, production build, desktop and phone browser review, responsive overflow, reduced-motion, and explicit-confirmation checks |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -33,10 +33,11 @@ one implementation item may be `in_progress`.
 
 ## Current update
 
-- Completed: Phase 1 scaffold P1.1–P1.5.
+- Completed: P1.1 through P1.5. Purchase now uses four progressive stages and
+  requires explicit confirmation from its Review page.
 - Current: G1 Scaffold review.
-- Next: collect UI/UX feedback; update the durable plan; begin Phase 2 only after
-  explicit G1 approval.
+- Next: review the remaining entry flows and the revised Purchase flow. Begin
+  Phase 2 only after explicit G1 approval.
 - Reviewable UI:
   - `/` — Library rename, target-only add language, global Add, per-card Record
     acquisition/View copies paths for signed-in users.
@@ -45,19 +46,22 @@ one implementation item may be `in_progress`.
   - `/records/history` — search/type/status filtering and dependency-aware
     void/restore.
   - `/records/inventory` — Cards (search and pagination), Sealed, Bulk, Supplies.
-  - `/records/new/purchase` — mixed-item three-step purchase with allocation
-    guardrails and Library prefill.
+  - `/records/new/purchase` — four-stage mixed-item purchase with optional listing
+    and TCGplayer links, controlled source entry, visual type selection, editable
+    review, and explicit confirmation.
   - `/records/new/opening` — three-step sealed-product-to-pulls flow.
   - `/records/new/sale` — two-step exact-copy sale with target-reopening warning.
   - `/records/new/adjustment` — reasoned add/remove correction flow.
   - `/records/new/bulk-itemization` — existing-lot itemization with explicit £0
     new spend.
   - `/spend` — intentionally preserved for comparison.
-- Checks: lint, TypeScript, and production build pass. Browser review passed at
-  1280×720 and 390×844 with no horizontal overflow; current browser console was
-  clean after fixing the preview hydration boundary.
-- Changed decisions: entry pages now use short multi-step flows with subtle,
-  reduced-motion-safe transitions instead of showing all sections at once.
+- Checks: TypeScript, lint, production build, patch whitespace, desktop and phone
+  purchase walkthroughs, responsive overflow, reduced-motion behavior, explicit
+  confirmation, mixed-item looping, and development server cleanup pass.
+- Changed decisions: Purchase now has a dedicated visual item-type stage,
+  optional purchase and TCGplayer URLs, a controlled source field with custom
+  `Other`, and an explicit non-mutating Review/Confirm boundary. Optional links
+  replace the earlier future requirement for mandatory TCGplayer URLs.
 - Blockers: Phase 2 is intentionally blocked by G1 review.
 
 ## Check log
@@ -72,6 +76,14 @@ one implementation item may be `in_progress`.
 | 2026-07-16 | Phone browser review | pass | 390×844; menu, Add, Overview, navigation, no horizontal overflow |
 | 2026-07-16 | Theme/reduced motion | pass | Dark palette inspected; step animation has `prefers-reduced-motion` fallback |
 | 2026-07-16 | Development server cleanup | pass | Server exited and port 3100 has no listener |
+| 2026-07-17 | TypeScript `--noEmit` | pass | Revised purchase input, record entry, preview adapter, and four-stage UI compile |
+| 2026-07-17 | `npm run lint` | pass | No warnings or errors after purchase and mobile action-bar changes |
+| 2026-07-17 | Patch whitespace | pass | `git diff --check` returned no errors |
+| 2026-07-17 | Production build | pass | Isolated build compiled all 18 routes with a dummy local `DATABASE_URL`; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
+| 2026-07-17 | Desktop purchase review | pass | Other-source disclosure, listing URL, visual type choice, card link, mixed single/supply lines, editable Review, and explicit Confirm verified |
+| 2026-07-17 | Phone purchase review | pass | 390×844; all four type cards, form actions, and Review remain usable with no horizontal overflow or covered fields |
+| 2026-07-17 | Review boundary | pass | Reaching Review created no record; only `Confirm preview purchase` displayed the saved state |
+| 2026-07-17 | Development server cleanup | pass | Temporary review server exited and port 3100 has no listener; the user's port-3000 server was left untouched |
 
 ## Feedback and implementation notes
 
@@ -83,6 +95,10 @@ one implementation item may be `in_progress`.
   to P1.3 because it improves progressive disclosure without changing domain
   behavior or backend scope. Recommendation: use steps for meaningful decisions,
   not one-field-per-page fragmentation.
+- Feedback classification: the 2026-07-17 purchase feedback is a Product/UX and
+  contract correction. Recommendation: make type choice repeatable per line so
+  the clearer step does not remove mixed purchases; use a real Review state and
+  explicit Confirm action. P1.3 is reopened and P1.5 returned to review.
 - Implementation detail: a development-only `NEXT_PUBLIC_RECORDS_UI_PREVIEW=1`
   flag permits local visual review without credentials. It is ignored in
   production; normal Records routes remain authenticated.
