@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import type { inferRouterOutputs } from "@trpc/server";
+import Link from "next/link";
 import {
   FormEvent,
   MouseEvent,
@@ -582,30 +583,17 @@ function EditCardModal({
             onChange={(rarity) => setForm((current) => ({ ...current, rarity }))}
           />
 
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">Status</span>
-            <select
-              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  chaseLevel:
-                    event.target.value === "owned" ? "" : current.chaseLevel,
-                  ebayListingUrl:
-                    event.target.value === "owned" ? "" : current.ebayListingUrl,
-                  purchaseMonth:
-                    event.target.value === "owned"
-                      ? current.purchaseMonth || currentMonthKey()
-                      : "",
-                  status: event.target.value as CardStatus,
-                }))
-              }
-              value={form.status}
-            >
-              <option value="wishlist">Wishlist</option>
-              <option value="owned">Owned</option>
-            </select>
-          </label>
+          <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
+            <span className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
+              Library state
+            </span>
+            <p className="mt-1 text-sm font-bold capitalize text-zinc-800">
+              {form.status === "wishlist" ? "Wishlist target" : "Owned legacy card"}
+            </p>
+            <p className="mt-1 text-xs font-medium leading-5 text-zinc-500">
+              Ownership changes belong in Records so acquisition history is preserved.
+            </p>
+          </div>
 
           {form.status === "wishlist" ? (
             <label className="block">
@@ -1087,7 +1075,7 @@ function AddCardForm({
     <form className="space-y-4" onSubmit={onSubmit}>
       <label className="block">
         <span className="text-sm font-medium text-zinc-700">
-          TCGplayer or eBay link
+          TCGplayer product link
         </span>
         <input
           autoFocus
@@ -1095,7 +1083,7 @@ function AddCardForm({
           onChange={(event) =>
             setForm((current) => ({ ...current, url: event.target.value }))
           }
-          placeholder="https://www.ebay.co.uk/itm/..."
+          placeholder="https://www.tcgplayer.com/product/..."
           type="url"
           value={form.url}
         />
@@ -1117,10 +1105,10 @@ function AddCardForm({
       </label>
 
       <div className="grid grid-cols-2 gap-3">
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700">
-            {form.status === "owned" ? "Paid price" : "Manual market price"}
-          </span>
+          <label className="block">
+            <span className="text-sm font-medium text-zinc-700">
+              Manual market price
+            </span>
           <input
             className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
             onChange={(event) =>
@@ -1129,7 +1117,7 @@ function AddCardForm({
                 priceText: event.target.value,
               }))
             }
-            placeholder={form.status === "owned" ? "12 or pulled from pack" : "£12.50"}
+            placeholder="£12.50"
             value={form.priceText}
           />
         </label>
@@ -1139,68 +1127,30 @@ function AddCardForm({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-[1fr_1fr]">
+        <div>
+          <p className="text-sm font-bold text-zinc-800">Wishlist Target</p>
+          <p className="mt-1 text-xs font-medium leading-5 text-zinc-500">
+            Adding here records what you want. Use a Purchase or Pack opening to create physical copies.
+          </p>
+        </div>
         <label className="block">
-          <span className="text-sm font-medium text-zinc-700">Status</span>
+          <span className="text-sm font-medium text-zinc-700">Chase</span>
           <select
-            className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+            className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-[#8a1f2d]"
             onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                chaseLevel:
-                  event.target.value === "owned" ? "" : current.chaseLevel,
-                purchaseMonth:
-                  event.target.value === "owned"
-                    ? current.purchaseMonth || currentMonthKey()
-                    : current.purchaseMonth,
-                status: event.target.value as "wishlist" | "owned",
-              }))
+              setForm((current) => ({ ...current, chaseLevel: event.target.value }))
             }
-            value={form.status}
+            value={form.chaseLevel}
           >
-            <option value="wishlist">Wishlist</option>
-            <option value="owned">Owned</option>
+            <option value="">None</option>
+            <option value="5">5 - next</option>
+            <option value="4">4</option>
+            <option value="3">3</option>
+            <option value="2">2</option>
+            <option value="1">1 - later</option>
           </select>
         </label>
-        {form.status === "wishlist" ? (
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">Chase</span>
-            <select
-              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  chaseLevel: event.target.value,
-                }))
-              }
-              value={form.chaseLevel}
-            >
-              <option value="">None</option>
-              <option value="5">5 - next</option>
-              <option value="4">4</option>
-              <option value="3">3</option>
-              <option value="2">2</option>
-              <option value="1">1 - later</option>
-            </select>
-          </label>
-        ) : (
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">
-              Bought month
-            </span>
-            <input
-              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  purchaseMonth: event.target.value,
-                }))
-              }
-              type="month"
-              value={form.purchaseMonth}
-            />
-          </label>
-        )}
       </div>
 
       <label className="block">
@@ -1253,7 +1203,7 @@ function AddCardForm({
         ) : (
           <Plus className="size-4" />
         )}
-        Add to tracker
+        Add wishlist target
       </button>
     </form>
   );
@@ -1302,14 +1252,14 @@ function AddCardDialog({
         <div className="flex items-center justify-between gap-4 border-b border-zinc-200 p-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
-              Add card
+              Add wishlist target
             </p>
             <h2 className="mt-1 text-xl font-bold" id="add-card-title">
-              Add to tracker
+              Add to Library
             </h2>
           </div>
           <button
-            aria-label="Close add card form"
+            aria-label="Close add wishlist target form"
             className="grid size-10 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
             onClick={onClose}
             type="button"
@@ -1532,9 +1482,6 @@ export function WishlistApp() {
       invalidateCardsAndSpend();
     },
   });
-  const setStatus = trpc.cards.setStatus.useMutation({
-    onSuccess: invalidateCardsAndSpend,
-  });
   const refreshAllPricing = trpc.cards.refreshAllPricing.useMutation({
     onSuccess: invalidateCardsAndSpend,
   });
@@ -1665,8 +1612,8 @@ export function WishlistApp() {
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <AppHeader
-          eyebrow="Local collection tracker"
-          title="Yu-Gi-Oh! Wishlist"
+          eyebrow="Cards, targets, and market estimates"
+          title="Library"
           actions={
             <div className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-zinc-300 bg-white text-center shadow-sm sm:min-w-[420px]">
             <div className="border-r border-zinc-200 px-4 py-3">
@@ -1709,7 +1656,7 @@ export function WishlistApp() {
             <div>
               <h2 className="text-lg font-semibold">Cards</h2>
               <p className="mt-1 text-sm font-medium text-zinc-500">
-                Track wishlist targets, owned cards, prices, and chase priority.
+                Browse wishlist targets and current cards. Use Records for purchases, pulls, and sales.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1737,7 +1684,7 @@ export function WishlistApp() {
                     type="button"
                   >
                     <Plus className="size-4" />
-                    Add card
+                    Add target
                   </button>
                 </>
               ) : null}
@@ -2053,25 +2000,20 @@ export function WishlistApp() {
                             >
                               <Trash2 className="size-4" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setStatus.mutate({
-                                  id: card.id,
-                                  status:
-                                    card.status === "owned" ? "wishlist" : "owned",
-                                })
-                              }
-                              className={`inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-bold transition disabled:opacity-50 ${
+                            <Link
+                              className={`inline-flex min-h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-center text-xs font-bold transition ${
                                 card.status === "owned"
                                   ? "border border-zinc-300 bg-white text-zinc-800 hover:border-zinc-950"
                                   : "bg-zinc-950 text-white hover:bg-zinc-800"
                               }`}
-                              disabled={setStatus.isPending}
+                              href={
+                                card.status === "owned"
+                                  ? `/records/inventory?kind=cards&card=${encodeURIComponent(card.name)}`
+                                  : `/records/new/purchase?cardName=${encodeURIComponent(card.name)}&legacyCardId=${card.id}`
+                              }
                             >
-                              <Check className="size-3.5" />
-                              {card.status === "owned" ? "Want" : "Own"}
-                              </button>
+                              {card.status === "owned" ? "View copies" : "Record acquisition"}
+                            </Link>
                             </div>
                           ) : null}
                         </div>
@@ -2159,7 +2101,7 @@ export function WishlistApp() {
               Remove this card?
             </h2>
             <p className="mt-2 text-sm font-medium leading-6 text-zinc-600">
-              {deleteTarget.name} will be removed from the tracker and any binder
+              {deleteTarget.name} will be removed from the Library and any binder
               slot it appears in.
             </p>
             <div className="mt-5 flex justify-end gap-2">

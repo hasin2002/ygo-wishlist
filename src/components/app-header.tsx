@@ -2,7 +2,9 @@
 
 import {
   BookOpen,
+  Boxes,
   CircleDot,
+  FileClock,
   ListChecks,
   LockKeyhole,
   LogIn,
@@ -10,6 +12,9 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  PackageOpen,
+  Plus,
+  ReceiptText,
   ShieldCheck,
   Sparkles,
   Wallet,
@@ -18,13 +23,14 @@ import {
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { authClient, useSession } from "@/lib/auth-client";
 import { clearPersistedQueryCache, trpc } from "@/trpc/client";
 
 const navItems = [
-  { href: "/", icon: ListChecks, label: "Tracker" },
+  { href: "/", icon: ListChecks, label: "Library" },
+  { href: "/records", icon: FileClock, label: "Records" },
   { href: "/assign-chase", icon: Sparkles, label: "Assign chase" },
   { href: "/wheel", icon: CircleDot, label: "Wheel" },
   { href: "/binder-v2", icon: BookOpen, label: "Binder" },
@@ -34,6 +40,39 @@ const navItems = [
   icon: LucideIcon;
   label: string;
 }[];
+
+const addItems = [
+  {
+    description: "Cards, sealed, bulk, and supplies",
+    href: "/records/new/purchase",
+    icon: Plus,
+    label: "Purchase",
+  },
+  {
+    description: "Open sealed product and record pulls",
+    href: "/records/new/opening",
+    icon: PackageOpen,
+    label: "Pack opening",
+  },
+  {
+    description: "Sell exact physical card copies",
+    href: "/records/new/sale",
+    icon: ReceiptText,
+    label: "Sale",
+  },
+  {
+    description: "Explain an inventory correction",
+    href: "/records/new/adjustment",
+    icon: ListChecks,
+    label: "Adjustment",
+  },
+  {
+    description: "Identify cards in an existing lot",
+    href: "/records/new/bulk-itemization",
+    icon: Boxes,
+    label: "Bulk itemization",
+  },
+] as const;
 
 function formatCurrency(value: number) {
   const precision = value > 0 && Math.abs(value) < 10 ? 2 : 0;
@@ -137,6 +176,76 @@ function SpendSummaryLink({
   );
 }
 
+function GlobalAddMenu() {
+  const menuId = useId();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  return (
+    <div className="relative w-full sm:w-auto" ref={wrapperRef}>
+      <button
+        aria-controls={menuId}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826] sm:w-auto"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <Plus className="size-4" />
+        Add
+      </button>
+      {open ? (
+        <div
+          className="absolute right-0 z-50 mt-2 w-full min-w-72 rounded-lg border border-zinc-300 bg-white p-2 text-left shadow-xl sm:w-80"
+          id={menuId}
+          role="menu"
+        >
+          <p className="px-2 pb-2 pt-1 text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
+            What happened?
+          </p>
+          {addItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50"
+                href={item.href}
+                key={item.href}
+                onClick={() => setOpen(false)}
+                role="menuitem"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]">
+                  <Icon className="size-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-zinc-950">{item.label}</span>
+                  <span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span>
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function AppHeader({
   actions,
   eyebrow,
@@ -152,7 +261,10 @@ export function AppHeader({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(true);
   const { data: session, isPending: sessionPending } = useSession();
-  const isAuthenticated = Boolean(session);
+  const localPreviewReview =
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
+  const isAuthenticated = Boolean(session) || localPreviewReview;
   const isAdmin = session?.user.role === "admin";
   const visibleNavItems = isAuthenticated
     ? navItems
@@ -243,7 +355,7 @@ export function AppHeader({
           }`}
         >
           <Link
-            aria-label="Go to tracker"
+            aria-label="Go to Library"
             className={`flex min-h-11 min-w-0 items-center gap-2 rounded-lg text-zinc-950 transition hover:text-[#8a1f2d] ${
               desktopMenuOpen ? "px-1" : "justify-center"
             }`}
@@ -258,7 +370,7 @@ export function AppHeader({
                   Yu-Gi-Oh!
                 </span>
                 <span className="block truncate text-xs font-semibold text-zinc-500">
-                  Wishlist
+                  Collection hub
                 </span>
               </span>
             ) : null}
@@ -461,6 +573,7 @@ export function AppHeader({
                 Public read-only view
               </p>
             ) : null}
+            {isAuthenticated ? <GlobalAddMenu /> : null}
             {actions ? <div className="w-full lg:w-auto">{actions}</div> : null}
           </div>
         </div>

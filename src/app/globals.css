@@ -505,6 +505,7 @@ html.dark-mode {
 }
 
 .dark-mode [class~="bg-white"],
+.dark-mode [class~="bg-white/95"],
 .dark-mode [class~="bg-[#fdfcf8]"],
 .dark-mode [class~="bg-[#f6f4ef]"] {
   background-color: var(--palette-surface);
@@ -646,13 +647,31 @@ html.dark-mode {
 }
 
 .dark-mode [class~="text-amber-700"],
+.dark-mode [class~="text-amber-800"],
+.dark-mode [class~="text-amber-900"],
 .dark-mode [class~="hover:text-amber-800"]:hover {
   color: var(--palette-warning);
 }
 
 .dark-mode [class~="border-amber-200"],
+.dark-mode [class~="border-amber-300"],
+.dark-mode [class~="border-amber-400"],
 .dark-mode [class~="hover:border-amber-300"]:hover {
   border-color: var(--palette-warning-border);
+}
+
+.dark-mode [class~="text-emerald-800"],
+.dark-mode [class~="text-emerald-900"] {
+  color: var(--palette-success);
+}
+
+.dark-mode [class~="border-emerald-200"],
+.dark-mode [class~="border-emerald-300"] {
+  border-color: var(--palette-success-border);
+}
+
+.dark-mode [class~="border-rose-300"] {
+  border-color: var(--palette-accent-border);
 }
 
 .dark-mode [class~="disabled:bg-zinc-300"]:disabled {
@@ -672,4 +691,25 @@ html.dark-mode {
 .dark-mode ::placeholder {
   color: var(--palette-subtle);
   opacity: 1;
+}
+
+@keyframes records-step-enter {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.records-step-enter {
+  animation: records-step-enter 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .records-step-enter {
+    animation: none;
+  }
 }

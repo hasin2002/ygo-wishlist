@@ -23,8 +23,8 @@ const themeInitializer = `
 `;
 
 export const metadata: Metadata = {
-  title: "Yu-Gi-Oh! Wishlist",
-  description: "A local wishlist and collection tracker for Yu-Gi-Oh! cards.",
+  title: "Yu-Gi-Oh! Collection Hub",
+  description: "A personal Yu-Gi-Oh! Library, wishlist, inventory, and records hub.",
 };
 
 export const viewport: Viewport = {
