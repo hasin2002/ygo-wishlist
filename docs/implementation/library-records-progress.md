@@ -18,7 +18,7 @@ one implementation item may be `in_progress`.
 
 | ID | Status | Item | Evidence / acceptance |
 | --- | --- | --- | --- |
-| P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is now checked out in the primary project directory; Stardust files remain unrelated, uncommitted, and excluded; plan, progress, context, ADR created |
+| P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
 | P1.3 | done | Entry workflows | Progressive Purchase, opening, sale, adjustment, and bulk itemization; drafts and preview submission verified |
@@ -88,8 +88,9 @@ one implementation item may be `in_progress`.
   production; normal Records routes remain authenticated.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
-  directory at the user's request. Existing Stardust modifications were carried
-  across unchanged and remain explicitly out of scope.
+  directory at the user's request. The uncommitted Stardust modelling experiment
+  and its redundant local branch pointer were subsequently deleted at the user's
+  request, leaving one clean feature worktree.
 
 ## G1 known scaffold limitations
 
