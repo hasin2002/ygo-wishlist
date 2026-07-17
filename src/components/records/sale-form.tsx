@@ -263,6 +263,17 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
     }));
   }
 
+  function switchToSingleSale() {
+    setError(null);
+    setDraft((current) => ({
+      ...current,
+      kind: "single",
+      // This action is only shown when exactly one Copy is selected, so the
+      // selection remains valid when the transaction type changes.
+      copyIds: current.copyIds.slice(0, 1),
+    }));
+  }
+
   function clearInventoryFilters() {
     setQuery("");
     setRarity("all");
@@ -372,10 +383,21 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                   </span>
                 </div>
               </div>
-              <span className={`inline-flex min-h-9 items-center gap-2 self-start rounded-full px-3 text-sm font-bold sm:self-auto ${selectionComplete ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
-                {selectionComplete ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
-                {selectionComplete ? "Ready to continue" : `${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} required`}
-              </span>
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <span className={`inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-sm font-bold ${selectionComplete ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
+                  {selectionComplete ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
+                  {selectionComplete ? "Ready to continue" : `${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} required`}
+                </span>
+                {draft.kind === "bulk" && draft.copyIds.length === 1 ? (
+                  <button
+                    className="inline-flex min-h-11 items-center rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-zinc-500 hover:bg-zinc-100"
+                    onClick={switchToSingleSale}
+                    type="button"
+                  >
+                    Switch to Single sale
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
@@ -409,7 +431,13 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
               <div>
                 <strong>{draft.copyIds.length} {draft.copyIds.length === 1 ? "copy" : "copies"} selected</strong>
                 <span className="mt-0.5 block text-sm font-medium text-zinc-500">
-                  {selectionComplete ? "Selection complete" : draft.kind === "single" ? "Choose one copy to continue" : `Choose ${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} to continue`}
+                  {selectionComplete
+                    ? "Selection complete"
+                    : draft.kind === "single"
+                      ? "Choose one copy to continue"
+                      : draft.copyIds.length === 1
+                        ? "Bulk sales need two or more copies. Add another card or switch to Single sale."
+                        : `Choose ${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} to continue`}
                 </span>
               </div>
               <span className="text-sm font-medium text-zinc-500">Showing {resultStart}–{resultEnd} of {filteredCopies.length}</span>

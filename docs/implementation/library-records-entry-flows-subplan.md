@@ -284,7 +284,9 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
   and Review presentation. Single uses radio semantics internally and requires
   one Copy; Bulk uses checkbox semantics and requires two. Inline text states
   how many more Copies are required, and Continue remains disabled until that
-  minimum is met instead of showing an avoidable error after the click.
+  minimum is met instead of showing an avoidable error after the click. When a
+  Bulk sale has exactly one Copy selected, make that distinction explicit and
+  provide a one-tap switch to Single sale that preserves that Copy.
 - Search across card name, rarity, set name, set code, and condition. Provide an
   All rarities filter and a Selected only view. Selection survives search,
   filtering, and pagination.

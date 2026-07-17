@@ -162,6 +162,7 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | P1.3i exact 375px review | not run | The in-app browser viewport override did not change the active 1280px viewport; previous 375px scaffold checks remain green, but this refinement is not falsely marked as rechecked |
 | 2026-07-17 | P1.3i production build | not run | The earlier isolated build runner rejection remains in effect; TypeScript, lint, live route compilation, and desktop browser behavior pass |
 | 2026-07-17 | P1.3i development server cleanup | pass | The isolated port-3100 review server stopped; the user's existing port-3000 server remained untouched |
+| 2026-07-17 | P1.3i Bulk-to-Single correction | pass | TypeScript, lint, and patch whitespace pass. A one-Copy Bulk selection now identifies the two-Copy minimum and offers an in-place Single switch that preserves the selected Copy; Library impact remains informational only |
 
 ## Feedback and implementation notes
 
@@ -246,6 +247,10 @@ one implementation item may be `in_progress`.
   clarity correction: the consequence is valid, but `reopens Wishlist` exposes
   implementation language and the amber treatment makes it look like an error.
   P1.3i reopens P1.3 and P1.5 for shared-editor and Sale verification.
+- Feedback classification: the apparent blocked Bulk sale is an interaction
+  clarity correction, not a Wishlist rule. Bulk still requires two or more
+  Copies; when exactly one is selected, the form now explains that requirement
+  and offers a direct switch to Single sale without dropping the selection.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment
