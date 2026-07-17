@@ -2,7 +2,6 @@
 
 import {
   ArrowLeft,
-  ArrowRight,
   Boxes,
   Check,
   ChevronRight,
@@ -15,12 +14,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import {
   fieldClass,
   FormSection,
-  poundsToPence,
   PreviewNotice,
   rowId,
   selectNumberOnFocus,
@@ -32,6 +30,7 @@ import {
 } from "@/components/records/entry-form-ui";
 import { OpeningForm, PurchaseForm } from "@/components/records/purchase-opening-forms";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { SaleForm } from "@/components/records/sale-form";
 
 export type EntryFlow = "purchase" | "pack-opening" | "sale" | "adjustment" | "bulk-itemization";
 
@@ -103,48 +102,6 @@ function PullRows({ rows, setRows }: { rows: PullRow[]; setRows: (rows: PullRow[
       ))}
       <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-dashed border-zinc-300 bg-white px-4 text-sm font-bold hover:border-zinc-950" onClick={() => setRows([...rows, { id: rowId("pull"), name: "", quantity: 1, setName: "", setCode: "" }])} type="button"><CirclePlus className="size-4" /> Add another pulled card</button>
     </div>
-  );
-}
-
-type SaleDraft = { date: string; source: string; proceeds: string; notes: string; copyIds: string[] };
-
-function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
-  const source = useRecordsDataSource();
-  const stored = source.drafts.sale as SaleDraft | undefined;
-  const [draft, setDraft] = useState<SaleDraft>(() => stored ?? { date: today(), source: "eBay", proceeds: "", notes: "", copyIds: [] });
-  const [step, setStep] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const availableCopies = source.snapshot.copies.filter((copy) => copy.status === "available").map((copy) => {
-    const printing = source.snapshot.printings.find((item) => item.id === copy.printingId)!;
-    const target = source.snapshot.targets.find((item) => item.id === printing.targetId)!;
-    return { copy, printing, target };
-  });
-  const reopenTargets = useMemo(() => source.snapshot.targets.filter((target) => {
-    const printingIds = source.snapshot.printings.filter((item) => item.targetId === target.id).map((item) => item.id);
-    const owned = source.snapshot.copies.filter((copy) => printingIds.includes(copy.printingId) && copy.status === "available").length;
-    const selected = availableCopies.filter((item) => item.target.id === target.id && draft.copyIds.includes(item.copy.id)).length;
-    return selected > 0 && owned >= target.desiredQuantity && owned - selected < target.desiredQuantity;
-  }), [availableCopies, draft.copyIds, source.snapshot]);
-  useEffect(() => source.setDraft("sale", draft), [draft, source]);
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!draft.copyIds.length) { setError("Select at least one physical copy."); return; }
-    if (!draft.proceeds.trim()) { setError("Enter the net amount you kept."); return; }
-    const result = source.createSale({ date: draft.date, source: draft.source, netProceedsPence: poundsToPence(draft.proceeds), notes: draft.notes, copyIds: draft.copyIds });
-    if (!result.ok) { setError(result.message); return; }
-    source.clearDraft("sale"); onSaved(result.id!);
-  }
-  function nextStep() {
-    if (!draft.copyIds.length) { setError("Select at least one physical copy."); return; }
-    setError(null); setStep(2);
-  }
-  return (
-    <form className="grid gap-4" onSubmit={submit}>
-      <WizardProgress labels={["Copies", "Proceeds"]} step={step} />
-      {step === 1 ? <StepPanel step={step}><FormSection description="Sales operate on real copies, so acquisition history is never erased." number={1} title="Copies sold"><div className="grid gap-2">{availableCopies.map(({ copy, printing, target }) => <label className={`flex min-h-16 cursor-pointer items-center gap-3 rounded-lg border p-3 transition ${draft.copyIds.includes(copy.id) ? "border-[#8a1f2d] bg-rose-50" : "border-zinc-200 bg-zinc-50 hover:border-zinc-400"}`} key={copy.id}><input checked={draft.copyIds.includes(copy.id)} className="size-4 accent-[#8a1f2d]" onChange={(event) => setDraft((current) => ({ ...current, copyIds: event.target.checked ? [...current.copyIds, copy.id] : current.copyIds.filter((id) => id !== copy.id) }))} type="checkbox" /><span className="min-w-0 flex-1"><span className="block font-bold">{target.name}</span><span className="mt-0.5 block text-xs font-semibold text-zinc-500">{printing.setCode} · {copy.condition} · Copy {copy.id.slice(-6)}</span></span></label>)}</div>{reopenTargets.length ? <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900"><ArrowRight className="mr-2 inline size-4" />This sale reopens {reopenTargets.map((target) => target.name).join(", ")} on your wishlist.</div> : null}</FormSection></StepPanel> : null}
-      {step === 2 ? <StepPanel step={step}><FormSection description="Use the amount that reaches you after marketplace fees and postage." number={2} title="Sale details"><div className="mb-4 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-bold">{draft.copyIds.length} physical {draft.copyIds.length === 1 ? "copy" : "copies"} selected</div><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">Sale date</span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required type="date" value={draft.date} /></label><label><span className="text-sm font-bold text-zinc-700">Marketplace or buyer</span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, source: event.target.value }))} required value={draft.source} /></label><label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Net proceeds</span><div className="relative mt-1"><span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-zinc-500">£</span><input className={`${fieldClass} mt-0 pl-7`} min="0" onChange={(event) => setDraft((current) => ({ ...current, proceeds: event.target.value }))} required step="0.01" type="number" value={draft.proceeds} /></div></label><label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Notes</span><textarea className={textAreaClass} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} value={draft.notes} /></label></div></FormSection></StepPanel> : null}
-      {error ? <p className="rounded-md border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-800" role="alert">{error}</p> : null}<WizardActions finalLabel="Create preview sale" onBack={() => { setError(null); setStep(1); }} onNext={nextStep} step={step} totalSteps={2} />
-    </form>
   );
 }
 

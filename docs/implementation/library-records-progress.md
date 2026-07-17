@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | review | Entry workflows | Exact product metadata resolves all eight supplied card links; changed-link re-fetch clears the previous product before loading; Purchase and Pack Opening await renewed G1 review |
+| P1.3 | review | Entry workflows | Purchase, Pack Opening, and four-stage Single/Bulk Sale are implemented and await renewed G1 UI review |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | done | Scaffold verification | Lint, TypeScript, production build, eight-link live metadata regression, full local route checks, and additional matcher edge checks pass |
+| P1.5 | review | Scaffold verification | Existing checks pass; Sale rewrite requires renewed automated and responsive verification |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -39,10 +39,11 @@ one implementation item may be `in_progress`.
   Purchase and Opening share seller/source including Gift and Other; visible
   inventory provenance is gone; Review is read-only until explicit confirmation;
   and recoverable errors use destructive toasts.
-- Current: G1 scaffold review. The resolver correction is implemented using the
-  product ID already present in every required link, without per-card exceptions.
+- Current: G1 scaffold review. The four-stage Single/Bulk Sale is implemented and
+  verified in desktop and 375px browser walkthroughs.
 - Next: collect renewed G1 feedback or explicit approval. Phase 2 still requires
-  explicit approval.
+  explicit approval. The Sale-specific production build should be rerun when the
+  isolated build runner is available; TypeScript and lint already pass.
 - Reviewable UI:
   - `/` — Library rename, target-only add language, global Add, per-card Record
     acquisition/View copies paths for signed-in users.
@@ -57,7 +58,8 @@ one implementation item may be `in_progress`.
   - `/records/new/opening` — link-first opened product, existing-unit match or
     Gift/Old collection/Other provenance, shared pulled-card editor, read-only
     Review and Confirm.
-  - `/records/new/sale` — two-step exact-copy sale with target-reopening warning.
+  - `/records/new/sale` — four-step Single/Bulk exact-copy Sale with thumbnail
+    search, rarity and Selected-only filters, pagination, Review, and Confirm.
   - `/records/new/adjustment` — reasoned add/remove correction flow.
   - `/records/new/bulk-itemization` — existing-lot itemization with explicit £0
     new spend.
@@ -84,8 +86,12 @@ one implementation item may be `in_progress`.
   before read-only Review; both Reviews require explicit confirmation.
   Gift now forces Purchase spend to £0 while selected, and quantity fields
   select their existing value on focus for one-keystroke replacement.
-- Blockers: no scaffold implementation blocker. Phase 2 remains intentionally
-  blocked by explicit G1 approval.
+  Sale now distinguishes one-Copy Single from multi-Copy Bulk, without treating
+  an unitemized Bulk Lot as a sellable card selection.
+- Blockers: no scaffold implementation blocker. The Sale-specific isolated
+  production build did not start because the local runner rejected the temporary
+  build command; the prior scaffold production build remains green. Phase 2
+  remains intentionally blocked by explicit G1 approval.
 
 ## Check log
 
@@ -136,6 +142,12 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Rarity status-label alignment | pass | The Rarity Auto-filled/Edited indicator now appears beside the label and required marker, matching the other derived fields; TypeScript, lint, and patch whitespace pass |
 | 2026-07-17 | Card-list action ordering | pass | The shared Card Contents Editor now places Add another card above the existing card summaries; behavior and touch-target styling are unchanged |
 | 2026-07-17 | Gift amount and quantity input UX | pass | Gift forces the Purchase amount to a read-only £0; Records quantity inputs select their current value on focus so a typed number replaces the default immediately; TypeScript, lint, and patch whitespace pass |
+| 2026-07-17 | P1.3h TypeScript, lint, and patch whitespace | pass | The four-stage Sale, extracted component, image grid, filters, Review boundary, and draft reset compile without errors or lint warnings |
+| 2026-07-17 | P1.3h desktop Sale review | pass | Bulk requires two Copies; search and Selected-only preserve selection; Review creates no record; Confirm creates the preview Sale; thumbnails and target-reopening warnings are visible |
+| 2026-07-17 | P1.3h Single Sale review | pass | Single uses radio semantics and replacing the selection leaves exactly one physical Copy selected |
+| 2026-07-17 | P1.3h phone Sale review | pass | 375×812 picker and Review have no horizontal overflow; the two-column thumbnail grid, filters, progress, and actions remain usable |
+| 2026-07-17 | P1.3h production build | not run | The isolated runner rejected the temporary build command before it started; no project or dev-server state changed, and the previous full scaffold production build remains green |
+| 2026-07-17 | P1.3h development server cleanup | pass | The isolated port-3100 review server stopped; the user's existing port-3000 server remained untouched |
 
 ## Feedback and implementation notes
 
@@ -210,6 +222,11 @@ one implementation item may be `in_progress`.
   quantity replacement is a form interaction correction under P1.3. Gift is
   enforced as zero-cost in both the visible field and submitted preview data;
   quantity validation and stored values are otherwise unchanged.
+- Feedback classification: the Sale request is a product/UX and workflow
+  replacement under P1.3. Recommendation applied: `Bulk sale` means two or more
+  already-tracked card Copies in one Sale; selling sealed products, unitemized
+  Bulk Lots, and supplies remains deferred. P1.3h is active and P1.5 returns to
+  review until the new flow is verified.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment

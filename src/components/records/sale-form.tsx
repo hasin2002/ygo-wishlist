@@ -1,0 +1,492 @@
+"use client";
+
+import {
+  AlertTriangle,
+  Boxes,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  Pencil,
+  Search,
+} from "lucide-react";
+import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DestructiveToast,
+  fieldClass,
+  FormSection,
+  penceToPounds,
+  poundsToPence,
+  PreviewNotice,
+  StepPanel,
+  textAreaClass,
+  today,
+  WizardActions,
+  WizardProgress,
+} from "@/components/records/entry-form-ui";
+import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import type {
+  CardCopy,
+  CardPrinting,
+  WishlistTarget,
+} from "@/lib/records/types";
+
+const salePageSize = 20;
+
+type SaleKind = "single" | "bulk";
+
+type SaleDraft = {
+  version: 2;
+  kind: SaleKind | null;
+  date: string;
+  source: string;
+  proceeds: string;
+  notes: string;
+  copyIds: string[];
+};
+
+type AvailableCopy = {
+  copy: CardCopy;
+  printing: CardPrinting;
+  target: WishlistTarget;
+  imageUrl: string | null;
+};
+
+function newSaleDraft(): SaleDraft {
+  return {
+    version: 2,
+    kind: null,
+    date: today(),
+    source: "eBay",
+    proceeds: "",
+    notes: "",
+    copyIds: [],
+  };
+}
+
+function CopyThumbnail({ eager = false, item }: { eager?: boolean; item: AvailableCopy }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+      <div className="relative aspect-[3/4] bg-zinc-100">
+        {item.imageUrl ? (
+          <Image
+            alt=""
+            className="object-contain p-2"
+            fill
+            loading={eager ? "eager" : "lazy"}
+            sizes="(max-width: 640px) 50vw, (max-width: 1280px) 33vw, 25vw"
+            src={`/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}`}
+            unoptimized
+          />
+        ) : (
+          <span className="grid h-full place-items-center text-xs font-black text-zinc-400">CARD</span>
+        )}
+      </div>
+      <div className="p-3">
+        <p className="line-clamp-2 min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</p>
+        <p className="mt-1 text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</p>
+        <p className="mt-1 text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.copy.condition}</p>
+      </div>
+    </div>
+  );
+}
+
+export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
+  const source = useRecordsDataSource();
+  const stored = source.drafts.sale as Partial<SaleDraft> | undefined;
+  const legacyDraftReset = Boolean(stored && stored.version !== 2);
+  const [draft, setDraft] = useState<SaleDraft>(() => stored?.version === 2 ? stored as SaleDraft : newSaleDraft());
+  const [step, setStep] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [query, setQuery] = useState("");
+  const [rarity, setRarity] = useState("all");
+  const [selectedOnly, setSelectedOnly] = useState(false);
+  const [page, setPage] = useState(1);
+
+  const availableCopies = useMemo<AvailableCopy[]>(() => {
+    const printings = new Map(source.snapshot.printings.map((printing) => [printing.id, printing]));
+    const targets = new Map(source.snapshot.targets.map((target) => [target.id, target]));
+
+    return source.snapshot.copies.flatMap((copy) => {
+      if (copy.status !== "available") return [];
+      const printing = printings.get(copy.printingId);
+      const target = printing ? targets.get(printing.targetId) : undefined;
+      if (!printing || !target) return [];
+      return [{ copy, printing, target, imageUrl: printing.imageUrl || target.imageUrl }];
+    });
+  }, [source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
+
+  const rarityOptions = useMemo(
+    () => Array.from(new Set(availableCopies.map((item) => item.target.rarity).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
+    [availableCopies],
+  );
+
+  const selectedCopies = useMemo(
+    () => availableCopies.filter((item) => draft.copyIds.includes(item.copy.id)),
+    [availableCopies, draft.copyIds],
+  );
+
+  const filteredCopies = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return availableCopies.filter((item) => {
+      if (selectedOnly && !draft.copyIds.includes(item.copy.id)) return false;
+      if (rarity !== "all" && item.target.rarity !== rarity) return false;
+      if (!search) return true;
+      return [
+        item.target.name,
+        item.target.rarity,
+        item.printing.setName,
+        item.printing.setCode,
+        item.copy.condition,
+      ].some((value) => value.toLowerCase().includes(search));
+    });
+  }, [availableCopies, draft.copyIds, query, rarity, selectedOnly]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredCopies.length / salePageSize));
+  const visibleCopies = filteredCopies.slice((page - 1) * salePageSize, page * salePageSize);
+
+  const reopenTargets = useMemo(() => source.snapshot.targets.filter((target) => {
+    const printingIds = source.snapshot.printings
+      .filter((printing) => printing.targetId === target.id)
+      .map((printing) => printing.id);
+    const owned = source.snapshot.copies.filter(
+      (copy) => printingIds.includes(copy.printingId) && copy.status === "available",
+    ).length;
+    const selected = selectedCopies.filter((item) => item.target.id === target.id).length;
+    return selected > 0 && owned >= target.desiredQuantity && owned - selected < target.desiredQuantity;
+  }), [selectedCopies, source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
+
+  useEffect(() => source.setDraft("sale", draft), [draft, source]);
+
+  function typeError() {
+    return draft.kind ? null : "Choose Single card or Bulk cards before continuing.";
+  }
+
+  function detailsError() {
+    if (!draft.date) return "Add the sale date.";
+    if (!draft.source.trim()) return "Add the marketplace or buyer.";
+    if (!draft.proceeds.trim()) return "Enter the net amount you kept.";
+    return null;
+  }
+
+  function selectionError() {
+    if (draft.kind === "single" && draft.copyIds.length !== 1) return "Choose exactly one physical copy for a Single card sale.";
+    if (draft.kind === "bulk" && draft.copyIds.length < 2) return "Choose at least two physical copies for a Bulk card sale.";
+    return null;
+  }
+
+  function nextStep() {
+    const problem = step === 1 ? typeError() : step === 2 ? detailsError() : selectionError();
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    setStep((current) => Math.min(4, current + 1));
+  }
+
+  function submit() {
+    if (step !== 4) return;
+    const problem = typeError() ?? detailsError() ?? selectionError();
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setPending(true);
+    const result = source.createSale({
+      date: draft.date,
+      source: draft.source.trim(),
+      netProceedsPence: poundsToPence(draft.proceeds),
+      notes: draft.notes.trim(),
+      copyIds: draft.copyIds,
+    });
+    setPending(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    source.clearDraft("sale");
+    onSaved(result.id!);
+  }
+
+  function chooseType(kind: SaleKind) {
+    setDraft((current) => ({
+      ...current,
+      kind,
+      copyIds: current.kind === kind ? current.copyIds : [],
+    }));
+  }
+
+  function toggleCopy(copyId: string, checked: boolean) {
+    setDraft((current) => ({
+      ...current,
+      copyIds: checked
+        ? current.kind === "single"
+          ? [copyId]
+          : Array.from(new Set([...current.copyIds, copyId]))
+        : current.copyIds.filter((id) => id !== copyId),
+    }));
+  }
+
+  function clearInventoryFilters() {
+    setQuery("");
+    setRarity("all");
+    setSelectedOnly(false);
+    setPage(1);
+  }
+
+  const saleLabel = draft.kind === "single" ? "Single card" : "Bulk cards";
+  const resultStart = filteredCopies.length ? (page - 1) * salePageSize + 1 : 0;
+  const resultEnd = Math.min(page * salePageSize, filteredCopies.length);
+
+  return (
+    <form className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
+      <DestructiveToast message={error} onDismiss={() => setError(null)} />
+      <WizardProgress labels={["Sale type", "Sale details", "Cards sold", "Review"]} step={step} />
+      {legacyDraftReset ? <PreviewNotice>The earlier two-step Sale draft was reset because its selection rules have changed.</PreviewNotice> : null}
+
+      {step === 1 ? (
+        <StepPanel step={step}>
+          <FormSection
+            description="Choose whether this Sale contains one tracked card Copy or several tracked Copies sold together."
+            number={1}
+            title="What kind of sale is this?"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                { kind: "single" as const, label: "Single card", description: "Sell exactly one physical Copy already in your Inventory.", icon: CreditCard },
+                { kind: "bulk" as const, label: "Bulk cards", description: "Sell two or more tracked card Copies in one transaction.", icon: Boxes },
+              ]).map((option) => {
+                const Icon = option.icon;
+                const selected = draft.kind === option.kind;
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`group flex min-h-32 cursor-pointer items-start gap-4 rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[#8a1f2d] focus:ring-offset-2 ${selected ? "border-[#8a1f2d] bg-rose-50 ring-1 ring-[#8a1f2d]" : "border-zinc-300 bg-white hover:border-zinc-500 hover:bg-zinc-50"}`}
+                    key={option.kind}
+                    onClick={() => chooseType(option.kind)}
+                    type="button"
+                  >
+                    <span className={`grid size-11 shrink-0 place-items-center rounded-lg ${selected ? "bg-[#8a1f2d] text-white" : "bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200"}`}>
+                      <Icon className="size-5" />
+                    </span>
+                    <span>
+                      <strong className="block text-base text-zinc-950">{option.label}</strong>
+                      <span className="mt-1 block text-sm font-medium leading-5 text-zinc-500">{option.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </FormSection>
+        </StepPanel>
+      ) : null}
+
+      {step === 2 ? (
+        <StepPanel step={step}>
+          <FormSection
+            description="Record the shared facts for this transaction before choosing the cards."
+            number={2}
+            title="Sale details"
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label>
+                <span className="text-sm font-bold text-zinc-700">Sale date <span className="text-rose-700">*</span></span>
+                <input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required type="date" value={draft.date} />
+              </label>
+              <label>
+                <span className="text-sm font-bold text-zinc-700">Marketplace or buyer <span className="text-rose-700">*</span></span>
+                <input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, source: event.target.value }))} required value={draft.source} />
+              </label>
+              <label className="sm:col-span-2">
+                <span className="text-sm font-bold text-zinc-700">Net proceeds <span className="text-rose-700">*</span></span>
+                <div className="relative mt-1">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-bold leading-none text-zinc-500">£</span>
+                  <input className={`${fieldClass} mt-0 pl-7`} inputMode="decimal" min="0" onChange={(event) => setDraft((current) => ({ ...current, proceeds: event.target.value }))} placeholder="0.00" required step="0.01" type="number" value={draft.proceeds} />
+                </div>
+                <span className="mt-1 block text-xs font-medium text-zinc-500">Enter what you kept after postage and marketplace fees.</span>
+              </label>
+              <label className="sm:col-span-2">
+                <span className="text-sm font-bold text-zinc-700">Sale notes <span className="font-medium text-zinc-400">(optional)</span></span>
+                <textarea className={textAreaClass} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Buyer, postage, condition, or sale context" value={draft.notes} />
+              </label>
+            </div>
+          </FormSection>
+        </StepPanel>
+      ) : null}
+
+      {step === 3 ? (
+        <StepPanel step={step}>
+          <FormSection
+            description={draft.kind === "single" ? "Choose the exact physical Copy sold." : "Choose every tracked physical Copy included in this Sale."}
+            number={3}
+            title="Cards sold"
+          >
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
+              <label>
+                <span className="text-sm font-bold text-zinc-700">Search cards</span>
+                <div className="relative mt-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    className={`${fieldClass} mt-0 pl-9`}
+                    onChange={(event) => { setQuery(event.target.value); setPage(1); }}
+                    placeholder="Name, set, code, rarity, condition"
+                    type="search"
+                    value={query}
+                  />
+                </div>
+              </label>
+              <label>
+                <span className="text-sm font-bold text-zinc-700">Rarity</span>
+                <select className={fieldClass} onChange={(event) => { setRarity(event.target.value); setPage(1); }} value={rarity}>
+                  <option value="all">All rarities</option>
+                  {rarityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </label>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-bold text-zinc-700">
+                <input checked={selectedOnly} className="size-4 accent-[#8a1f2d]" onChange={(event) => { setSelectedOnly(event.target.checked); setPage(1); }} type="checkbox" />
+                Selected only
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <strong>{draft.copyIds.length} {draft.copyIds.length === 1 ? "copy" : "copies"} selected</strong>
+              <span className="text-sm font-medium text-zinc-500">Showing {resultStart}–{resultEnd} of {filteredCopies.length}</span>
+            </div>
+
+            {visibleCopies.length ? (
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+                {visibleCopies.map((item, index) => {
+                  const selected = draft.copyIds.includes(item.copy.id);
+                  return (
+                    <label
+                      className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-white transition focus-within:ring-2 focus-within:ring-[#8a1f2d] focus-within:ring-offset-2 ${selected ? "border-[#8a1f2d] ring-1 ring-[#8a1f2d]" : "border-zinc-200 hover:border-zinc-400 hover:shadow-sm"}`}
+                      key={item.copy.id}
+                    >
+                      <div className="relative aspect-[3/4] bg-zinc-100">
+                        {item.imageUrl ? (
+                          <Image
+                            alt=""
+                            className="object-contain p-2"
+                            fill
+                            loading={index === 0 ? "eager" : "lazy"}
+                            sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                            src={`/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}`}
+                            unoptimized
+                          />
+                        ) : (
+                          <span className="grid h-full place-items-center text-xs font-black text-zinc-400">CARD</span>
+                        )}
+                        <input
+                          aria-label={`Select ${item.target.name}, ${item.printing.setCode || "unknown set"}, copy ${item.copy.id.slice(-6)}`}
+                          checked={selected}
+                          className="absolute right-3 top-3 z-10 size-5 accent-[#8a1f2d]"
+                          name={draft.kind === "single" ? "sale-copy" : undefined}
+                          onChange={(event) => toggleCopy(item.copy.id, event.target.checked)}
+                          type={draft.kind === "single" ? "radio" : "checkbox"}
+                        />
+                        {selected ? (
+                          <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-[#8a1f2d] px-2 py-1 text-[11px] font-black text-white shadow-sm">
+                            <Check className="size-3" /> Selected
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className="block p-3">
+                        <span className="line-clamp-2 block min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</span>
+                        <span className="mt-1 block text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</span>
+                        <span className="mt-1 block text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.copy.condition}</span>
+                        <span className="mt-1 block text-[11px] font-medium text-zinc-400">Copy {item.copy.id.slice(-6)}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center">
+                <p className="font-black text-zinc-800">{availableCopies.length ? "No cards match these filters" : "No available card copies"}</p>
+                <p className="mt-1 text-sm font-medium text-zinc-500">{availableCopies.length ? "Clear the filters or search for a different card." : "Record an acquisition before creating a Sale."}</p>
+                {availableCopies.length ? <button className="mt-4 min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold" onClick={clearInventoryFilters} type="button">Clear filters</button> : null}
+              </div>
+            )}
+
+            {filteredCopies.length > salePageSize ? (
+              <nav aria-label="Card results pages" className="mt-4 flex items-center justify-between gap-3 border-t border-zinc-200 pt-4">
+                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /> Previous</button>
+                <span className="text-sm font-bold text-zinc-600">Page {page} of {pageCount}</span>
+                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button">Next <ChevronRight className="size-4" /></button>
+              </nav>
+            ) : null}
+
+            {reopenTargets.length ? (
+              <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-900">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span>This Sale reopens {reopenTargets.map((target) => target.name).join(", ")} on your Wishlist.</span>
+              </div>
+            ) : null}
+          </FormSection>
+        </StepPanel>
+      ) : null}
+
+      {step === 4 ? (
+        <StepPanel step={step}>
+          <div className="grid gap-4">
+            <PreviewNotice>This is a read-only review. Nothing has been saved; only the confirmation button below creates the preview Sale.</PreviewNotice>
+            <FormSection
+              description="Check the transaction and every selected physical Copy before confirming."
+              number={4}
+              title="Review sale"
+            >
+              <div className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                <div>
+                  <span className="text-xs font-bold uppercase text-zinc-500">Sale</span>
+                  <p className="mt-1 font-black">{saleLabel} · £{penceToPounds(poundsToPence(draft.proceeds))}</p>
+                  <p className="mt-1 text-sm font-medium text-zinc-500">{draft.source} · {draft.date}</p>
+                </div>
+                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button>
+              </div>
+
+              <div className="mt-5 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-black">Cards sold</h3>
+                  <p className="mt-1 text-sm font-medium text-zinc-500">{selectedCopies.length} physical {selectedCopies.length === 1 ? "Copy" : "Copies"}</p>
+                </div>
+                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+                {selectedCopies.map((item, index) => <CopyThumbnail eager={index === 0} item={item} key={item.copy.id} />)}
+              </div>
+
+              {reopenTargets.length ? (
+                <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-900">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <span>This Sale reopens {reopenTargets.map((target) => target.name).join(", ")} on your Wishlist.</span>
+                </div>
+              ) : null}
+
+              <div className="mt-4 rounded-lg border border-zinc-200 p-3">
+                <span className="text-xs font-bold uppercase text-zinc-500">Notes</span>
+                <p className="mt-1 whitespace-pre-wrap text-sm font-medium text-zinc-700">{draft.notes || "No sale notes."}</p>
+              </div>
+              <div className="mt-4 rounded-lg border border-[#8a1f2d]/30 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-950">
+                <strong className="block font-black">Ready to record?</strong>
+                <p className="mt-1">Confirm only after the proceeds and selected Copies match the completed Sale.</p>
+              </div>
+            </FormSection>
+          </div>
+        </StepPanel>
+      ) : null}
+
+      <WizardActions
+        finalLabel="Confirm preview sale"
+        onBack={() => { setError(null); setStep((current) => Math.max(1, current - 1)); }}
+        onConfirm={submit}
+        onNext={nextStep}
+        pending={pending}
+        step={step}
+        totalSteps={4}
+      />
+    </form>
+  );
+}

@@ -1,14 +1,14 @@
-# Purchase and Pack Opening scaffold redesign
+# Purchase, Pack Opening, and Sale scaffold redesign
 
-Status: G1 refinements implemented and verified; ready for scaffold review.
+Status: G1 refinements implemented; Sale browser and static verification pass.
 Backend and database work remain blocked by G1.
 
 ## Authority and scope
 
 This subplan is the detailed specification for `P1.3 Entry workflows` in
-[`library-records-plan.md`](./library-records-plan.md). It currently covers only
-Purchase and Pack Opening. Sale, Adjustment, and standalone Bulk Itemization
-remain unchanged until separately reviewed.
+[`library-records-plan.md`](./library-records-plan.md). It covers Purchase, Pack
+Opening, and Sale. Adjustment and standalone Bulk Itemization remain unchanged
+until separately reviewed.
 
 If this file conflicts with the main plan on either covered flow, this file is
 more specific. The main plan's decision log must still record every replacement.
@@ -20,6 +20,8 @@ more specific. The main plan's decision log must still record every replacement.
 - Keep one Purchase focused on one acquisition kind instead of mixing unrelated
   inventory kinds in one wizard.
 - Reuse one calm, scalable card-contents editor for a Bulk Lot and Pack Opening.
+- Give Sale the same four-stage rhythm as Purchase while selecting existing
+  physical Copies from a scalable visual inventory browser.
 - Let metadata remove typing without hiding resolution failures or creating
   inventory before an explicit confirmation.
 - Keep the scaffold UI-only: drafts and submitted preview records remain in
@@ -237,6 +239,50 @@ Pack Opening remains three stages:
 - Optional opening notes are entered on Product and displayed read-only on
   Review.
 
+## Sale wizard
+
+Sale is four stages in this order: Sale type, Sale details, Cards sold, Review.
+The term `Bulk sale` means several already-tracked card Copies sold together; it
+does not mean selling an unitemized Bulk Lot, sealed product, or supply.
+
+### P1.3-S1 Sale type
+
+- Show two large labeled, icon-backed choices: `Single card` and `Bulk cards`.
+- Single requires exactly one available Copy. Bulk requires at least two
+  available Copies and records them under one Sale entry.
+- Changing type clears an incompatible selection instead of silently retaining
+  several Copies in Single mode.
+
+### P1.3-S2 Sale details
+
+- Keep Sale date, Marketplace or buyer, Net proceeds, and optional Notes.
+- Net proceeds are the all-in amount retained after postage and fees. No per-card
+  allocation creates or changes cashflow.
+
+### P1.3-S3 Cards sold
+
+- Browse only available physical Copies already present in Inventory. Never ask
+  for a TCGplayer link or recreate card metadata during a Sale.
+- Present Copies as selectable thumbnail cards in a responsive grid rather than
+  a long row list. Each tile shows image/fallback, card name, rarity, set code,
+  condition, and a visible selected state using more than color alone.
+- Search across card name, rarity, set name, set code, and condition. Provide an
+  All rarities filter and a Selected only view. Selection survives search,
+  filtering, and pagination.
+- Paginate the result grid so a large collection never becomes one unbounded
+  scroll. Show result and selected counts, clear empty states, and Previous/Next
+  controls with correct disabled semantics.
+- Warn when the selected Copies will reduce owned quantity below a Wishlist
+  Target's desired quantity.
+
+### P1.3-S4 Review and confirmation
+
+- Review is read-only and summarizes type, sale details, net proceeds, selected
+  card thumbnails, and every target-reopening consequence. Edit actions return
+  to the owning stage.
+- Reaching Review never submits. `Confirm preview sale` is a distinct action
+  with pending, success, and recoverable error feedback.
+
 ## Preview contract changes
 
 - Replace the current multi-line `PurchaseInput` with a discriminated input
@@ -300,6 +346,7 @@ Pack Opening remains three stages:
 | P1.3e | done | Pack Opening rewrite | Link-first product and pulls flow now hides inventory mechanics, shares source, and requires explicit confirmation from Review |
 | P1.3f | done | Verification | Automated checks, supplied metadata fixtures, desktop walkthroughs, and 375px/focus/touch checks pass |
 | P1.3g | done | G1 form refinements | Sealed fields, shared source, dedicated Review, destructive toast, reducers, and responsive verification match this specification |
+| P1.3h | done | Sale rewrite | Four-stage Single/Bulk Sale, scalable thumbnail inventory browser, Review boundary, preview reducer behavior, and responsive verification match this specification |
 
 ## Review gate
 
