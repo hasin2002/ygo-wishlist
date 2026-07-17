@@ -25,7 +25,7 @@ export function blankCardContents(name = ""): CardContentsDraft {
   return {
     id: `card-${crypto.randomUUID()}`,
     quantity: 1,
-    ...blankProductIdentity(name),
+    ...blankProductIdentity(name, "1st Edition"),
   };
 }
 
@@ -35,6 +35,7 @@ export function cardContentsError(row: CardContentsDraft) {
   if (row.fetchStatus === "stale") return "The TCGplayer link changed. Fetch the card details again.";
   if (row.fetchStatus === "fetching") return "Wait for the card details to finish fetching.";
   if (!row.name.trim()) return "Add the card name.";
+  if (!row.edition) return "Choose the card edition.";
   if (!row.rarity.trim()) return "Choose the card rarity.";
   if (!Number.isInteger(row.quantity) || row.quantity < 1) return "Quantity must be at least one.";
   return null;
@@ -121,7 +122,7 @@ export function CardContentsEditor({
             {row.imageUrl ? (
               <Image alt="" className="size-14 shrink-0 rounded-md object-contain" height={56} src={`/api/image-proxy?url=${encodeURIComponent(row.imageUrl)}`} unoptimized width={56} />
             ) : <span className="grid size-14 shrink-0 place-items-center rounded-md bg-zinc-100 text-xs font-bold text-zinc-400">CARD</span>}
-            <div className="min-w-0"><p className="font-bold text-zinc-950">{row.name || `Unnamed ${noun}`}</p><p className="mt-1 text-sm font-medium text-zinc-500">{row.rarity || "Rarity missing"} · Quantity {row.quantity}</p></div>
+            <div className="min-w-0"><p className="font-bold text-zinc-950">{row.name || `Unnamed ${noun}`}</p><p className="mt-1 text-sm font-medium text-zinc-500">{row.edition || "Edition missing"} · {row.rarity || "Rarity missing"} · Quantity {row.quantity}</p></div>
           </div>
           <div className="flex gap-2">
             <button className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 sm:flex-none" onClick={() => { setActiveId(row.id); setError(null); }} type="button"><Pencil className="size-4" /> Edit</button>

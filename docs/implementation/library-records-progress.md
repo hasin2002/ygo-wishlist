@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | review | Entry workflows | Purchase, Pack Opening, and four-stage Single/Bulk Sale are implemented and await renewed G1 UI review |
+| P1.3 | review | Entry workflows | Required defaulted Card edition and the revised consistent Single/Bulk Sale selection await renewed G1 review |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | review | Scaffold verification | Existing checks pass; Sale rewrite requires renewed automated and responsive verification |
+| P1.5 | review | Scaffold verification | Static and desktop P1.3i checks pass; a fresh isolated production build and exact 375px rerun remain outstanding |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -39,11 +39,11 @@ one implementation item may be `in_progress`.
   Purchase and Opening share seller/source including Gift and Other; visible
   inventory provenance is gone; Review is read-only until explicit confirmation;
   and recoverable errors use destructive toasts.
-- Current: G1 scaffold review. The four-stage Single/Bulk Sale is implemented and
-  verified in desktop and 375px browser walkthroughs.
+- Current: G1 scaffold review. Required Card edition and the revised Single/Bulk
+  Sale selection are implemented and desktop-verified.
 - Next: collect renewed G1 feedback or explicit approval. Phase 2 still requires
-  explicit approval. The Sale-specific production build should be rerun when the
-  isolated build runner is available; TypeScript and lint already pass.
+  explicit approval; the exact 375px and isolated production-build checks remain
+  recorded under P1.5 rather than being silently marked complete.
 - Reviewable UI:
   - `/` — Library rename, target-only add language, global Add, per-card Record
     acquisition/View copies paths for signed-in users.
@@ -72,7 +72,10 @@ one implementation item may be `in_progress`.
   eight user-supplied metadata fixtures resolve the exact expected name, rarity,
   and set code. The Gorz and Slifer requests also pass through the running local
   Next.js metadata route. Additional probes cover repeated card names inside a
-  set slug, apostrophes, and same-set rarity disambiguation.
+  set slug, apostrophes, and same-set rarity disambiguation. The P1.3i desktop
+  pass covers Single/Bulk/Pull edition defaults, sealed-product edition
+  resolution, Single/Bulk selection progress, neutral Library impact, card-tile
+  selection, dark-mode contrast, and browser-console review.
 - Changed decisions: Purchase type moves first and becomes single-kind;
   TCGplayer links become required primary identity for cards/sealed products;
   Bulk repeats cards rather than purchase items; Opening reuses that card editor;
@@ -88,10 +91,13 @@ one implementation item may be `in_progress`.
   select their existing value on focus for one-keystroke replacement.
   Sale now distinguishes one-Copy Single from multi-Copy Bulk, without treating
   an unitemized Bulk Lot as a sellable card selection.
-- Blockers: no scaffold implementation blocker. The Sale-specific isolated
-  production build did not start because the local runner rejected the temporary
-  build command; the prior scaffold production build remains green. Phase 2
-  remains intentionally blocked by explicit G1 approval.
+  New acquired cards require edition and default to `1st Edition`; Sale impact
+  is explanatory information rather than an error-looking Wishlist warning.
+- Blockers: no scaffold implementation blocker. A fresh isolated production
+  build remains unavailable after the runner rejection, and the in-app browser's
+  viewport override did not apply for an exact P1.3i 375px rerun; both gaps stay
+  recorded under P1.5. The prior scaffold build and 375px checks remain green.
+  Phase 2 remains intentionally blocked by explicit G1 approval.
 
 ## Check log
 
@@ -148,6 +154,14 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | P1.3h phone Sale review | pass | 375×812 picker and Review have no horizontal overflow; the two-column thumbnail grid, filters, progress, and actions remain usable |
 | 2026-07-17 | P1.3h production build | not run | The isolated runner rejected the temporary build command before it started; no project or dev-server state changed, and the previous full scaffold production build remains green |
 | 2026-07-17 | P1.3h development server cleanup | pass | The isolated port-3100 review server stopped; the user's existing port-3000 server remained untouched |
+| 2026-07-17 | P1.3i TypeScript, lint, and patch whitespace | pass | Required Card edition, draft-version resets, edition-aware preview matching, revised Sale feedback, and image loading compile without errors or warnings |
+| 2026-07-17 | P1.3i Single/Bulk/Pull edition review | pass | Single Purchase, the shared Bulk card editor, and Pack Opening pulls visibly default Card edition to 1st Edition; sealed Opening still resolves Unlimited Edition from its product link |
+| 2026-07-17 | P1.3i Single/Bulk Sale desktop review | pass | Both modes use the same filters, tiles, markers, progress, and Review path; one-copy Bulk shows one more required with disabled Continue, while completed selections enable Continue |
+| 2026-07-17 | P1.3i Library impact and theme review | pass | The warning-looking Wishlist message is replaced by neutral current/after owned counts and wanted quantity; ready and selected states remain legible in dark mode |
+| 2026-07-17 | P1.3i browser console | review | Purchase, Bulk Purchase, and Opening had no warnings/errors; Sale emitted an LCP warning during the walkthrough, so the first visible grid row now loads eagerly while later images remain lazy; browser confirmation is pending under P1.5 |
+| 2026-07-17 | P1.3i exact 375px review | not run | The in-app browser viewport override did not change the active 1280px viewport; previous 375px scaffold checks remain green, but this refinement is not falsely marked as rechecked |
+| 2026-07-17 | P1.3i production build | not run | The earlier isolated build runner rejection remains in effect; TypeScript, lint, live route compilation, and desktop browser behavior pass |
+| 2026-07-17 | P1.3i development server cleanup | pass | The isolated port-3100 review server stopped; the user's existing port-3000 server remained untouched |
 
 ## Feedback and implementation notes
 
@@ -227,6 +241,11 @@ one implementation item may be `in_progress`.
   already-tracked card Copies in one Sale; selling sealed products, unitemized
   Bulk Lots, and supplies remains deferred. P1.3h is active and P1.5 returns to
   review until the new flow is verified.
+- Feedback classification: required Card edition is a product/data correction
+  because edition participates in target identity. The Sale screenshot is a UX
+  clarity correction: the consequence is valid, but `reopens Wishlist` exposes
+  implementation language and the amber treatment makes it look like an error.
+  P1.3i reopens P1.3 and P1.5 for shared-editor and Sale verification.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment

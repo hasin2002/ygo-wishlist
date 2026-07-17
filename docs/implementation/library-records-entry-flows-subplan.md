@@ -1,6 +1,7 @@
 # Purchase, Pack Opening, and Sale scaffold redesign
 
-Status: G1 refinements implemented; Sale browser and static verification pass.
+Status: G1 refinements implemented; edition and Sale clarity desktop/static
+verification pass.
 Backend and database work remain blocked by G1.
 
 ## Authority and scope
@@ -43,9 +44,8 @@ more specific. The main plan's decision log must still record every replacement.
   - `needs attention`: retain the valid URL, explain which facts could not be
     resolved, and provide Retry.
 - Keep the relevant derived fields in the form rather than replacing them with a
-  read-only summary. Card fields are name, rarity, set name, and set code where
-  available. Sealed fields are product name and any applicable product/set or
-  edition facts.
+  read-only summary. Card fields are name, required edition, rarity, set name,
+  and set code where available. Sealed fields are product name and edition.
 - Populated fields remain editable. Label fetched values as `Auto-filled` and
   changed values as `Edited`. Re-fetching the same link after a manual
   correction must ask before overwriting those corrections; cancelling keeps
@@ -119,14 +119,26 @@ such as `GBI-001`; it does not use or require TCGplayer developer credentials.
   confirmation or correction.
 - Pack Opening pulls use the same required rarity control as Bulk Lot cards.
 
+### Card edition control
+
+- Card edition is required for a Single Card Purchase and every card inside a
+  Bulk Lot or Pack Opening. It is part of Wishlist Target identity rather than
+  optional printing decoration.
+- Every new card row visibly defaults to `1st Edition`. The same select offers
+  `Unlimited Edition`, remains editable after metadata fetching, and is included
+  in collapsed rows and Review summaries.
+- Fetching a changed card link clears the old identity but restores the safe
+  `1st Edition` default instead of leaving a required field blank or carrying an
+  edition from the previous card.
+
 ### Card contents editor
 
 - One reusable editor powers Bulk Lot contents and Pack Opening pulls.
 - A new card opens as a focused editor with TCGplayer link first, followed by
-  `Fetch details`, populated metadata fields, required rarity when applicable,
-  and quantity.
+  `Fetch details`, populated metadata fields, required edition and rarity, and
+  quantity.
 - Saving that card collapses it into a compact summary row containing thumbnail,
-  title, rarity, quantity, and Edit/Remove controls.
+  title, edition, rarity, quantity, and Edit/Remove controls.
 - Only one card is expanded at a time. `Add another card` creates and focuses a
   fresh editor; it does not create another purchase item or inventory kind.
 - Show a running summary such as `4 card types · 7 copies` outside the rows.
@@ -169,8 +181,9 @@ The page branches by the type selected in stage 1:
 
 - `Single Card`: required TCGplayer product link, resolved product preview,
   explicit `Fetch details`, populated card-name/set fields, required reusable
-  rarity control, and quantity. Quantity may exceed one, but every Copy created
-  here must share that exact TCGplayer product/printing.
+  rarity control, required Card edition defaulted to `1st Edition`, and quantity.
+  Quantity may exceed one, but every Copy created here must share that exact
+  TCGplayer product/printing and edition.
 - `Sealed Product`: required TCGplayer product link, resolved product preview,
   explicit `Fetch details`, Product name, required Product edition with only
   `1st Edition` and `Unlimited Edition`, and quantity. Product line, Set, and
@@ -226,7 +239,8 @@ Pack Opening remains three stages:
 - Every accepted pull creates the stated quantity of physical Copies tied to
   the Pack Opening record.
 - Every pull uses the same required TCGplayer URL, `Fetch details`, editable
-  populated metadata, required rarity, and quantity behavior as a Bulk card.
+  populated metadata, required edition defaulted to `1st Edition`, required
+  rarity, and quantity behavior as a Bulk card.
 
 ### P1.3-O3 Review and confirmation
 
@@ -265,21 +279,28 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
   for a TCGplayer link or recreate card metadata during a Sale.
 - Present Copies as selectable thumbnail cards in a responsive grid rather than
   a long row list. Each tile shows image/fallback, card name, rarity, set code,
-  condition, and a visible selected state using more than color alone.
+  edition, condition, and one visible selected state using more than color alone.
+- Single and Bulk use the same tile layout, filters, selection marker, counts,
+  and Review presentation. Single uses radio semantics internally and requires
+  one Copy; Bulk uses checkbox semantics and requires two. Inline text states
+  how many more Copies are required, and Continue remains disabled until that
+  minimum is met instead of showing an avoidable error after the click.
 - Search across card name, rarity, set name, set code, and condition. Provide an
   All rarities filter and a Selected only view. Selection survives search,
   filtering, and pagination.
 - Paginate the result grid so a large collection never becomes one unbounded
   scroll. Show result and selected counts, clear empty states, and Previous/Next
   controls with correct disabled semantics.
-- Warn when the selected Copies will reduce owned quantity below a Wishlist
-  Target's desired quantity.
+- When selected Copies reduce owned quantity below a target, show a neutral
+  `Library after this sale` explanation with owned-before, owned-after, and
+  wanted quantity. Do not style this consequence as a form error or use the
+  implementation phrase `reopens Wishlist`.
 
 ### P1.3-S4 Review and confirmation
 
 - Review is read-only and summarizes type, sale details, net proceeds, selected
-  card thumbnails, and every target-reopening consequence. Edit actions return
-  to the owning stage.
+  card thumbnails, and every plain-language Library-impact consequence. Edit
+  actions return to the owning stage.
 - Reaching Review never submits. `Confirm preview sale` is a distinct action
   with pending, success, and recoverable error feedback.
 
@@ -347,6 +368,7 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
 | P1.3f | done | Verification | Automated checks, supplied metadata fixtures, desktop walkthroughs, and 375px/focus/touch checks pass |
 | P1.3g | done | G1 form refinements | Sealed fields, shared source, dedicated Review, destructive toast, reducers, and responsive verification match this specification |
 | P1.3h | done | Sale rewrite | Four-stage Single/Bulk Sale, scalable thumbnail inventory browser, Review boundary, preview reducer behavior, and responsive verification match this specification |
+| P1.3i | done | Edition and Sale clarity | Required defaulted Card edition, edition-aware target matching, consistent Sale selection progress, and plain Library-impact wording match this specification |
 
 ## Review gate
 

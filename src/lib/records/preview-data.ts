@@ -48,6 +48,11 @@ function normalized(value: string) {
   return value.trim().toLocaleLowerCase("en-GB");
 }
 
+function normalizedEdition(value: string | null | undefined) {
+  const edition = normalized(value || "");
+  return edition === "unlimited" ? "unlimited edition" : edition;
+}
+
 function canonicalProductUrl(value: string | null | undefined) {
   if (!value) return "";
 
@@ -504,6 +509,7 @@ function findOrCreatePrinting(
   snapshot: RecordsSnapshot,
   input: {
     name: string;
+    edition?: string;
     rarity?: string;
     setName: string;
     setCode: string;
@@ -513,8 +519,12 @@ function findOrCreatePrinting(
 ) {
   const tcgplayerUrl = input.tcgplayerUrl?.trim() || null;
   const rarity = input.rarity?.trim() || "Unknown rarity";
+  const edition = input.edition?.trim() || "Unknown edition";
   let target = snapshot.targets.find(
-    (item) => normalized(item.name) === normalized(input.name) && normalized(item.rarity) === normalized(rarity),
+    (item) =>
+      normalized(item.name) === normalized(input.name) &&
+      normalized(item.rarity) === normalized(rarity) &&
+      normalizedEdition(item.edition) === normalizedEdition(edition),
   );
 
   if (!target) {
@@ -522,7 +532,7 @@ function findOrCreatePrinting(
       id: previewId("target"),
       name: input.name,
       rarity,
-      edition: "Unknown edition",
+      edition,
       desiredQuantity: 1,
       imageUrl: input.imageUrl || null,
       tcgplayerUrl,
@@ -562,6 +572,7 @@ function addCopies(
   snapshot: RecordsSnapshot,
   input: {
     name: string;
+    edition?: string;
     rarity?: string;
     setName: string;
     setCode: string;
@@ -600,7 +611,10 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
   const addAttention = (item: ProductIdentityInput, label: string) => {
     if (!item.metadataNeedsAttention) return;
     const target = next.targets.find(
-      (candidate) => normalized(candidate.name) === normalized(item.name) && normalized(candidate.rarity) === normalized(item.rarity),
+      (candidate) =>
+        normalized(candidate.name) === normalized(item.name) &&
+        normalized(candidate.rarity) === normalized(item.rarity) &&
+        normalizedEdition(candidate.edition) === normalizedEdition(item.edition),
     );
     next.attention.push({
       id: previewId("attention"),
@@ -614,7 +628,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
   if (input.kind === "card") {
     const card = input.card;
     const ids = addCopies(next, card, id);
-    lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · ${card.rarity}`));
+    lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · ${card.edition} · ${card.rarity}`));
     addAttention(card, card.name);
     title = `Purchased ${card.name}`;
   } else if (input.kind === "sealed") {
@@ -652,7 +666,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
     lines.push(recordLine("bulk", lotName, 1, [bulkId], null, input.moreToItemize ? "Partially itemized" : "Fully itemized"));
     for (const card of input.cards) {
       const ids = addCopies(next, card, id);
-      lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · from ${lotName}`));
+      lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · ${card.edition} · from ${lotName}`));
       addAttention(card, card.name);
     }
     title = `Purchased ${lotName.toLowerCase()}`;
@@ -739,7 +753,10 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
     const ids = addCopies(next, pull, id);
     if (pull.metadataNeedsAttention) {
       const target = next.targets.find(
-        (candidate) => normalized(candidate.name) === normalized(pull.name) && normalized(candidate.rarity) === normalized(pull.rarity),
+        (candidate) =>
+          normalized(candidate.name) === normalized(pull.name) &&
+          normalized(candidate.rarity) === normalized(pull.rarity) &&
+          normalizedEdition(candidate.edition) === normalizedEdition(pull.edition),
       );
       next.attention.push({
         id: previewId("attention"),
@@ -749,7 +766,7 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
         field: "tcgplayer",
       });
     }
-    return recordLine("card", pull.name, pull.quantity, ids, null, `${pull.setCode || "Unknown code"} · ${pull.rarity} · pulled`);
+    return recordLine("card", pull.name, pull.quantity, ids, null, `${pull.setCode || "Unknown code"} · ${pull.edition} · ${pull.rarity} · pulled`);
   });
   sealed.status = "opened";
   sealed.openedRecordId = id;

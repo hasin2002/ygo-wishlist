@@ -28,12 +28,15 @@ export type ProductIdentityDraft = {
   editedFields: string[];
 };
 
-export function blankProductIdentity(name = ""): ProductIdentityDraft {
+export function blankProductIdentity(
+  name = "",
+  edition: ProductEdition | "" = "",
+): ProductIdentityDraft {
   return {
     tcgplayerUrl: "",
     name,
     imageUrl: null,
-    edition: "",
+    edition,
     rarity: "",
     setName: "",
     setCode: "",
@@ -94,7 +97,7 @@ export function ProductIdentityEditor({
     const requestedUrl = value.tcgplayerUrl.trim();
     const requestValue: ProductIdentityDraft = replacingProduct
       ? {
-          ...blankProductIdentity(),
+          ...blankProductIdentity("", kind === "card" ? "1st Edition" : ""),
           tcgplayerUrl: requestedUrl,
           fetchAttempted: true,
         }
@@ -158,14 +161,16 @@ export function ProductIdentityEditor({
     setFetchError(null);
     const missingRequired =
       !metadata.title ||
-      (kind === "card" && !metadata.rarity) ||
+      (kind === "card" && (!metadata.rarity || !pendingValue.edition)) ||
       (kind === "sealed" && !metadata.edition);
     const incomplete = missingRequired || !metadata.imageUrl || (kind === "card" && (!metadata.setName || !metadata.setCode));
     onChange({
       ...pendingValue,
       name: metadata.title || pendingValue.name,
       imageUrl: metadata.imageUrl || pendingValue.imageUrl,
-      edition: kind === "sealed" ? metadata.edition || pendingValue.edition : "",
+      edition: kind === "sealed"
+        ? metadata.edition || pendingValue.edition
+        : pendingValue.edition || "1st Edition",
       rarity: kind === "card" ? metadata.rarity || pendingValue.rarity : "",
       setName: kind === "card" ? metadata.setName || pendingValue.setName : "",
       setCode: kind === "card" ? metadata.setCode || pendingValue.setCode : "",
@@ -280,6 +285,21 @@ export function ProductIdentityEditor({
             required
             value={value.rarity}
           />
+        ) : null}
+        {kind === "card" ? (
+          <label>
+            <span className="text-sm font-bold text-zinc-700">Card edition <span className="text-rose-700">*</span></span>
+            <select
+              className={fieldClass}
+              onChange={(event) => updateField("edition", event.target.value)}
+              required
+              value={value.edition}
+            >
+              <option value="1st Edition">1st Edition</option>
+              <option value="Unlimited Edition">Unlimited Edition</option>
+            </select>
+            <span className="mt-1 block text-xs font-medium text-zinc-500">Defaults to 1st Edition. Change it when the physical card says Unlimited Edition.</span>
+          </label>
         ) : null}
         {kind === "card" ? (
           <>

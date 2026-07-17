@@ -81,6 +81,9 @@ Its open decisions must be closed before either flow is rewritten.
 - Bulk Lot Purchase and Pack Opening reuse one progressive Card Contents Editor;
   it repeats cards, not purchase item types, and avoids displaying every card's
   fields simultaneously.
+- Every card added through Single Card Purchase, Bulk Lot contents, or Pack
+  Opening pulls requires Card edition. New card rows default to `1st Edition`;
+  the user may change the visible field to `Unlimited Edition` before Review.
 - A Bulk Purchase requires at least one identified card and records whether more
   cards remain. Partial lots can be updated/itemized later without new spend;
   dependency rules prevent corrections that would contradict later history.
@@ -96,9 +99,12 @@ Its open decisions must be closed before either flow is rewritten.
 - Sale uses four stages: sale type, sale details, cards sold, and Review. Single
   selects exactly one available physical Copy; Bulk selects two or more tracked
   Copies within one Sale record. This does not sell an unitemized Bulk Lot.
-- Sale card selection uses a paginated thumbnail grid with search, rarity
-  filtering, a selected-only view, persistent selection across filters, and a
-  clear target-reopening warning. It selects existing Copy IDs and never asks
+- Sale card selection uses the same paginated thumbnail grid and selection
+  feedback for Single and Bulk, with search, rarity filtering, a selected-only
+  view, persistent selection across filters, and inline progress toward the
+  mode's required Copy count. A neutral Library-impact explanation replaces
+  target-reopening/error language and states the before/after owned and wanted
+  quantities in plain language. Sale selects existing Copy IDs and never asks
   for a new TCGplayer link.
 - Entering Sale Review never creates a record; a separate confirmation records
   net proceeds and marks the selected Copies sold.
@@ -212,3 +218,4 @@ Review complete real-data behavior before deployment or landing on `main`.
 | 2026-07-17 | Sealed identity exposed product line/set and product code/edition; Opening exposed inventory-provenance choices and matching units; validation used page-level messages | Sealed identity shows Product name plus `1st Edition`/`Unlimited Edition`; Purchase and Opening share seller/source including Gift; inventory matching is automatic and hidden; errors use destructive toasts; Review is a dedicated read-only confirmation state | G1 feedback showed the prior labels and provenance mechanics were implementation language rather than a natural manual-entry experience | P1.3d, P1.3e, P1.3f, P1.3g |
 | 2026-07-17 | Re-fetch protection treated same-link edits and a changed product link alike; printing facts depended on slug/YGOPRODeck matching | Same-link re-fetch still protects manual edits, while fetching a changed link first clears all prior derived fields; exact unauthenticated marketplace product details supply rarity/set code before the existing fallbacks | A changed link was retaining prior card values, and YGOPRODeck omits valid marketplace printings such as GBI-001 | P1.3, P1.5, Phase 2 resolver contract |
 | 2026-07-17 | Sale was a two-step unfiltered text-row list with unrestricted multi-selection and submission from its final editing page | Four-stage Single/Bulk card Sale with details before inventory selection, paginated searchable/filterable thumbnail cards, read-only Review, and explicit confirmation | G1 feedback requires scalable discovery and a Purchase-like flow while continuing to operate on already-tracked Copies | P1.3, P1.5 |
+| 2026-07-17 | Card edition was omitted for Single/Bulk/Pull cards; Sale displayed a target-reopening warning that looked like an unexplained error | Require visible Card edition defaulted to `1st Edition` for every acquired card; use one consistent Single/Bulk selection surface with inline minimum progress and a neutral plain-language Library-impact summary | Edition is part of target identity, while implementation terms such as “reopens Wishlist” do not explain the real effect to the user | P1.3, P1.5, preview target matching |

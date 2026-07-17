@@ -118,7 +118,7 @@ const purchaseKindOptions = [
 type SealedDraft = ProductIdentityDraft & { quantity: number };
 
 type PurchaseDraft = {
-  version: 3;
+  version: 4;
   kind: InventoryKind | null;
   date: string;
   sourceOption: SourceOption;
@@ -137,7 +137,7 @@ type PurchaseDraft = {
 
 function purchaseDraft(prefilledName: string): PurchaseDraft {
   return {
-    version: 3,
+    version: 4,
     kind: prefilledName ? "card" : null,
     date: today(),
     sourceOption: "ebay",
@@ -183,6 +183,7 @@ function productError(value: ProductIdentityDraft, kind: "card" | "sealed") {
   if (value.fetchStatus === "stale") return "The TCGplayer link changed. Fetch the product details again.";
   if (value.fetchStatus === "fetching") return "Wait for the product details to finish fetching.";
   if (!value.name.trim()) return `Add the ${kind === "card" ? "card" : "product"} name.`;
+  if (kind === "card" && !value.edition) return "Choose the card edition.";
   if (kind === "card" && !value.rarity.trim()) return "Choose the card rarity.";
   if (kind === "sealed" && !value.edition) return "Choose the product edition.";
   return null;
@@ -191,7 +192,7 @@ function productError(value: ProductIdentityDraft, kind: "card" | "sealed") {
 function ProductReview({ item, kind = "card", quantity }: { item: ProductIdentityDraft; kind?: "card" | "sealed"; quantity: number }) {
   const detail = kind === "sealed"
     ? item.edition || "Edition missing"
-    : `${item.rarity ? `${item.rarity} · ` : ""}${item.setCode || item.setName || "Product details incomplete"}`;
+    : `${item.edition || "Edition missing"} · ${item.rarity || "Rarity missing"} · ${item.setCode || item.setName || "Printing details incomplete"}`;
 
   return (
     <div className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-white p-3">
@@ -213,8 +214,8 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
   const searchParams = useSearchParams();
   const prefilledName = searchParams.get("cardName") ?? "";
   const stored = source.drafts.purchase as Partial<PurchaseDraft> | undefined;
-  const legacyDraftReset = Boolean(stored && stored.version !== 3);
-  const [draft, setDraft] = useState<PurchaseDraft>(() => stored?.version === 3 ? stored as PurchaseDraft : purchaseDraft(prefilledName));
+  const legacyDraftReset = Boolean(stored && stored.version !== 4);
+  const [draft, setDraft] = useState<PurchaseDraft>(() => stored?.version === 4 ? stored as PurchaseDraft : purchaseDraft(prefilledName));
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -295,7 +296,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
     <form className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
       <WizardProgress labels={["Item type", "Purchase", "Item details", "Review"]} step={step} />
-      {legacyDraftReset ? <PreviewNotice>The earlier purchase draft used the replaced mixed-item format, so only that draft was reset.</PreviewNotice> : null}
+      {legacyDraftReset ? <PreviewNotice>Your earlier purchase draft was reset because acquired cards now require an edition.</PreviewNotice> : null}
 
       {step === 1 ? <StepPanel step={step}><FormSection description="Choose one acquisition kind. Bulk can contain several identified cards, but the Purchase itself stays one lot." number={1} title="What did you buy?">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -344,7 +345,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
 }
 
 type OpeningDraft = {
-  version: 3;
+  version: 4;
   date: string;
   notes: string;
   product: ProductIdentityDraft;
@@ -370,9 +371,9 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
   const requested = searchParams.get("sealedId");
   const requestedUnit = source.snapshot.sealedUnits.find((unit) => unit.id === requested && unit.status === "sealed");
   const stored = source.drafts["pack-opening"] as Partial<OpeningDraft> | undefined;
-  const legacyDraftReset = Boolean(stored && stored.version !== 3);
-  const [draft, setDraft] = useState<OpeningDraft>(() => stored?.version === 3 ? stored as OpeningDraft : {
-    version: 3,
+  const legacyDraftReset = Boolean(stored && stored.version !== 4);
+  const [draft, setDraft] = useState<OpeningDraft>(() => stored?.version === 4 ? stored as OpeningDraft : {
+    version: 4,
     date: today(),
     notes: "",
     product: {
@@ -454,7 +455,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
     <form className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
       <WizardProgress labels={["Product", "Pulled cards", "Review"]} step={step} />
-      {legacyDraftReset ? <PreviewNotice>The earlier opening draft used the replaced product-selection format, so only that draft was reset.</PreviewNotice> : null}
+      {legacyDraftReset ? <PreviewNotice>Your earlier opening draft was reset because pulled cards now require an edition.</PreviewNotice> : null}
 
       {step === 1 ? <StepPanel step={step}><FormSection description="Fetch the sealed product details, then record when it was opened and where it came from." number={1} title="What did you open?">
         <ProductIdentityEditor kind="sealed" onChange={updateOpeningProduct} value={draft.product} />

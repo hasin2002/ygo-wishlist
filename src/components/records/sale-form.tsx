@@ -1,13 +1,15 @@
 "use client";
 
 import {
-  AlertTriangle,
   Boxes,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CreditCard,
+  Info,
   Pencil,
+  Plus,
   Search,
 } from "lucide-react";
 import Image from "next/image";
@@ -53,6 +55,12 @@ type AvailableCopy = {
   imageUrl: string | null;
 };
 
+type LibraryImpact = {
+  after: number;
+  before: number;
+  target: WishlistTarget;
+};
+
 function newSaleDraft(): SaleDraft {
   return {
     version: 2,
@@ -86,9 +94,29 @@ function CopyThumbnail({ eager = false, item }: { eager?: boolean; item: Availab
       <div className="p-3">
         <p className="line-clamp-2 min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</p>
         <p className="mt-1 text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</p>
-        <p className="mt-1 text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.copy.condition}</p>
+        <p className="mt-1 text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.target.edition || "Unknown edition"} · {item.copy.condition}</p>
       </div>
     </div>
+  );
+}
+
+function LibraryImpactNotice({ impacts }: { impacts: LibraryImpact[] }) {
+  if (!impacts.length) return null;
+
+  return (
+    <aside className="mt-4 flex items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+      <Info className="mt-0.5 size-5 shrink-0" />
+      <div>
+        <strong className="font-black">Library after this sale</strong>
+        <ul className="mt-1 grid gap-1 font-medium leading-5">
+          {impacts.map(({ after, before, target }) => (
+            <li key={target.id}>
+              {target.name}: you currently own {before}. After this sale you will own {after}. You are tracking {target.desiredQuantity} wanted {target.desiredQuantity === 1 ? "copy" : "copies"}, so it will appear in Wants.
+            </li>
+          ))}
+        </ul>
+      </div>
+    </aside>
   );
 }
 
@@ -137,6 +165,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       return [
         item.target.name,
         item.target.rarity,
+        item.target.edition,
         item.printing.setName,
         item.printing.setCode,
         item.copy.condition,
@@ -147,15 +176,18 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   const pageCount = Math.max(1, Math.ceil(filteredCopies.length / salePageSize));
   const visibleCopies = filteredCopies.slice((page - 1) * salePageSize, page * salePageSize);
 
-  const reopenTargets = useMemo(() => source.snapshot.targets.filter((target) => {
+  const libraryImpacts = useMemo<LibraryImpact[]>(() => source.snapshot.targets.flatMap((target) => {
     const printingIds = source.snapshot.printings
       .filter((printing) => printing.targetId === target.id)
       .map((printing) => printing.id);
-    const owned = source.snapshot.copies.filter(
+    const before = source.snapshot.copies.filter(
       (copy) => printingIds.includes(copy.printingId) && copy.status === "available",
     ).length;
     const selected = selectedCopies.filter((item) => item.target.id === target.id).length;
-    return selected > 0 && owned >= target.desiredQuantity && owned - selected < target.desiredQuantity;
+    const after = before - selected;
+    return selected > 0 && before >= target.desiredQuantity && after < target.desiredQuantity
+      ? [{ after, before, target }]
+      : [];
   }), [selectedCopies, source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
 
   useEffect(() => source.setDraft("sale", draft), [draft, source]);
@@ -220,6 +252,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   }
 
   function toggleCopy(copyId: string, checked: boolean) {
+    setError(null);
     setDraft((current) => ({
       ...current,
       copyIds: checked
@@ -238,6 +271,9 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   }
 
   const saleLabel = draft.kind === "single" ? "Single card" : "Bulk cards";
+  const requiredCopies = draft.kind === "single" ? 1 : 2;
+  const remainingCopies = Math.max(0, requiredCopies - draft.copyIds.length);
+  const selectionComplete = draft.kind !== null && remainingCopies === 0;
   const resultStart = filteredCopies.length ? (page - 1) * salePageSize + 1 : 0;
   const resultEnd = Math.min(page * salePageSize, filteredCopies.length);
 
@@ -250,14 +286,14 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       {step === 1 ? (
         <StepPanel step={step}>
           <FormSection
-            description="Choose whether this Sale contains one tracked card Copy or several tracked Copies sold together."
+            description="Choose whether this sale contains one tracked card or several cards sold together."
             number={1}
             title="What kind of sale is this?"
           >
             <div className="grid gap-3 sm:grid-cols-2">
               {([
-                { kind: "single" as const, label: "Single card", description: "Sell exactly one physical Copy already in your Inventory.", icon: CreditCard },
-                { kind: "bulk" as const, label: "Bulk cards", description: "Sell two or more tracked card Copies in one transaction.", icon: Boxes },
+                { kind: "single" as const, label: "Single card", description: "Sell exactly one physical copy already in your Inventory.", icon: CreditCard },
+                { kind: "bulk" as const, label: "Bulk cards", description: "Sell two or more tracked card copies in one transaction.", icon: Boxes },
               ]).map((option) => {
                 const Icon = option.icon;
                 const selected = draft.kind === option.kind;
@@ -320,10 +356,28 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       {step === 3 ? (
         <StepPanel step={step}>
           <FormSection
-            description={draft.kind === "single" ? "Choose the exact physical Copy sold." : "Choose every tracked physical Copy included in this Sale."}
+            description="Search your available Inventory and select the exact physical copies included in this transaction."
             number={3}
             title="Cards sold"
           >
+            <div className="mb-4 flex flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-zinc-950 text-white">
+                  {draft.kind === "single" ? <CreditCard className="size-5" /> : <Boxes className="size-5" />}
+                </span>
+                <div>
+                  <strong className="block">{saleLabel} sale</strong>
+                  <span className="mt-0.5 block text-sm font-medium text-zinc-500">
+                    {draft.kind === "single" ? "Select exactly one card copy." : "Select at least two card copies sold together."}
+                  </span>
+                </div>
+              </div>
+              <span className={`inline-flex min-h-9 items-center gap-2 self-start rounded-full px-3 text-sm font-bold sm:self-auto ${selectionComplete ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
+                {selectionComplete ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
+                {selectionComplete ? "Ready to continue" : `${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} required`}
+              </span>
+            </div>
+
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
               <label>
                 <span className="text-sm font-bold text-zinc-700">Search cards</span>
@@ -332,7 +386,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                   <input
                     className={`${fieldClass} mt-0 pl-9`}
                     onChange={(event) => { setQuery(event.target.value); setPage(1); }}
-                    placeholder="Name, set, code, rarity, condition"
+                    placeholder="Name, set, code, edition, rarity, condition"
                     type="search"
                     value={query}
                   />
@@ -352,7 +406,12 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
             </div>
 
             <div className="mt-4 flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <strong>{draft.copyIds.length} {draft.copyIds.length === 1 ? "copy" : "copies"} selected</strong>
+              <div>
+                <strong>{draft.copyIds.length} {draft.copyIds.length === 1 ? "copy" : "copies"} selected</strong>
+                <span className="mt-0.5 block text-sm font-medium text-zinc-500">
+                  {selectionComplete ? "Selection complete" : draft.kind === "single" ? "Choose one copy to continue" : `Choose ${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} to continue`}
+                </span>
+              </div>
               <span className="text-sm font-medium text-zinc-500">Showing {resultStart}–{resultEnd} of {filteredCopies.length}</span>
             </div>
 
@@ -371,7 +430,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                             alt=""
                             className="object-contain p-2"
                             fill
-                            loading={index === 0 ? "eager" : "lazy"}
+                            loading={index < 4 ? "eager" : "lazy"}
                             sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
                             src={`/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}`}
                             unoptimized
@@ -382,21 +441,25 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                         <input
                           aria-label={`Select ${item.target.name}, ${item.printing.setCode || "unknown set"}, copy ${item.copy.id.slice(-6)}`}
                           checked={selected}
-                          className="absolute right-3 top-3 z-10 size-5 accent-[#8a1f2d]"
+                          className="sr-only"
                           name={draft.kind === "single" ? "sale-copy" : undefined}
                           onChange={(event) => toggleCopy(item.copy.id, event.target.checked)}
                           type={draft.kind === "single" ? "radio" : "checkbox"}
                         />
+                        <span aria-hidden="true" className={`absolute right-2 top-2 z-10 grid size-9 place-items-center rounded-full border shadow-sm transition ${selected ? "border-[#8a1f2d] bg-[#8a1f2d] text-white" : "border-zinc-300 bg-white text-zinc-600 group-hover:border-zinc-500"}`}>
+                          {selected ? <Check className="size-4" /> : <Plus className="size-4" />}
+                        </span>
                         {selected ? (
-                          <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-[#8a1f2d] px-2 py-1 text-[11px] font-black text-white shadow-sm">
-                            <Check className="size-3" /> Selected
+                          <span className="absolute left-2 top-2 z-10 inline-flex items-center rounded-full bg-[#8a1f2d] px-2 py-1 text-[11px] font-black text-white shadow-sm">
+                            Selected
                           </span>
                         ) : null}
                       </div>
                       <span className="block p-3">
                         <span className="line-clamp-2 block min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</span>
                         <span className="mt-1 block text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</span>
-                        <span className="mt-1 block text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.copy.condition}</span>
+                        <span className="mt-1 block text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.target.edition || "Unknown edition"}</span>
+                        <span className="mt-1 block text-xs font-medium text-zinc-500">{item.copy.condition}</span>
                         <span className="mt-1 block text-[11px] font-medium text-zinc-400">Copy {item.copy.id.slice(-6)}</span>
                       </span>
                     </label>
@@ -419,12 +482,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
               </nav>
             ) : null}
 
-            {reopenTargets.length ? (
-              <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-900">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                <span>This Sale reopens {reopenTargets.map((target) => target.name).join(", ")} on your Wishlist.</span>
-              </div>
-            ) : null}
+            <LibraryImpactNotice impacts={libraryImpacts} />
           </FormSection>
         </StepPanel>
       ) : null}
@@ -434,7 +492,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
           <div className="grid gap-4">
             <PreviewNotice>This is a read-only review. Nothing has been saved; only the confirmation button below creates the preview Sale.</PreviewNotice>
             <FormSection
-              description="Check the transaction and every selected physical Copy before confirming."
+              description="Check the transaction and every selected physical copy before confirming."
               number={4}
               title="Review sale"
             >
@@ -450,20 +508,15 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
               <div className="mt-5 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="font-black">Cards sold</h3>
-                  <p className="mt-1 text-sm font-medium text-zinc-500">{selectedCopies.length} physical {selectedCopies.length === 1 ? "Copy" : "Copies"}</p>
+                  <p className="mt-1 text-sm font-medium text-zinc-500">{selectedCopies.length} physical {selectedCopies.length === 1 ? "copy" : "copies"}</p>
                 </div>
                 <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-                {selectedCopies.map((item, index) => <CopyThumbnail eager={index === 0} item={item} key={item.copy.id} />)}
+                {selectedCopies.map((item, index) => <CopyThumbnail eager={index < 4} item={item} key={item.copy.id} />)}
               </div>
 
-              {reopenTargets.length ? (
-                <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-900">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                  <span>This Sale reopens {reopenTargets.map((target) => target.name).join(", ")} on your Wishlist.</span>
-                </div>
-              ) : null}
+              <LibraryImpactNotice impacts={libraryImpacts} />
 
               <div className="mt-4 rounded-lg border border-zinc-200 p-3">
                 <span className="text-xs font-bold uppercase text-zinc-500">Notes</span>
@@ -471,7 +524,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
               </div>
               <div className="mt-4 rounded-lg border border-[#8a1f2d]/30 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-950">
                 <strong className="block font-black">Ready to record?</strong>
-                <p className="mt-1">Confirm only after the proceeds and selected Copies match the completed Sale.</p>
+                <p className="mt-1">Confirm only after the proceeds and selected copies match the completed sale.</p>
               </div>
             </FormSection>
           </div>
@@ -483,6 +536,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
         onBack={() => { setError(null); setStep((current) => Math.max(1, current - 1)); }}
         onConfirm={submit}
         onNext={nextStep}
+        nextDisabled={step === 3 && !selectionComplete}
         pending={pending}
         step={step}
         totalSteps={4}
