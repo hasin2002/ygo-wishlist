@@ -16,12 +16,16 @@ export type LinkMetadata = {
   imageUrl?: string;
   priceText?: string;
   rarity?: string;
+  setName?: string;
+  setCode?: string;
   cardType?: string;
   source: LinkSource;
+  resolution?: "page" | "fallback";
 };
 
 type YgoProDeckCard = {
   card_sets?: {
+    set_code?: string;
     set_name: string;
     set_rarity?: string;
   }[];
@@ -135,6 +139,23 @@ function titleCaseFromSlug(slug: string) {
     .replace(/\bQcsr\b/g, "QCSR");
 }
 
+function titleFromUnmatchedTcgplayerSlug(slug: string) {
+  const tokens = slug.replace(/^yugioh-/, "").split("-").filter(Boolean);
+
+  for (let length = Math.floor(tokens.length / 2); length >= 1; length -= 1) {
+    for (let start = 0; start + (length * 2) <= tokens.length; start += 1) {
+      const first = tokens.slice(start, start + length).join("-");
+      const second = tokens.slice(start + length, start + (length * 2)).join("-");
+
+      if (first === second) {
+        return titleCaseFromSlug(tokens.slice(start + length).join("-"));
+      }
+    }
+  }
+
+  return titleCaseFromSlug(tokens.join("-"));
+}
+
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -142,6 +163,39 @@ function slugify(value: string) {
     .replace(/@/g, " ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function containsSlug(candidate: string, value: string) {
+  return `-${candidate}-`.includes(`-${value}-`);
+}
+
+function contextAroundSlug(candidate: string, value: string) {
+  const paddedCandidate = `-${candidate}-`;
+  const paddedValue = `-${value}-`;
+  const matchIndex = paddedCandidate.indexOf(paddedValue);
+
+  if (matchIndex < 0) {
+    return null;
+  }
+
+  return {
+    after: paddedCandidate
+      .slice(matchIndex + paddedValue.length)
+      .replace(/^-+|-+$/g, ""),
+    before: paddedCandidate.slice(0, matchIndex).replace(/^-+|-+$/g, ""),
+  };
+}
+
+function titleForMatchedPrinting(
+  cardName: string,
+  setCode: string | undefined,
+) {
+  const qualifierBySetCode: Record<string, string> = {
+    "FMR-001": "Forbidden Memories",
+  };
+  const qualifier = setCode ? qualifierBySetCode[setCode] : undefined;
+
+  return qualifier ? `${cardName} (${qualifier})` : cardName;
 }
 
 function tcgplayerProductDetails(url: string) {
@@ -193,7 +247,7 @@ async function ygoCards() {
         "user-agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
       },
-      next: { revalidate: 86400 },
+      cache: "no-store",
     },
   )
     .then(async (response) => {
@@ -238,25 +292,33 @@ async function cardDetailsFromTcgplayerSlug(productSlug: string | undefined) {
   const candidateSlug = slugWithoutRarity.replace(/^yugioh-/, "");
   const cards = await ygoCards();
   const matchedCard = [...cards]
-    .sort((a, b) => b.name.length - a.name.length)
-    .find((card) => candidateSlug.endsWith(slugify(card.name)));
+    .sort((a, b) => slugify(b.name).length - slugify(a.name).length)
+    .find((card) => containsSlug(candidateSlug, slugify(card.name)));
 
   if (!matchedCard) {
-    return { title: titleCaseFromSlug(candidateSlug) };
+    return { title: titleFromUnmatchedTcgplayerSlug(candidateSlug) };
   }
 
   const cardSlug = slugify(matchedCard.name);
-  const setSlug = candidateSlug
-    .replace(new RegExp(`-?${cardSlug}$`), "")
-    .replace(/^-+|-+$/g, "");
-  const matchedSet = matchedCard.card_sets?.find(
-    (set) => slugify(set.set_name) === setSlug,
-  );
+  const cardContext = contextAroundSlug(candidateSlug, cardSlug);
+  const matchedSet = matchedCard.card_sets?.find((set) => {
+    const setSlug = slugify(set.set_name);
+
+    return (
+      setSlug === cardContext?.before ||
+      setSlug === cardContext?.after ||
+      Boolean(
+        cardContext?.after && containsSlug(setSlug, cardContext.after),
+      )
+    );
+  });
 
   return {
     cardType: matchedCard.type,
     rarity: matchedSet?.set_rarity,
-    title: matchedCard.name,
+    setCode: matchedSet?.set_code,
+    setName: matchedSet?.set_name,
+    title: titleForMatchedPrinting(matchedCard.name, matchedSet?.set_code),
   };
 }
 
@@ -271,6 +333,8 @@ async function tcgplayerMetadataFallback(url: string) {
       : undefined,
     cardType: details.cardType,
     rarity: parsedRarity?.rarity ?? details.rarity,
+    setCode: details.setCode,
+    setName: details.setName,
     title: details.title,
   };
 }
@@ -309,16 +373,27 @@ export async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
   const tcgplayerFallback =
     source === "tcgplayer" ? await tcgplayerMetadataFallback(parsedUrl) : null;
 
-  const response = await fetch(parsedUrl, {
-    headers: {
-      "accept-language": "en-GB,en;q=0.9",
-      "user-agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
-    },
-    next: { revalidate: 0 },
-  });
+  let response: Response;
+  try {
+    response = await fetch(parsedUrl, {
+      headers: {
+        "accept-language": "en-GB,en;q=0.9",
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+      },
+      next: { revalidate: 0 },
+    });
+  } catch (error) {
+    if (tcgplayerFallback) {
+      return { ...tcgplayerFallback, source, resolution: "fallback" };
+    }
+    throw error;
+  }
 
   if (!response.ok) {
+    if (tcgplayerFallback) {
+      return { ...tcgplayerFallback, source, resolution: "fallback" };
+    }
     throw new Error(`Could not fetch link details (${response.status}).`);
   }
 
@@ -335,11 +410,14 @@ export async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
     $('[itemprop="image"]').first().attr("src");
 
   return {
-    title: cleanTitle(rawTitle) ?? tcgplayerFallback?.title,
+    title: tcgplayerFallback?.title ?? cleanTitle(rawTitle),
     imageUrl: absoluteUrl(rawImage, parsedUrl) ?? tcgplayerFallback?.imageUrl,
     priceText: pickPrice($),
     cardType: tcgplayerFallback?.cardType,
     rarity: tcgplayerFallback?.rarity,
+    setCode: tcgplayerFallback?.setCode,
+    setName: tcgplayerFallback?.setName,
     source,
+    resolution: "page",
   };
 }

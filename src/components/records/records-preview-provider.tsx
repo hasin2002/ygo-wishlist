@@ -126,6 +126,49 @@ export function RecordsPreviewProvider({ children }: { children: ReactNode }) {
       : null,
     snapshot: snapshot ?? emptySnapshot,
     drafts,
+    resolveTcgplayerProduct: async (url) => {
+      try {
+        const response = await fetch("/api/records/metadata", {
+          body: JSON.stringify({ url }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        });
+        const payload = await response.json() as {
+          message?: string;
+          metadata?: {
+            title?: string;
+            imageUrl?: string;
+            rarity?: string;
+            setName?: string;
+            setCode?: string;
+            cardType?: string;
+            resolution?: "page" | "fallback";
+          };
+        };
+
+        if (!response.ok || !payload.metadata) {
+          return { ok: false, message: payload.message || "Details could not be fetched." } as const;
+        }
+
+        return {
+          ok: true,
+          metadata: {
+            title: payload.metadata.title || "",
+            imageUrl: payload.metadata.imageUrl || null,
+            rarity: payload.metadata.rarity || "",
+            setName: payload.metadata.setName || "",
+            setCode: payload.metadata.setCode || "",
+            cardType: payload.metadata.cardType || "",
+            resolution: payload.metadata.resolution || "fallback",
+          },
+        } as const;
+      } catch {
+        return {
+          ok: false,
+          message: "Details could not be fetched. Check your connection, then retry or enter them manually.",
+        } as const;
+      }
+    },
     createPurchase: (input) => withSnapshot((current) => applyPurchase(current, input)),
     createOpening: (input) => withSnapshot((current) => applyOpening(current, input)),
     createSale: (input) => withSnapshot((current) => applySale(current, input)),

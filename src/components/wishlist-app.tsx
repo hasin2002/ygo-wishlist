@@ -2,7 +2,6 @@
 
 import {
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -34,6 +33,7 @@ import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
 import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
+import { RarityCombobox } from "@/components/rarity-combobox";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
@@ -85,43 +85,6 @@ type EditForm = CardForm & {
 };
 
 const pageSize = 8;
-
-const rarities = [
-  "Common",
-  "Short Print",
-  "Super Short Print",
-  "Rare",
-  "Super Rare",
-  "Ultra Rare",
-  "Overframe Ultra Rare",
-  "Secret Rare",
-  "Ultimate Rare",
-  "Ghost Rare",
-  "Gold Rare",
-  "Gold Secret Rare",
-  "Premium Gold Rare",
-  "Platinum Rare",
-  "Platinum Secret Rare",
-  "Collector's Rare",
-  "Starlight Rare",
-  "Overframe Starlight Rare",
-  "Quarter Century Secret Rare",
-  "Prismatic Secret Rare",
-  "Parallel Rare",
-  "Duel Terminal Normal Parallel Rare",
-  "Duel Terminal Rare Parallel Rare",
-  "Duel Terminal Super Parallel Rare",
-  "Duel Terminal Ultra Parallel Rare",
-  "Duel Terminal Secret Parallel Rare",
-  "Mosaic Rare",
-  "Starfoil Rare",
-  "Shatterfoil Rare",
-  "Pharaoh's Rare",
-  "Millennium Rare",
-  "Extra Secret Rare",
-  "20th Secret Rare",
-  "10000 Secret Rare",
-];
 
 const filters: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -376,95 +339,6 @@ function ebaySearchUrl(card: Card) {
 
 function isTcgplayerUrl(url: string | null) {
   return Boolean(url?.toLowerCase().includes("tcgplayer.com"));
-}
-
-function RarityCombobox({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const visibleRarities = useMemo(() => {
-    const search = value.toLowerCase().trim();
-
-    if (!search) {
-      return rarities;
-    }
-
-    return rarities.filter((rarity) => rarity.toLowerCase().includes(search));
-  }, [value]);
-
-  useEffect(() => {
-    function onPointerDown(event: PointerEvent) {
-      if (!wrapperRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, []);
-
-  return (
-    <div className="relative" ref={wrapperRef}>
-      <label className="block">
-        <span className="text-sm font-medium text-zinc-700">Rarity</span>
-        <div className="relative mt-1">
-          <input
-            aria-controls="rarity-options"
-            aria-expanded={open}
-            aria-label="Rarity"
-            autoComplete="off"
-            className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 pr-9 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-            onChange={(event) => {
-              onChange(event.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => setOpen(true)}
-            placeholder="Search rarity"
-            role="combobox"
-            value={value}
-          />
-          <button
-            aria-label="Show rarities"
-            className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
-            onClick={() => setOpen((current) => !current)}
-            type="button"
-          >
-            <ChevronDown className="size-4" />
-          </button>
-        </div>
-      </label>
-
-      {open ? (
-        <div
-          className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-zinc-300 bg-white p-1 shadow-lg"
-          id="rarity-options"
-        >
-          {visibleRarities.length ? (
-            visibleRarities.map((rarity) => (
-              <button
-                className="block w-full rounded px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-950"
-                key={rarity}
-                onClick={() => {
-                  onChange(rarity);
-                  setOpen(false);
-                }}
-                type="button"
-              >
-                {rarity}
-              </button>
-            ))
-          ) : (
-            <p className="px-3 py-2 text-sm text-zinc-500">No rarity found</p>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function EditCardModal({

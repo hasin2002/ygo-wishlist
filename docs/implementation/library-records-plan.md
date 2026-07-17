@@ -58,22 +58,37 @@ separation decision in ADR 0001 are normative.
 
 ### P1.3 Entry workflows
 
+The detailed, authoritative field and interaction specification for Purchase and
+Pack Opening is [`library-records-entry-flows-subplan.md`](./library-records-entry-flows-subplan.md).
+Its open decisions must be closed before either flow is rewritten.
+
 - Global Add exposes Purchase, Pack opening, Sale, Adjustment, and Bulk
   itemization.
-- Purchase supports mixed lines (cards, sealed products, bulk lots, supplies),
-  one all-in amount, and optional allocations that never add cashflow.
-- Purchase uses four stages: purchase details, item-type choice, item details,
-  and review. Adding another item returns to the visual type choice so one
-  purchase can still mix singles, sealed products, bulk lots, and supplies.
+- Purchase uses four stages: item-type choice, purchase details, item details,
+  and review. One Purchase records one Single Card, one Sealed Product, one Bulk
+  Lot with card contents, or one Supply/Extra; it does not mix inventory kinds.
 - Purchase details include an optional source listing URL and a source selector.
   Choosing `Other` reveals a required free-text source name.
 - Item type is selected with labeled, icon-backed buttons rather than a compact
-  dropdown. Card and sealed item details accept an optional TCGplayer product
-  URL; a missing URL remains visible as incomplete metadata rather than blocking
-  manual entry.
+  dropdown. TCGplayer product URLs are the required primary identity field for
+  new cards and sealed products. A labeled `Fetch details` action shows an
+  accessible loading state and populates the visible name, image, set, rarity,
+  or product fields applicable to that item type. Populated fields remain
+  editable, manual corrections are marked, and re-fetch never overwrites a
+  correction without confirmation.
+- Bulk Lot Purchase and Pack Opening reuse one progressive Card Contents Editor;
+  it repeats cards, not purchase item types, and avoids displaying every card's
+  fields simultaneously.
+- A Bulk Purchase requires at least one identified card and records whether more
+  cards remain. Partial lots can be updated/itemized later without new spend;
+  dependency rules prevent corrections that would contradict later history.
 - Entering the Review stage never creates a record. Review shows the purchase
-  facts and every item, and creation requires a separate explicit confirmation.
-- Opening records sealed product opened and resulting pulled copies.
+  facts and selected acquisition, and creation requires a separate explicit
+  confirmation.
+- Opening is link-first, records the sealed product opened and resulting pulled
+  copies, and also requires an explicit confirmation from Review. It consumes a
+  matching unopened Sealed Unit or creates an explicit Gift/unknown-cost
+  Imported Acquisition before opening, so provenance is never orphaned.
 - Bulk itemization attaches discovered contents to an existing lot with zero new
   spend.
 - Sale selects available copy IDs and shows target reopening when owned quantity
@@ -121,8 +136,9 @@ or feedback and update this plan before Phase 2.
   proceeds; allocations are optional descriptions only.
 - Match targets on normalized Card Name + Rarity + Edition. Nest exact printings
   and copies.
-- Accept TCGplayer product URLs for new targets and physical cards without
-  requiring them during manual entry. Missing links remain attention items.
+- Require TCGplayer product URLs as the primary identity field for new physical
+  cards and sealed products in the covered entry flows. Legacy missing links
+  remain attention items.
   Reuse target metadata only when the set also matches.
 - Resolve printing metadata through the current link parser and YGOPRODeck set
   data without depending on unavailable TCGplayer credentials.
@@ -176,3 +192,7 @@ Review complete real-data behavior before deployment or landing on `main`.
 | 2026-07-16 | None | Initial approved specification recorded | Implementation start | None |
 | 2026-07-16 | Long entry pages with all sections visible | Progressive multi-step entry flows with subtle reduced-motion-safe transitions | User feedback: the forms felt potentially overwhelming | P1.3 |
 | 2026-07-17 | Purchase combined item entry and type selection in one dropdown-driven page; the future model required TCGplayer links | Four-stage repeatable type selection with visual buttons, optional listing/product URLs, controlled source choice, and a non-mutating review that requires explicit confirmation | G1 feedback showed that the scaffold did not yet communicate the purchase workflow or confirmation boundary clearly | P1.3, P1.5, Phase 2 URL rule |
+| 2026-07-17 | Purchase details preceded type; one Purchase could repeat and mix item kinds; product URLs were optional; Pack Opening manually selected/named products and its Review submitted without a clear confirmation boundary | Type-first, single-acquisition-kind Purchase; required link-first card/sealed identity; shared progressive card editor for Bulk and Opening; explicit confirmations for both flows | Detailed G1 field review clarified that product links should drive identity and that repeated rows represent cards within a lot/opening, not unrelated purchase kinds | P1.3, P1.5, Phase 2 input contracts |
+| 2026-07-17 | Link metadata resolved implicitly into summary-only derived facts; Bulk completion behavior was undecided | User-triggered `Fetch details` with loading/result states and populated form fields; Bulk requires at least one identified card, may remain partially itemized, and can be updated later without new spend | Explicit fetching makes the network action and result legible; partial itemization reflects real unsorted purchases without blocking later correction | P1.3, Phase 2 resolver and dependency contracts |
+| 2026-07-17 | Fetched metadata field editability was undecided | Auto-filled fields remain editable, manual corrections are marked, and re-fetch confirms before overwriting them | Metadata extraction can be incomplete or wrong; a required link must accelerate entry without trapping the user in incorrect data | P1.3 metadata UI and resolver state |
+| 2026-07-17 | Pack Opening required an existing sealed-unit selection before link resolution; remaining quantity, pull identity, notes, and resolver-failure details were undecided | Link-first match-or-explain opening provenance; same-printing multi-copy Single purchases; required link/rarity for every pull; notes before Review; recoverable unresolved metadata | Preserves inventory history without blocking gifts/old stock, keeps Review a confirmation surface, and prevents marketplace availability from making records impossible | P1.3 Purchase/Opening contracts and review UI |

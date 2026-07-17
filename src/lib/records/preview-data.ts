@@ -5,6 +5,7 @@ import type {
   DataSourceResult,
   OpeningInput,
   PreviewAttentionItem,
+  ProductIdentityInput,
   PurchaseInput,
   RecordEntry,
   RecordLine,
@@ -328,11 +329,13 @@ function seededSnapshot(): RecordsSnapshot {
       },
       {
         id: "sealed-preview-box",
-        name: "Battles of Legend: Monster Mayhem box",
+        name: "Spellcaster's Command Structure Deck — Unlimited Edition",
         quantity: 1,
         status: "sealed",
         acquiredRecordId: records[0].id,
         openedRecordId: null,
+        tcgplayerUrl: "https://www.tcgplayer.com/product/176852/yugioh-structure-deck-spellcasters-command-spellcasters-command-structure-deck-unlimited-edition",
+        imageUrl: "https://product-images.tcgplayer.com/fit-in/437x437/176852.jpg",
       },
     ],
     bulkLots: [
@@ -457,6 +460,7 @@ export function createPreviewSnapshot(legacyCards: LegacyCard[]): RecordsSnapsho
         source: "Legacy Library",
         listingUrl: null,
         amountPence: paidPence ?? 0,
+        amountKnown: paidPence !== null,
         notes: paidPence === null ? "Cost missing; review after migration." : "Imported from the current owned-card row.",
         lines: [
           {
@@ -486,19 +490,29 @@ function clone(snapshot: RecordsSnapshot) {
 
 function findOrCreatePrinting(
   snapshot: RecordsSnapshot,
-  input: { name: string; setName: string; setCode: string; tcgplayerUrl?: string },
+  input: {
+    name: string;
+    rarity?: string;
+    setName: string;
+    setCode: string;
+    tcgplayerUrl?: string;
+    imageUrl?: string | null;
+  },
 ) {
   const tcgplayerUrl = input.tcgplayerUrl?.trim() || null;
-  let target = snapshot.targets.find((item) => normalized(item.name) === normalized(input.name));
+  const rarity = input.rarity?.trim() || "Unknown rarity";
+  let target = snapshot.targets.find(
+    (item) => normalized(item.name) === normalized(input.name) && normalized(item.rarity) === normalized(rarity),
+  );
 
   if (!target) {
     target = {
       id: previewId("target"),
       name: input.name,
-      rarity: "Unknown rarity",
+      rarity,
       edition: "Unknown edition",
       desiredQuantity: 1,
-      imageUrl: null,
+      imageUrl: input.imageUrl || null,
       tcgplayerUrl,
       marketPricePence: null,
     };
@@ -506,9 +520,13 @@ function findOrCreatePrinting(
   } else if (tcgplayerUrl && !target.tcgplayerUrl) {
     target.tcgplayerUrl = tcgplayerUrl;
   }
+  if (input.imageUrl && !target.imageUrl) target.imageUrl = input.imageUrl;
 
   let printing = snapshot.printings.find(
-    (item) => item.targetId === target.id && normalized(item.setCode) === normalized(input.setCode || "Unknown code"),
+    (item) => item.targetId === target.id && (
+      (input.setCode && normalized(item.setCode) === normalized(input.setCode)) ||
+      (tcgplayerUrl && item.tcgplayerUrl === tcgplayerUrl)
+    ),
   );
 
   if (!printing) {
@@ -518,7 +536,7 @@ function findOrCreatePrinting(
       setName: input.setName || "Unknown set",
       setCode: input.setCode || "Unknown code",
       tcgplayerUrl: tcgplayerUrl || target.tcgplayerUrl,
-      imageUrl: target.imageUrl,
+      imageUrl: input.imageUrl || target.imageUrl,
     };
     snapshot.printings.push(printing);
   } else if (tcgplayerUrl && !printing.tcgplayerUrl) {
@@ -530,7 +548,15 @@ function findOrCreatePrinting(
 
 function addCopies(
   snapshot: RecordsSnapshot,
-  input: { name: string; setName: string; setCode: string; quantity: number; tcgplayerUrl?: string },
+  input: {
+    name: string;
+    rarity?: string;
+    setName: string;
+    setCode: string;
+    quantity: number;
+    tcgplayerUrl?: string;
+    imageUrl?: string | null;
+  },
   recordId: string,
 ) {
   const printing = findOrCreatePrinting(snapshot, input);
@@ -557,63 +583,81 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
   const next = clone(snapshot);
   const id = previewId("record");
   const lines: RecordLine[] = [];
+  let title = "Purchase";
 
-  for (const inputLine of input.lines) {
-    let entityIds: string[] = [];
-    let detail: string | null = null;
+  const addAttention = (item: ProductIdentityInput, label: string) => {
+    if (!item.metadataNeedsAttention) return;
+    const target = next.targets.find(
+      (candidate) => normalized(candidate.name) === normalized(item.name) && normalized(candidate.rarity) === normalized(item.rarity),
+    );
+    next.attention.push({
+      id: previewId("attention"),
+      targetId: target?.id ?? null,
+      label,
+      detail: "Some TCGplayer metadata was entered manually after details could not be fully resolved.",
+      field: "tcgplayer",
+    });
+  };
 
-    if (inputLine.kind === "card") {
-      entityIds = addCopies(
-        next,
-        {
-          name: inputLine.name,
-          quantity: inputLine.quantity,
-          setName: inputLine.setName || "Unknown set",
-          setCode: inputLine.setCode || "Unknown code",
-          tcgplayerUrl: inputLine.tcgplayerUrl,
-        },
-        id,
-      );
-      detail = `${inputLine.setCode || "Unknown code"} · physical ${inputLine.quantity === 1 ? "copy" : "copies"}`;
-    } else if (inputLine.kind === "sealed") {
+  if (input.kind === "card") {
+    const card = input.card;
+    const ids = addCopies(next, card, id);
+    lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · ${card.rarity}`));
+    addAttention(card, card.name);
+    title = `Purchased ${card.name}`;
+  } else if (input.kind === "sealed") {
+    const entityIds: string[] = [];
+    for (let index = 0; index < input.product.quantity; index += 1) {
       const sealedId = previewId("sealed");
-      entityIds = [sealedId];
+      entityIds.push(sealedId);
       next.sealedUnits.push({
         id: sealedId,
-        name: inputLine.name,
-        quantity: inputLine.quantity,
+        name: input.product.name,
+        quantity: 1,
+        tcgplayerUrl: input.product.tcgplayerUrl,
+        imageUrl: input.product.imageUrl,
         status: "sealed",
         acquiredRecordId: id,
         openedRecordId: null,
       });
-      detail = "Sealed product";
-    } else if (inputLine.kind === "bulk") {
-      const bulkId = previewId("bulk");
-      entityIds = [bulkId];
-      next.bulkLots.push({
-        id: bulkId,
-        name: inputLine.name,
-        estimatedQuantity: inputLine.estimatedQuantity ?? null,
-        itemizedQuantity: 0,
-        acquiredRecordId: id,
-        status: "open",
-      });
-      detail = inputLine.estimatedQuantity ? `About ${inputLine.estimatedQuantity} cards` : "Quantity not yet known";
-    } else {
-      const supplyId = previewId("supply");
-      entityIds = [supplyId];
-      next.supplies.push({
-        id: supplyId,
-        name: inputLine.name,
-        category: inputLine.category || "other",
-        quantity: inputLine.quantity,
-        acquiredRecordId: id,
-        status: "held",
-      });
-      detail = inputLine.category || "Other supply";
     }
-
-    lines.push(recordLine(inputLine.kind, inputLine.name, inputLine.quantity, entityIds, inputLine.allocationPence, detail));
+    lines.push(recordLine("sealed", input.product.name, input.product.quantity, entityIds, null, "Sealed product"));
+    addAttention(input.product, input.product.name);
+    title = `Purchased ${input.product.name}`;
+  } else if (input.kind === "bulk") {
+    const bulkId = previewId("bulk");
+    const copyCount = input.cards.reduce((sum, card) => sum + card.quantity, 0);
+    const lotName = `Bulk lot · ${input.cards.length} card ${input.cards.length === 1 ? "type" : "types"}`;
+    next.bulkLots.push({
+      id: bulkId,
+      name: lotName,
+      estimatedQuantity: null,
+      itemizedQuantity: copyCount,
+      acquiredRecordId: id,
+      status: input.moreToItemize ? "open" : "itemized",
+    });
+    lines.push(recordLine("bulk", lotName, 1, [bulkId], null, input.moreToItemize ? "Partially itemized" : "Fully itemized"));
+    for (const card of input.cards) {
+      const ids = addCopies(next, card, id);
+      lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · from ${lotName}`));
+      addAttention(card, card.name);
+    }
+    title = `Purchased ${lotName.toLowerCase()}`;
+  } else {
+    const supplyId = previewId("supply");
+    const categoryLabel = input.category === "other"
+      ? input.otherName
+      : input.category.charAt(0).toUpperCase() + input.category.slice(1);
+    next.supplies.push({
+      id: supplyId,
+      name: categoryLabel,
+      category: input.category,
+      quantity: input.quantity,
+      acquiredRecordId: id,
+      status: "held",
+    });
+    lines.push(recordLine("supply", categoryLabel, input.quantity, [supplyId], null, "Supply or extra"));
+    title = `Purchased ${categoryLabel}`;
   }
 
   next.records.unshift({
@@ -621,7 +665,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
     type: "purchase",
     status: "active",
     date: input.date,
-    title: input.lines.length === 1 ? `Purchased ${input.lines[0].name}` : `Mixed purchase · ${input.lines.length} lines`,
+    title,
     source: input.source || "Manual entry",
     listingUrl: input.listingUrl.trim() || null,
     amountPence: input.totalPence,
@@ -636,13 +680,66 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
 
 export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
   const next = clone(snapshot);
-  const sealed = next.sealedUnits.find((item) => item.id === input.sealedUnitId && item.status === "sealed");
-  if (!sealed) return { next: snapshot, result: { ok: false, message: "Choose an unopened sealed product." } satisfies DataSourceResult };
+  let sealed = input.sealedUnitId
+    ? next.sealedUnits.find((item) => item.id === input.sealedUnitId && item.status === "sealed")
+    : undefined;
+
+  if (!sealed && input.provenance === "existing") {
+    return { next: snapshot, result: { ok: false, message: "Choose the matching unopened sealed product." } satisfies DataSourceResult };
+  }
+
+  if (!sealed) {
+    const importedId = previewId("record");
+    const sealedId = previewId("sealed");
+    const source = input.provenance === "gift"
+      ? "Gift"
+      : input.provenance === "old-collection"
+        ? "Old collection"
+        : input.provenanceOther || "Other unrecorded source";
+    sealed = {
+      id: sealedId,
+      name: input.product.name,
+      quantity: 1,
+      tcgplayerUrl: input.product.tcgplayerUrl,
+      imageUrl: input.product.imageUrl,
+      status: "sealed",
+      acquiredRecordId: importedId,
+      openedRecordId: null,
+    };
+    next.sealedUnits.push(sealed);
+    next.records.unshift({
+      id: importedId,
+      type: "imported-acquisition",
+      status: "active",
+      date: input.date,
+      title: `Imported ${input.product.name}`,
+      source,
+      listingUrl: null,
+      amountPence: 0,
+      amountKnown: input.provenance === "gift",
+      notes: input.provenance === "gift" ? "Gifted sealed product." : "Historical cost is unknown and excluded from known spend.",
+      lines: [recordLine("sealed", input.product.name, 1, [sealedId], null, input.provenance === "gift" ? "Gift · £0" : "Unknown historical cost")],
+      createdAt: nowIso(),
+      preview: true,
+    });
+  }
 
   const id = previewId("record");
   const lines = input.pulls.map((pull) => {
     const ids = addCopies(next, pull, id);
-    return recordLine("card", pull.name, pull.quantity, ids, null, `${pull.setCode || "Unknown code"} · pulled`);
+    if (pull.metadataNeedsAttention) {
+      const target = next.targets.find(
+        (candidate) => normalized(candidate.name) === normalized(pull.name) && normalized(candidate.rarity) === normalized(pull.rarity),
+      );
+      next.attention.push({
+        id: previewId("attention"),
+        targetId: target?.id ?? null,
+        label: pull.name,
+        detail: "Pulled-card metadata needs another fetch or later correction.",
+        field: "tcgplayer",
+      });
+    }
+    return recordLine("card", pull.name, pull.quantity, ids, null, `${pull.setCode || "Unknown code"} · ${pull.rarity} · pulled`);
   });
   sealed.status = "opened";
   sealed.openedRecordId = id;
@@ -651,7 +748,7 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
     type: "pack-opening",
     status: "active",
     date: input.date,
-    title: `Opened ${sealed.name}`,
+    title: `Opened ${input.product.name}`,
     source: "Collection",
     listingUrl: null,
     amountPence: 0,

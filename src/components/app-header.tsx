@@ -264,21 +264,22 @@ export function AppHeader({
   const localPreviewReview =
     process.env.NODE_ENV !== "production" &&
     process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
-  const isAuthenticated = Boolean(session) || localPreviewReview;
+  const hasSession = Boolean(session);
+  const isAuthenticated = hasSession || localPreviewReview;
   const isAdmin = session?.user.role === "admin";
   const visibleNavItems = isAuthenticated
     ? navItems
     : navItems.filter((item) => item.href === "/" || item.href === "/binder-v2");
   const utils = trpc.useUtils();
   const currentMonth = trpc.spend.currentMonth.useQuery(undefined, {
-    enabled: isAuthenticated,
+    enabled: hasSession,
     staleTime: 60_000,
   });
   const monthlyTotal = currentMonth.data?.total ?? 0;
   const monthlyLabel = currentMonth.data?.label ?? "This month";
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!hasSession) {
       return;
     }
 
@@ -321,7 +322,7 @@ export function AppHeader({
     const timeoutId = window.setTimeout(prefetchLikelyRoutes, 750);
 
     return () => window.clearTimeout(timeoutId);
-  }, [isAuthenticated, pathname, utils]);
+  }, [hasSession, pathname, utils]);
 
   async function signOut() {
     await authClient.signOut();

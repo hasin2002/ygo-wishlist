@@ -69,6 +69,7 @@ function formatDate(value: string) {
 }
 
 function recordAmount(record: RecordEntry) {
+  if (record.amountKnown === false) return "Cost unknown";
   if (record.type === "sale") return `+${formatCurrency(record.amountPence)}`;
   if (record.amountPence > 0) return `−${formatCurrency(record.amountPence)}`;
   return "No cashflow";
@@ -212,7 +213,9 @@ function RecordRow({
             className={`font-black tabular-nums ${
               record.type === "sale"
                 ? "text-emerald-700"
-                : record.amountPence > 0
+                : record.amountKnown === false
+                  ? "text-amber-700"
+                  : record.amountPence > 0
                   ? "text-zinc-950"
                   : "text-zinc-500"
             }`}
@@ -256,7 +259,7 @@ function Overview() {
   const { snapshot } = useRecordsDataSource();
   const activeRecords = snapshot.records.filter((record) => record.status === "active");
   const cost = activeRecords
-    .filter((record) => record.type === "purchase" || record.type === "imported-acquisition")
+    .filter((record) => (record.type === "purchase" || record.type === "imported-acquisition") && record.amountKnown !== false)
     .reduce((sum, record) => sum + record.amountPence, 0);
   const proceeds = activeRecords
     .filter((record) => record.type === "sale")

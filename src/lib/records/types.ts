@@ -67,6 +67,7 @@ export type RecordEntry = {
   source: string;
   listingUrl: string | null;
   amountPence: number;
+  amountKnown?: boolean;
   notes: string;
   lines: RecordLine[];
   createdAt: string;
@@ -77,6 +78,8 @@ export type SealedUnit = {
   id: string;
   name: string;
   quantity: number;
+  tcgplayerUrl?: string | null;
+  imageUrl?: string | null;
   status: "sealed" | "opened" | "void";
   acquiredRecordId: string;
   openedRecordId: string | null;
@@ -120,17 +123,29 @@ export type RecordsSnapshot = {
   attention: PreviewAttentionItem[];
 };
 
-export type PurchaseLineInput = {
-  id: string;
-  kind: InventoryKind;
+export type ResolvedProductMetadata = {
+  title: string;
+  imageUrl: string | null;
+  rarity: string;
+  setName: string;
+  setCode: string;
+  cardType: string;
+  resolution: "page" | "fallback";
+};
+
+export type ProductIdentityInput = {
+  tcgplayerUrl: string;
   name: string;
+  imageUrl: string | null;
+  rarity: string;
+  setName: string;
+  setCode: string;
+  metadataNeedsAttention: boolean;
+};
+
+export type CardContentsInput = ProductIdentityInput & {
+  id: string;
   quantity: number;
-  allocationPence: number | null;
-  setName?: string;
-  setCode?: string;
-  tcgplayerUrl?: string;
-  category?: SupplyCategory;
-  estimatedQuantity?: number | null;
 };
 
 export type PurchaseInput = {
@@ -139,20 +154,23 @@ export type PurchaseInput = {
   listingUrl: string;
   totalPence: number;
   notes: string;
-  lines: PurchaseLineInput[];
-};
+} & (
+  | { kind: "card"; card: CardContentsInput }
+  | { kind: "sealed"; product: ProductIdentityInput & { quantity: number } }
+  | { kind: "bulk"; cards: CardContentsInput[]; moreToItemize: boolean }
+  | { kind: "supply"; category: SupplyCategory; otherName: string; quantity: number }
+);
+
+export type OpeningProvenance = "existing" | "gift" | "old-collection" | "other";
 
 export type OpeningInput = {
   date: string;
-  sealedUnitId: string;
   notes: string;
-  pulls: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    setName: string;
-    setCode: string;
-  }>;
+  product: ProductIdentityInput;
+  sealedUnitId: string | null;
+  provenance: OpeningProvenance;
+  provenanceOther: string;
+  pulls: CardContentsInput[];
 };
 
 export type SaleInput = {
@@ -196,6 +214,9 @@ export type PreviewDrafts = Partial<
 >;
 
 export type DataSourceResult = { ok: true; id?: string } | { ok: false; message: string };
+export type ResolveProductResult =
+  | { ok: true; metadata: ResolvedProductMetadata }
+  | { ok: false; message: string };
 
 export type RecordsDataSource = {
   mode: "preview";
@@ -203,6 +224,7 @@ export type RecordsDataSource = {
   errorMessage: string | null;
   snapshot: RecordsSnapshot;
   drafts: PreviewDrafts;
+  resolveTcgplayerProduct: (url: string) => Promise<ResolveProductResult>;
   createPurchase: (input: PurchaseInput) => DataSourceResult;
   createOpening: (input: OpeningInput) => DataSourceResult;
   createSale: (input: SaleInput) => DataSourceResult;

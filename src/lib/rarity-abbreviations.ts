@@ -35,6 +35,8 @@ export const rarityAbbreviations = [
   { abbreviation: "10KSR", rarity: "10000 Secret Rare" },
 ] as const;
 
+export const rarityNames = rarityAbbreviations.map((entry) => entry.rarity);
+
 function normalizeRarity(value: string) {
   return value
     .toLowerCase()

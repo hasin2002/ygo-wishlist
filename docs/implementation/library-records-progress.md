@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | done | Entry workflows | Purchase is now a four-stage flow with visual item-type selection, source/listing metadata, optional TCGplayer links, a mixed-item loop, and explicit review confirmation; opening, sale, adjustment, and bulk-itemization remain walkable |
+| P1.3 | review | Entry workflows | Purchase and Pack Opening now match the approved linked subplan; implementation and primary verification are complete and awaiting G1 review |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | done | Scaffold verification | Revised purchase flow passed TypeScript, lint, production build, desktop and phone browser review, responsive overflow, reduced-motion, and explicit-confirmation checks |
+| P1.5 | done | Scaffold verification | Automated checks and desktop/375px walkthroughs pass for the revised Purchase and Pack Opening flows; subjective approval remains G1 |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -33,11 +33,15 @@ one implementation item may be `in_progress`.
 
 ## Current update
 
-- Completed: P1.1 through P1.5. Purchase now uses four progressive stages and
-  requires explicit confirmation from its Review page.
-- Current: G1 Scaffold review.
-- Next: review the remaining entry flows and the revised Purchase flow. Begin
-  Phase 2 only after explicit G1 approval.
+- Completed: P1.3a–P1.3e. Purchase is type-first and single-kind; Purchase and
+  Opening use an explicit link fetch with loading/recovery states; Bulk and
+  pulled cards share the same progressive Card Contents Editor; Review is
+  read-only and requires Confirm; unknown historical cost is distinct from £0.
+- Current: G1 scaffold review. Automated checks and the primary desktop/phone
+  walkthrough pass; the user can now judge terminology, density, transitions,
+  and overall feel before backend work.
+- Next: collect G1 feedback, reopen any affected checklist item if needed, and
+  begin Phase 2 only after explicit G1 approval.
 - Reviewable UI:
   - `/` — Library rename, target-only add language, global Add, per-card Record
     acquisition/View copies paths for signed-in users.
@@ -46,23 +50,35 @@ one implementation item may be `in_progress`.
   - `/records/history` — search/type/status filtering and dependency-aware
     void/restore.
   - `/records/inventory` — Cards (search and pagination), Sealed, Bulk, Supplies.
-  - `/records/new/purchase` — four-stage mixed-item purchase with optional listing
-    and TCGplayer links, controlled source entry, visual type selection, editable
-    review, and explicit confirmation.
-  - `/records/new/opening` — three-step sealed-product-to-pulls flow.
+  - `/records/new/purchase` — type-first Single Card, Sealed Product, Bulk Lot,
+    and Supply/Extra branches; purchase details; explicit metadata fetch;
+    read-only Review and Confirm.
+  - `/records/new/opening` — link-first opened product, existing-unit match or
+    Gift/Old collection/Other provenance, shared pulled-card editor, read-only
+    Review and Confirm.
   - `/records/new/sale` — two-step exact-copy sale with target-reopening warning.
   - `/records/new/adjustment` — reasoned add/remove correction flow.
   - `/records/new/bulk-itemization` — existing-lot itemization with explicit £0
     new spend.
   - `/spend` — intentionally preserved for comparison.
-- Checks: TypeScript, lint, production build, patch whitespace, desktop and phone
-  purchase walkthroughs, responsive overflow, reduced-motion behavior, explicit
-  confirmation, mixed-item looping, and development server cleanup pass.
-- Changed decisions: Purchase now has a dedicated visual item-type stage,
-  optional purchase and TCGplayer URLs, a controlled source field with custom
-  `Other`, and an explicit non-mutating Review/Confirm boundary. Optional links
-  replace the earlier future requirement for mandatory TCGplayer URLs.
-- Blockers: Phase 2 is intentionally blocked by G1 review.
+- Checks: TypeScript, lint, patch whitespace, and an isolated production build
+  pass. Browser walkthroughs covered Purchase Other-source/listing input,
+  sealed-product fetch/loading, Opening inventory match, pulled-card
+  name/rarity/set/code resolution, add/collapse/remove cards, Review boundaries,
+  explicit confirmation, keyboard focus, and 375px no-overflow/touch sizing. All
+  three user-supplied promotional/standard metadata fixtures resolve the exact
+  expected name, rarity, and set code.
+- Changed decisions: Purchase type moves first and becomes single-kind;
+  TCGplayer links become required primary identity for cards/sealed products;
+  Bulk repeats cards rather than purchase items; Opening reuses that card editor;
+  details are populated only after an explicit `Fetch details` action with a
+  loading state; populated fields remain editable and protected from silent
+  re-fetch overwrite; a Bulk Lot may remain partially itemized and be updated
+  later without new spend; Pack Opening uses match-or-explain provenance; every
+  pull requires link and rarity; notes move before read-only Review; both Reviews
+  require explicit confirmation.
+- Blockers: no scaffold implementation blocker. Phase 2 remains intentionally
+  blocked by explicit G1 approval.
 
 ## Check log
 
@@ -84,6 +100,16 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Phone purchase review | pass | 390×844; all four type cards, form actions, and Review remain usable with no horizontal overflow or covered fields |
 | 2026-07-17 | Review boundary | pass | Reaching Review created no record; only `Confirm preview purchase` displayed the saved state |
 | 2026-07-17 | Development server cleanup | pass | Temporary review server exited and port 3100 has no listener; the user's port-3000 server was left untouched |
+| 2026-07-17 | TypeScript `--noEmit` and `npm run lint` | pass | Revised discriminated inputs, metadata endpoint, shared editors, Purchase, Opening, provenance, and focus behavior compile without warnings |
+| 2026-07-17 | Patch whitespace | pass | `git diff --check` returned no errors after the final UI pass |
+| 2026-07-17 | Production build | pass | Isolated build compiled all 19 routes with a dummy local `DATABASE_URL`; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
+| 2026-07-17 | Metadata resolver | pass | User-provided sealed-product URL resolved image and cleaned product name; a card URL resolved Dark Magician, Ultra Rare, Starter Deck: Yugi, and SDY-006 |
+| 2026-07-17 | Supplied metadata fixtures | pass | Product 22954 resolved Red-Eyes Black Metal Dragon (Forbidden Memories), Prismatic Secret Rare, FMR-001; product 702350 resolved Black Chaos, Secret Rare, CORI-EN001; product 22940 resolved Blue-Eyes White Dragon, Prismatic Secret Rare, DDS-001 |
+| 2026-07-17 | Desktop Purchase and Opening review | pass | Explicit fetch/loading, existing sealed match, shared pulled-card editor, Review boundary, and Confirmed preview saved state verified |
+| 2026-07-17 | Phone and focus review | pass | 375×812; no horizontal overflow or visible controls below 40px; step changes focus the new panel; reduced-motion fallback remains in CSS |
+| 2026-07-17 | Development server cleanup | pass | Isolated port-3100 review server stopped; the user's existing port-3000 server was not stopped or changed |
+| 2026-07-17 | Final TypeScript, lint, and patch whitespace | pass | Checks rerun after promotional-card resolver changes; no errors or warnings |
+| 2026-07-17 | Final production build | pass | Isolated build compiled all 19 routes after the resolver acceptance fixes; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
 
 ## Feedback and implementation notes
 
@@ -99,6 +125,24 @@ one implementation item may be `in_progress`.
   contract correction. Recommendation: make type choice repeatable per line so
   the clearer step does not remove mixed purchases; use a real Review state and
   explicit Confirm action. P1.3 is reopened and P1.5 returned to review.
+- Feedback classification: the later 2026-07-17 Purchase and Pack Opening field
+  specification is a Product/UX and input-contract replacement. It explicitly
+  replaces the prior mixed-purchase recommendation. P1.3 is reopened, P1.5
+  returns to review, and implementation is paused while the linked subplan's
+  domain decisions are resolved one at a time.
+- Feedback classification: Bulk partial itemization and user-triggered metadata
+  fetching are clarified product decisions. Bulk remains updateable without
+  duplicate spend, while dependency checks protect later history. `Fetch
+  details` owns idle/loading/resolved/error/stale states and populates visible
+  fields instead of silently replacing them.
+- Feedback classification: editable fetched fields are a clarification of the
+  metadata UX. Auto-filled versus manually edited provenance remains visible,
+  and re-fetch requires confirmation before replacing a correction.
+- Feedback classification: Pack Opening provenance is resolved as
+  match-or-explain. A Gift is zero-cost; Old collection/Other remains
+  unknown-cost and is excluded from known-spend totals rather than falsely
+  recorded as £0. Remaining low-risk flow choices use the recommendations in the
+  approved subplan after the user requested uninterrupted implementation.
 - Implementation detail: a development-only `NEXT_PUBLIC_RECORDS_UI_PREVIEW=1`
   flag permits local visual review without credentials. It is ignored in
   production; normal Records routes remain authenticated.

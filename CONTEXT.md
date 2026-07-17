@@ -20,9 +20,14 @@ changed.
 - A **Record Entry** is one dated Purchase, Pack Opening, Sale, Adjustment,
   Imported Acquisition, or Bulk Itemization event. An entry can contain several
   lines.
-- A **Bulk Lot** is acquired before all of its contents are necessarily known.
-  Itemizing it explains what was discovered; it must not create a second cash
-  expense.
+- A **Pack Opening** consumes one Sealed Unit and creates the physical card
+  Copies pulled from it. If that unit was not previously recorded, an explicit
+  Imported Acquisition establishes its provenance first; gifts have zero cost,
+  while unknown historical cost is not treated as zero.
+- A **Bulk Lot** is one grouped card acquisition that may be only partially
+  identified when purchased. At least one card is identified initially; later
+  itemization adds or corrects its known contents without creating a second cash
+  expense, while preserving any later history that depends on those Copies.
 - A **Supply** is a non-card collecting expense. Initial categories are sleeves,
   binder, storage, playmat, and other.
 - **Actual cost** and **net proceeds** belong in Records. Market estimates belong
@@ -31,9 +36,10 @@ changed.
 ## Product boundaries
 
 - Library may be public read-only; Records is owner-only.
-- New targets and physical cards will require a TCGplayer product URL when the
-  real model is integrated. Legacy rows with missing metadata remain usable and
-  are surfaced as needing attention.
+- New card identities and sealed-product identities use a required TCGplayer
+  product URL as their primary reference. Names, images, printing/set facts, and
+  rarity are derived from that reference where possible. Legacy rows with
+  missing metadata remain usable and are surfaced as needing attention.
 - Sales initially cover card copies only.
 - Binder location remains an integration with the existing Binder feature, not
   a generalized inventory-location model.
