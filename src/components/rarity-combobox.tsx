@@ -1,16 +1,25 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { rarityNames } from "@/lib/rarity-abbreviations";
 
 export function RarityCombobox({
   label = "Rarity",
+  labelSuffix,
   onChange,
   required = false,
   value,
 }: {
   label?: string;
+  labelSuffix?: ReactNode;
   onChange: (value: string) => void;
   required?: boolean;
   value: string;
@@ -37,7 +46,9 @@ export function RarityCombobox({
     <div className="relative" ref={wrapperRef}>
       <label className="block">
         <span className="text-sm font-medium text-zinc-700">
-          {label}{required ? <span className="text-rose-700"> *</span> : null}
+          {label}
+          {required ? <span className="text-rose-700"> *</span> : null}
+          {labelSuffix}
         </span>
         <div className="relative mt-1">
           <input

@@ -269,10 +269,17 @@ export function ProductIdentityEditor({
           <input className={fieldClass} onChange={(event) => updateField("name", event.target.value)} required value={value.name} />
         </label>
         {kind === "card" ? (
-          <div>
-            <RarityCombobox onChange={(rarity) => updateField("rarity", rarity)} required value={value.rarity} />
-            <FieldOrigin edited={value.editedFields.includes("rarity")} fetched={fetched && Boolean(value.rarity)} />
-          </div>
+          <RarityCombobox
+            labelSuffix={
+              <FieldOrigin
+                edited={value.editedFields.includes("rarity")}
+                fetched={fetched && Boolean(value.rarity)}
+              />
+            }
+            onChange={(rarity) => updateField("rarity", rarity)}
+            required
+            value={value.rarity}
+          />
         ) : null}
         {kind === "card" ? (
           <>

@@ -131,6 +131,7 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Running Next.js metadata route | pass | The user's existing port-3000 server returned the same exact Gorz and Slifer facts through `/api/records/metadata`; the server was not stopped or replaced |
 | 2026-07-17 | Changed-link state isolation | pass | A stale link now creates a blank pending identity containing only the new URL before resolving; failures retain the new URL and blank fields, and superseded requests cannot repopulate an edited link |
 | 2026-07-17 | Exact metadata/state production build | pass | An isolated webpack build compiled all 19 routes without writing into the user's active `.next` dev session; expected Better Auth warnings because review credentials were intentionally omitted |
+| 2026-07-17 | Rarity status-label alignment | pass | The Rarity Auto-filled/Edited indicator now appears beside the label and required marker, matching the other derived fields; TypeScript, lint, and patch whitespace pass |
 
 ## Feedback and implementation notes
 
@@ -195,6 +196,9 @@ one implementation item may be `in_progress`.
 - Implementation detail: the All-in amount paid currency prefix is optically
   centred with a non-interactive full-height flex overlay; form behaviour and
   the approved product contract are unchanged.
+- Implementation detail: the shared Rarity combobox accepts an inline label
+  suffix so its Auto-filled/Edited indicator appears beside the label rather
+  than below the input; field behaviour is unchanged.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment
