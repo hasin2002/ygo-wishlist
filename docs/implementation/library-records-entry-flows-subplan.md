@@ -45,8 +45,11 @@ more specific. The main plan's decision log must still record every replacement.
   available. Sealed fields are product name and any applicable product/set or
   edition facts.
 - Populated fields remain editable. Label fetched values as `Auto-filled` and
-  changed values as `Edited`. Re-fetching after a manual correction must ask
-  before overwriting those corrections; cancelling keeps the current values.
+  changed values as `Edited`. Re-fetching the same link after a manual
+  correction must ask before overwriting those corrections; cancelling keeps
+  the current values. If the link has changed, pressing `Fetch again` clears
+  every previous derived identity field before the request begins, retains only
+  the new link, and does not ask to preserve edits belonging to the old product.
 - Reuse the existing TCGplayer URL rules and metadata parser behavior through a
   typed resolver boundary. The preview adapter may provide deterministic
   scaffold results; the Phase 2 adapter will call the server resolver.
@@ -89,12 +92,19 @@ be normalized for display, but the meaning, rarity, and set code must not drift:
 | `22954` Forbidden Memories promo | Red-Eyes Black Metal Dragon (Forbidden Memories) | Prismatic Secret Rare | FMR-001 |
 | `702350` Chaos Origins | Black Chaos | Secret Rare | CORI-EN001 |
 | `22940` Dark Duel Stories promo | Blue-Eyes White Dragon | Prismatic Secret Rare | DDS-001 |
+| `149350` Yu-Gi-Oh! R Manga promo | Gorz the Emissary of Darkness | Ultra Rare | YR01-EN003 |
+| `25371` Worldwide Edition promo | Slifer the Sky Dragon | Ultra Rare | GBI-001 |
 
 Promotional-card URLs may put a game/set qualifier after the card name. The
 resolver therefore matches the longest card name on slug-token boundaries and
 uses both the prefix and suffix to identify its printing. A small title
 normalization preserves TCGplayer's Forbidden Memories qualifier; all populated
 fields remain editable if marketplace naming changes.
+
+The resolver first reads the exact unauthenticated TCGplayer marketplace product
+detail by product ID, then falls back to slug matching and YGOPRODeck when that
+response is unavailable or incomplete. This is required for catalog omissions
+such as `GBI-001`; it does not use or require TCGplayer developer credentials.
 
 ### Rarity control
 

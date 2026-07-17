@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | review | Entry workflows | Generalized printing matching now resolves all six supplied card links exactly; Purchase and Pack Opening await renewed G1 review |
+| P1.3 | review | Entry workflows | Exact product metadata resolves all eight supplied card links; changed-link re-fetch clears the previous product before loading; Purchase and Pack Opening await renewed G1 review |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | done | Scaffold verification | Lint, TypeScript, production build, six-link live metadata regression, and additional matcher edge checks pass |
+| P1.5 | done | Scaffold verification | Lint, TypeScript, production build, eight-link live metadata regression, full local route checks, and additional matcher edge checks pass |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -33,13 +33,14 @@ one implementation item may be `in_progress`.
 
 ## Current update
 
-- Completed: P1.3g UI behavior and the generalized metadata resolver correction.
+- Completed: P1.3g UI behavior, changed-link state isolation, and the exact
+  product metadata resolver correction.
   Sealed forms show only Product name and Product edition;
   Purchase and Opening share seller/source including Gift and Other; visible
   inventory provenance is gone; Review is read-only until explicit confirmation;
   and recoverable errors use destructive toasts.
-- Current: G1 scaffold review. The resolver correction is implemented and
-  verified without product-ID exceptions.
+- Current: G1 scaffold review. The resolver correction is implemented using the
+  product ID already present in every required link, without per-card exceptions.
 - Next: collect renewed G1 feedback or explicit approval. Phase 2 still requires
   explicit approval.
 - Reviewable UI:
@@ -66,18 +67,21 @@ one implementation item may be `in_progress`.
   sealed-product fetch/loading, Opening inventory match, pulled-card
   name/rarity/set/code resolution, add/collapse/remove cards, Review boundaries,
   explicit confirmation, keyboard focus, and 375px no-overflow/touch sizing. All
-  six user-supplied metadata fixtures resolve the exact expected name, rarity,
-  and set code. Additional probes cover repeated card names inside a set slug,
-  apostrophes, and same-set rarity disambiguation.
+  eight user-supplied metadata fixtures resolve the exact expected name, rarity,
+  and set code. The Gorz and Slifer requests also pass through the running local
+  Next.js metadata route. Additional probes cover repeated card names inside a
+  set slug, apostrophes, and same-set rarity disambiguation.
 - Changed decisions: Purchase type moves first and becomes single-kind;
   TCGplayer links become required primary identity for cards/sealed products;
   Bulk repeats cards rather than purchase items; Opening reuses that card editor;
   details are populated only after an explicit `Fetch details` action with a
   loading state; populated fields remain editable and protected from silent
-  re-fetch overwrite; a Bulk Lot may remain partially itemized and be updated
-  later without new spend; Pack Opening uses match-or-explain provenance; every
-  pull requires link and rarity; notes move before read-only Review; both Reviews
-  require explicit confirmation.
+  same-link re-fetch overwrite; fetching a changed product link clears every
+  old derived field before loading; exact unauthenticated marketplace product
+  details precede the slug/catalogue fallback; a Bulk Lot may remain partially
+  itemized and be updated later without new spend; Pack Opening uses
+  match-or-explain provenance; every pull requires link and rarity; notes move
+  before read-only Review; both Reviews require explicit confirmation.
 - Blockers: no scaffold implementation blocker. Phase 2 remains intentionally
   blocked by explicit G1 approval.
 
@@ -123,6 +127,10 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Metadata matcher edge probes | pass | Repeated Blue-Eyes card/set wording resolved LOB-001; apostrophe-normalized Jack's Knight resolved KICO-EN028 Collector's Rare; rarity-suffixed Big Shield Gardna resolved BP02-EN032 Mosaic Rare |
 | 2026-07-17 | Resolver TypeScript, lint, and patch whitespace | pass | Generalized context scoring and possessive normalization compile without errors or lint warnings |
 | 2026-07-17 | Resolver production build | pass | Isolated build compiled all 19 routes after the matcher correction |
+| 2026-07-17 | Exact marketplace metadata | pass | Product 149350 resolved Gorz the Emissary of Darkness, Ultra Rare, YR01-EN003; product 25371 resolved Slifer the Sky Dragon, Ultra Rare, GBI-001 without developer credentials |
+| 2026-07-17 | Running Next.js metadata route | pass | The user's existing port-3000 server returned the same exact Gorz and Slifer facts through `/api/records/metadata`; the server was not stopped or replaced |
+| 2026-07-17 | Changed-link state isolation | pass | A stale link now creates a blank pending identity containing only the new URL before resolving; failures retain the new URL and blank fields, and superseded requests cannot repopulate an edited link |
+| 2026-07-17 | Exact metadata/state production build | pass | An isolated webpack build compiled all 19 routes without writing into the user's active `.next` dev session; expected Better Auth warnings because review credentials were intentionally omitted |
 
 ## Feedback and implementation notes
 
@@ -172,6 +180,15 @@ one implementation item may be `in_progress`.
   card name against set text on both sides, tolerates meaningful marketplace
   prefixes/suffixes, normalizes possessive apostrophes, and uses a URL rarity
   suffix to disambiguate otherwise identical set matches.
+- Feedback classification: the Gorz/Slifer report is both a UI-state correction
+  and a resolver-source correction. A changed link must never inherit fields
+  from its predecessor; exact marketplace product details are preferred because
+  the fallback catalogue does not contain every valid printing, including
+  `GBI-001`. Same-link edit protection remains intact.
+- Implementation detail: the TCGplayer product ID already required in the form
+  is sent to TCGplayer's unauthenticated marketplace detail endpoint. Failure is
+  non-blocking because the generalized slug/YGOPRODeck matcher remains the
+  fallback; no developer key or per-product mapping was added.
 - Implementation detail: a development-only `NEXT_PUBLIC_RECORDS_UI_PREVIEW=1`
   flag permits local visual review without credentials. It is ignored in
   production; normal Records routes remain authenticated.

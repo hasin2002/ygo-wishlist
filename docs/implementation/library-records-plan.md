@@ -140,8 +140,10 @@ or feedback and update this plan before Phase 2.
   cards and sealed products in the covered entry flows. Legacy missing links
   remain attention items.
   Reuse target metadata only when the set also matches.
-- Resolve printing metadata through the current link parser and YGOPRODeck set
-  data without depending on unavailable TCGplayer credentials.
+- Resolve printing metadata through the exact unauthenticated TCGplayer
+  marketplace product detail keyed by the required product link, then use the
+  current link parser and YGOPRODeck set data as fallbacks. Do not depend on
+  unavailable TCGplayer developer credentials.
 - Replace the preview data source with a tRPC adapter satisfying the same
   contract.
 - Integrate Library, Binder, Wheel, Assign Chase, navigation, authentication,
@@ -197,3 +199,4 @@ Review complete real-data behavior before deployment or landing on `main`.
 | 2026-07-17 | Fetched metadata field editability was undecided | Auto-filled fields remain editable, manual corrections are marked, and re-fetch confirms before overwriting them | Metadata extraction can be incomplete or wrong; a required link must accelerate entry without trapping the user in incorrect data | P1.3 metadata UI and resolver state |
 | 2026-07-17 | Pack Opening required an existing sealed-unit selection before link resolution; remaining quantity, pull identity, notes, and resolver-failure details were undecided | Link-first match-or-explain opening provenance; same-printing multi-copy Single purchases; required link/rarity for every pull; notes before Review; recoverable unresolved metadata | Preserves inventory history without blocking gifts/old stock, keeps Review a confirmation surface, and prevents marketplace availability from making records impossible | P1.3 Purchase/Opening contracts and review UI |
 | 2026-07-17 | Sealed identity exposed product line/set and product code/edition; Opening exposed inventory-provenance choices and matching units; validation used page-level messages | Sealed identity shows Product name plus `1st Edition`/`Unlimited Edition`; Purchase and Opening share seller/source including Gift; inventory matching is automatic and hidden; errors use destructive toasts; Review is a dedicated read-only confirmation state | G1 feedback showed the prior labels and provenance mechanics were implementation language rather than a natural manual-entry experience | P1.3d, P1.3e, P1.3f, P1.3g |
+| 2026-07-17 | Re-fetch protection treated same-link edits and a changed product link alike; printing facts depended on slug/YGOPRODeck matching | Same-link re-fetch still protects manual edits, while fetching a changed link first clears all prior derived fields; exact unauthenticated marketplace product details supply rarity/set code before the existing fallbacks | A changed link was retaining prior card values, and YGOPRODeck omits valid marketplace printings such as GBI-001 | P1.3, P1.5, Phase 2 resolver contract |

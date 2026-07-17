@@ -34,6 +34,20 @@ type YgoProDeckCard = {
   type?: string;
 };
 
+type TcgplayerMarketplaceProduct = {
+  customAttributes?: {
+    cardType?: string[];
+    number?: string;
+    rarityDbName?: string;
+  };
+  formattedAttributes?: Record<string, string>;
+  productLineName?: string;
+  productLineUrlName?: string;
+  productName?: string;
+  rarityName?: string;
+  setName?: string;
+};
+
 let ygoCardsPromise: Promise<YgoProDeckCard[]> | null = null;
 
 const rarityNames = [
@@ -451,21 +465,77 @@ async function cardDetailsFromTcgplayerSlug(productSlug: string | undefined) {
   };
 }
 
+async function tcgplayerMarketplaceDetails(productId: string | undefined) {
+  if (!productId) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `https://mp-search-api.tcgplayer.com/v1/product/${productId}/details`,
+      {
+        headers: {
+          "accept": "application/json",
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        },
+        cache: "no-store",
+      },
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const product = (await response.json()) as TcgplayerMarketplaceProduct;
+    const productLine =
+      product.productLineUrlName?.toLowerCase() ??
+      product.productLineName?.toLowerCase();
+
+    if (productLine !== "yugioh") {
+      return null;
+    }
+
+    const cardType = product.customAttributes?.cardType;
+
+    return {
+      cardType: cardType?.length ? cardType.join(", ") : undefined,
+      rarity:
+        product.customAttributes?.rarityDbName ??
+        product.rarityName ??
+        product.formattedAttributes?.Rarity,
+      setCode:
+        product.customAttributes?.number ??
+        product.formattedAttributes?.Number,
+      setName: product.setName,
+      title: cleanTitle(product.productName),
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function tcgplayerMetadataFallback(url: string) {
   const { productId, productSlug } = tcgplayerProductDetails(url);
   const parsedRarity = rarityFromTcgplayerSlug(productSlug);
-  const details = await cardDetailsFromTcgplayerSlug(productSlug);
+  const [marketplaceDetails, catalogueDetails] = await Promise.all([
+    tcgplayerMarketplaceDetails(productId),
+    cardDetailsFromTcgplayerSlug(productSlug),
+  ]);
 
   return {
     imageUrl: productId
       ? `https://tcgplayer-cdn.tcgplayer.com/product/${productId}_in_1000x1000.jpg`
       : undefined,
-    cardType: details.cardType,
+    cardType: catalogueDetails.cardType ?? marketplaceDetails?.cardType,
     edition: editionFromTcgplayerSlug(productSlug),
-    rarity: parsedRarity?.rarity ?? details.rarity,
-    setCode: details.setCode,
-    setName: details.setName,
-    title: details.title,
+    rarity:
+      marketplaceDetails?.rarity ??
+      parsedRarity?.rarity ??
+      catalogueDetails.rarity,
+    setCode: marketplaceDetails?.setCode ?? catalogueDetails.setCode,
+    setName: marketplaceDetails?.setName ?? catalogueDetails.setName,
+    title: catalogueDetails.title ?? marketplaceDetails?.title,
   };
 }
 

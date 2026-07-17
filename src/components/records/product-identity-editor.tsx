@@ -2,7 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
@@ -77,7 +77,10 @@ export function ProductIdentityEditor({
   const source = useRecordsDataSource();
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const fetched = value.fetchAttempted && value.fetchStatus !== "attention";
+  const requestId = useRef(0);
+  const fetched =
+    value.fetchAttempted &&
+    (value.fetchStatus === "resolved" || value.fetchStatus === "attention");
 
   function updateField(field: keyof ProductIdentityDraft, nextValue: string) {
     const editedFields = value.editedFields.includes(field)
@@ -87,11 +90,25 @@ export function ProductIdentityEditor({
   }
 
   async function fetchDetails(force = false) {
-    if (!isTcgplayerProductUrl(value.tcgplayerUrl)) {
+    const replacingProduct = value.fetchStatus === "stale";
+    const requestedUrl = value.tcgplayerUrl.trim();
+    const requestValue: ProductIdentityDraft = replacingProduct
+      ? {
+          ...blankProductIdentity(),
+          tcgplayerUrl: requestedUrl,
+          fetchAttempted: true,
+        }
+      : {
+          ...value,
+          tcgplayerUrl: requestedUrl,
+        };
+
+    if (!isTcgplayerProductUrl(requestedUrl)) {
+      requestId.current += 1;
       const message = "Use a complete TCGplayer product link containing a product ID.";
       setFetchError(message);
       onChange({
-        ...value,
+        ...requestValue,
         fetchAttempted: true,
         fetchStatus: "attention",
         fetchMessage: message,
@@ -99,19 +116,36 @@ export function ProductIdentityEditor({
       });
       return;
     }
-    if (value.editedFields.length && value.fetchAttempted && !force) {
+    if (
+      !replacingProduct &&
+      value.editedFields.length &&
+      value.fetchAttempted &&
+      !force
+    ) {
       setConfirmOverwrite(true);
       return;
     }
 
+    const activeRequestId = ++requestId.current;
+    const pendingValue: ProductIdentityDraft = {
+      ...requestValue,
+      fetchStatus: "fetching",
+      fetchMessage: "",
+    };
+
     setConfirmOverwrite(false);
     setFetchError(null);
-    onChange({ ...value, fetchStatus: "fetching", fetchMessage: "" });
-    const result = await source.resolveTcgplayerProduct(value.tcgplayerUrl.trim());
+    onChange(pendingValue);
+    const result = await source.resolveTcgplayerProduct(requestedUrl);
+
+    if (activeRequestId !== requestId.current) {
+      return;
+    }
+
     if (!result.ok) {
       setFetchError(result.message);
       onChange({
-        ...value,
+        ...pendingValue,
         fetchAttempted: true,
         fetchStatus: "attention",
         fetchMessage: result.message,
@@ -128,14 +162,14 @@ export function ProductIdentityEditor({
       (kind === "sealed" && !metadata.edition);
     const incomplete = missingRequired || !metadata.imageUrl || (kind === "card" && (!metadata.setName || !metadata.setCode));
     onChange({
-      ...value,
-      name: metadata.title || value.name,
-      imageUrl: metadata.imageUrl || value.imageUrl,
-      edition: kind === "sealed" ? metadata.edition || value.edition : "",
-      rarity: kind === "card" ? metadata.rarity || value.rarity : "",
-      setName: kind === "card" ? metadata.setName || value.setName : "",
-      setCode: kind === "card" ? metadata.setCode || value.setCode : "",
-      cardType: metadata.cardType || value.cardType,
+      ...pendingValue,
+      name: metadata.title || pendingValue.name,
+      imageUrl: metadata.imageUrl || pendingValue.imageUrl,
+      edition: kind === "sealed" ? metadata.edition || pendingValue.edition : "",
+      rarity: kind === "card" ? metadata.rarity || pendingValue.rarity : "",
+      setName: kind === "card" ? metadata.setName || pendingValue.setName : "",
+      setCode: kind === "card" ? metadata.setCode || pendingValue.setCode : "",
+      cardType: metadata.cardType || pendingValue.cardType,
       fetchAttempted: true,
       fetchStatus: incomplete ? "attention" : "resolved",
       fetchMessage: incomplete
@@ -157,13 +191,20 @@ export function ProductIdentityEditor({
           <input
             className={fieldClass}
             inputMode="url"
-            onChange={(event) => onChange({
-              ...value,
-              tcgplayerUrl: event.target.value,
-              fetchStatus: value.fetchAttempted ? "stale" : "idle",
-              fetchMessage: value.fetchAttempted ? "Link changed. Fetch details again before continuing." : "",
-              metadataNeedsAttention: value.fetchAttempted,
-            })}
+            onChange={(event) => {
+              requestId.current += 1;
+              setConfirmOverwrite(false);
+              setFetchError(null);
+              onChange({
+                ...value,
+                tcgplayerUrl: event.target.value,
+                fetchStatus: value.fetchAttempted ? "stale" : "idle",
+                fetchMessage: value.fetchAttempted
+                  ? "Link changed. Fetch details again before continuing. Previous details will be cleared when you fetch."
+                  : "",
+                metadataNeedsAttention: value.fetchAttempted,
+              });
+            }}
             placeholder="https://www.tcgplayer.com/product/…"
             required
             type="url"
