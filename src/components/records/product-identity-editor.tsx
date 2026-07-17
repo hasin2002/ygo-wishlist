@@ -4,7 +4,9 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
 import { RarityCombobox } from "@/components/rarity-combobox";
+import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import type { ProductEdition } from "@/lib/records/types";
 
 const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
 
@@ -14,6 +16,7 @@ export type ProductIdentityDraft = {
   tcgplayerUrl: string;
   name: string;
   imageUrl: string | null;
+  edition: ProductEdition | "";
   rarity: string;
   setName: string;
   setCode: string;
@@ -30,6 +33,7 @@ export function blankProductIdentity(name = ""): ProductIdentityDraft {
     tcgplayerUrl: "",
     name,
     imageUrl: null,
+    edition: "",
     rarity: "",
     setName: "",
     setCode: "",
@@ -72,6 +76,7 @@ export function ProductIdentityEditor({
 }) {
   const source = useRecordsDataSource();
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const fetched = value.fetchAttempted && value.fetchStatus !== "attention";
 
   function updateField(field: keyof ProductIdentityDraft, nextValue: string) {
@@ -83,11 +88,13 @@ export function ProductIdentityEditor({
 
   async function fetchDetails(force = false) {
     if (!isTcgplayerProductUrl(value.tcgplayerUrl)) {
+      const message = "Use a complete TCGplayer product link containing a product ID.";
+      setFetchError(message);
       onChange({
         ...value,
         fetchAttempted: true,
         fetchStatus: "attention",
-        fetchMessage: "Use a complete TCGplayer product link containing a product ID.",
+        fetchMessage: message,
         metadataNeedsAttention: true,
       });
       return;
@@ -98,9 +105,11 @@ export function ProductIdentityEditor({
     }
 
     setConfirmOverwrite(false);
+    setFetchError(null);
     onChange({ ...value, fetchStatus: "fetching", fetchMessage: "" });
     const result = await source.resolveTcgplayerProduct(value.tcgplayerUrl.trim());
     if (!result.ok) {
+      setFetchError(result.message);
       onChange({
         ...value,
         fetchAttempted: true,
@@ -112,15 +121,20 @@ export function ProductIdentityEditor({
     }
 
     const metadata = result.metadata;
-    const missingRequired = !metadata.title || (kind === "card" && !metadata.rarity);
+    setFetchError(null);
+    const missingRequired =
+      !metadata.title ||
+      (kind === "card" && !metadata.rarity) ||
+      (kind === "sealed" && !metadata.edition);
     const incomplete = missingRequired || !metadata.imageUrl || (kind === "card" && (!metadata.setName || !metadata.setCode));
     onChange({
       ...value,
       name: metadata.title || value.name,
       imageUrl: metadata.imageUrl || value.imageUrl,
+      edition: kind === "sealed" ? metadata.edition || value.edition : "",
       rarity: kind === "card" ? metadata.rarity || value.rarity : "",
-      setName: metadata.setName || value.setName,
-      setCode: metadata.setCode || value.setCode,
+      setName: kind === "card" ? metadata.setName || value.setName : "",
+      setCode: kind === "card" ? metadata.setCode || value.setCode : "",
       cardType: metadata.cardType || value.cardType,
       fetchAttempted: true,
       fetchStatus: incomplete ? "attention" : "resolved",
@@ -136,6 +150,7 @@ export function ProductIdentityEditor({
 
   return (
     <div className="grid gap-4">
+      <DestructiveToast message={fetchError} onDismiss={() => setFetchError(null)} />
       <div>
         <label className="block">
           <span className="text-sm font-bold text-zinc-700">TCGplayer product link <span className="text-rose-700">*</span></span>
@@ -218,14 +233,32 @@ export function ProductIdentityEditor({
             <FieldOrigin edited={value.editedFields.includes("rarity")} fetched={fetched && Boolean(value.rarity)} />
           </div>
         ) : null}
-        <label>
-          <span className="text-sm font-bold text-zinc-700">{kind === "card" ? "Set name" : "Product line or set"}<FieldOrigin edited={value.editedFields.includes("setName")} fetched={fetched && Boolean(value.setName)} /></span>
-          <input className={fieldClass} onChange={(event) => updateField("setName", event.target.value)} placeholder="Auto-filled when available" value={value.setName} />
-        </label>
-        <label>
-          <span className="text-sm font-bold text-zinc-700">{kind === "card" ? "Set code" : "Product code or edition"}<FieldOrigin edited={value.editedFields.includes("setCode")} fetched={fetched && Boolean(value.setCode)} /></span>
-          <input className={fieldClass} onChange={(event) => updateField("setCode", event.target.value)} placeholder="Auto-filled when available" value={value.setCode} />
-        </label>
+        {kind === "card" ? (
+          <>
+            <label>
+              <span className="text-sm font-bold text-zinc-700">Set name<FieldOrigin edited={value.editedFields.includes("setName")} fetched={fetched && Boolean(value.setName)} /></span>
+              <input className={fieldClass} onChange={(event) => updateField("setName", event.target.value)} placeholder="Auto-filled when available" value={value.setName} />
+            </label>
+            <label>
+              <span className="text-sm font-bold text-zinc-700">Set code<FieldOrigin edited={value.editedFields.includes("setCode")} fetched={fetched && Boolean(value.setCode)} /></span>
+              <input className={fieldClass} onChange={(event) => updateField("setCode", event.target.value)} placeholder="Auto-filled when available" value={value.setCode} />
+            </label>
+          </>
+        ) : (
+          <label className="sm:col-span-2 sm:max-w-sm">
+            <span className="text-sm font-bold text-zinc-700">Product edition <span className="text-rose-700">*</span><FieldOrigin edited={value.editedFields.includes("edition")} fetched={fetched && Boolean(value.edition)} /></span>
+            <select
+              className={fieldClass}
+              onChange={(event) => updateField("edition", event.target.value)}
+              required
+              value={value.edition}
+            >
+              <option value="">Choose edition</option>
+              <option value="1st Edition">1st Edition</option>
+              <option value="Unlimited Edition">Unlimited Edition</option>
+            </select>
+          </label>
+        )}
       </div>
     </div>
   );

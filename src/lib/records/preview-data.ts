@@ -48,6 +48,17 @@ function normalized(value: string) {
   return value.trim().toLocaleLowerCase("en-GB");
 }
 
+function canonicalProductUrl(value: string | null | undefined) {
+  if (!value) return "";
+
+  try {
+    const url = new URL(value);
+    return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return normalized(value);
+  }
+}
+
 function previewId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -329,7 +340,8 @@ function seededSnapshot(): RecordsSnapshot {
       },
       {
         id: "sealed-preview-box",
-        name: "Spellcaster's Command Structure Deck — Unlimited Edition",
+        name: "Spellcaster's Command Structure Deck",
+        edition: "Unlimited Edition",
         quantity: 1,
         status: "sealed",
         acquiredRecordId: records[0].id,
@@ -613,6 +625,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
       next.sealedUnits.push({
         id: sealedId,
         name: input.product.name,
+        edition: input.product.edition || null,
         quantity: 1,
         tcgplayerUrl: input.product.tcgplayerUrl,
         imageUrl: input.product.imageUrl,
@@ -621,7 +634,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
         openedRecordId: null,
       });
     }
-    lines.push(recordLine("sealed", input.product.name, input.product.quantity, entityIds, null, "Sealed product"));
+    lines.push(recordLine("sealed", input.product.name, input.product.quantity, entityIds, null, input.product.edition || "Edition unknown"));
     addAttention(input.product, input.product.name);
     title = `Purchased ${input.product.name}`;
   } else if (input.kind === "bulk") {
@@ -683,22 +696,19 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
   let sealed = input.sealedUnitId
     ? next.sealedUnits.find((item) => item.id === input.sealedUnitId && item.status === "sealed")
     : undefined;
-
-  if (!sealed && input.provenance === "existing") {
-    return { next: snapshot, result: { ok: false, message: "Choose the matching unopened sealed product." } satisfies DataSourceResult };
-  }
+  const productKey = canonicalProductUrl(input.product.tcgplayerUrl);
+  sealed ??= productKey
+    ? next.sealedUnits.find((item) => item.status === "sealed" && canonicalProductUrl(item.tcgplayerUrl) === productKey)
+    : undefined;
 
   if (!sealed) {
     const importedId = previewId("record");
     const sealedId = previewId("sealed");
-    const source = input.provenance === "gift"
-      ? "Gift"
-      : input.provenance === "old-collection"
-        ? "Old collection"
-        : input.provenanceOther || "Other unrecorded source";
+    const isGift = normalized(input.source) === "gift";
     sealed = {
       id: sealedId,
       name: input.product.name,
+      edition: input.product.edition || null,
       quantity: 1,
       tcgplayerUrl: input.product.tcgplayerUrl,
       imageUrl: input.product.imageUrl,
@@ -713,12 +723,12 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
       status: "active",
       date: input.date,
       title: `Imported ${input.product.name}`,
-      source,
+      source: input.source,
       listingUrl: null,
       amountPence: 0,
-      amountKnown: input.provenance === "gift",
-      notes: input.provenance === "gift" ? "Gifted sealed product." : "Historical cost is unknown and excluded from known spend.",
-      lines: [recordLine("sealed", input.product.name, 1, [sealedId], null, input.provenance === "gift" ? "Gift · £0" : "Unknown historical cost")],
+      amountKnown: isGift,
+      notes: isGift ? "Gifted sealed product." : "Historical cost is unknown and excluded from known spend.",
+      lines: [recordLine("sealed", input.product.name, 1, [sealedId], null, isGift ? `Gift · £0 · ${input.product.edition}` : `Unknown historical cost · ${input.product.edition}`)],
       createdAt: nowIso(),
       preview: true,
     });
@@ -749,7 +759,7 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
     status: "active",
     date: input.date,
     title: `Opened ${input.product.name}`,
-    source: "Collection",
+    source: input.source,
     listingUrl: null,
     amountPence: 0,
     notes: input.notes,

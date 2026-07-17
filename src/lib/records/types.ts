@@ -10,6 +10,7 @@ export type RecordEntryType =
 
 export type RecordStatus = "active" | "void";
 export type InventoryKind = "card" | "sealed" | "bulk" | "supply";
+export type ProductEdition = "1st Edition" | "Unlimited Edition";
 export type SupplyCategory =
   | "sleeves"
   | "binder"
@@ -77,6 +78,7 @@ export type RecordEntry = {
 export type SealedUnit = {
   id: string;
   name: string;
+  edition?: ProductEdition | null;
   quantity: number;
   tcgplayerUrl?: string | null;
   imageUrl?: string | null;
@@ -126,6 +128,7 @@ export type RecordsSnapshot = {
 export type ResolvedProductMetadata = {
   title: string;
   imageUrl: string | null;
+  edition: ProductEdition | "";
   rarity: string;
   setName: string;
   setCode: string;
@@ -137,6 +140,7 @@ export type ProductIdentityInput = {
   tcgplayerUrl: string;
   name: string;
   imageUrl: string | null;
+  edition: ProductEdition | "";
   rarity: string;
   setName: string;
   setCode: string;
@@ -161,15 +165,12 @@ export type PurchaseInput = {
   | { kind: "supply"; category: SupplyCategory; otherName: string; quantity: number }
 );
 
-export type OpeningProvenance = "existing" | "gift" | "old-collection" | "other";
-
 export type OpeningInput = {
   date: string;
   notes: string;
   product: ProductIdentityInput;
   sealedUnitId: string | null;
-  provenance: OpeningProvenance;
-  provenanceOther: string;
+  source: string;
   pulls: CardContentsInput[];
 };
 

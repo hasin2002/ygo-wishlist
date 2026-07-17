@@ -1,6 +1,14 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CircleX,
+  Loader2,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 export const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
@@ -54,6 +62,49 @@ export function PreviewNotice({ children }: { children: ReactNode }) {
   );
 }
 
+export function DestructiveToast({
+  message,
+  onDismiss,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+}) {
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timeout = window.setTimeout(onDismiss, 5000);
+    return () => window.clearTimeout(timeout);
+  }, [message, onDismiss]);
+
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-live="assertive"
+      className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-md items-start gap-3 rounded-lg border border-rose-300 bg-rose-700 px-4 py-3 text-sm text-white shadow-xl sm:inset-x-auto sm:right-4 sm:mx-0"
+      role="alert"
+    >
+      <CircleX className="mt-0.5 size-5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <strong className="block font-black">Check the form</strong>
+        <p className="mt-0.5 font-medium leading-5">{message}</p>
+      </div>
+      <button
+        aria-label="Dismiss error"
+        className="grid size-11 shrink-0 place-items-center rounded-md text-white transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white"
+        onClick={onDismiss}
+        type="button"
+      >
+        <X className="size-4" />
+      </button>
+    </div>
+  );
+}
+
 export function WizardProgress({ labels, step }: { labels: string[]; step: number }) {
   return (
     <nav aria-label="Form progress" className="rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
@@ -82,6 +133,7 @@ export function WizardActions({
   finalLabel,
   nextDisabled = false,
   onBack,
+  onConfirm,
   onNext,
   pending = false,
   step,
@@ -90,6 +142,7 @@ export function WizardActions({
   finalLabel: string;
   nextDisabled?: boolean;
   onBack: () => void;
+  onConfirm?: () => void;
   onNext: () => void;
   pending?: boolean;
   step: number;
@@ -101,7 +154,7 @@ export function WizardActions({
       {step < totalSteps ? (
         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5" disabled={nextDisabled || pending} onClick={onNext} type="button">Continue <ArrowRight className="size-4" /></button>
       ) : (
-        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={pending} type="submit">{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? "Saving preview…" : finalLabel}</button>
+        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? "Saving preview…" : finalLabel}</button>
       )}
     </div>
   );

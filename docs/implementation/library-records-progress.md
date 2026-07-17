@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | review | Entry workflows | Purchase and Pack Opening now match the approved linked subplan; implementation and primary verification are complete and awaiting G1 review |
+| P1.3 | review | Entry workflows | P1.3g refinements are implemented and verified; Purchase and Pack Opening await renewed G1 review |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | done | Scaffold verification | Automated checks and desktop/375px walkthroughs pass for the revised Purchase and Pack Opening flows; subjective approval remains G1 |
+| P1.5 | done | Scaffold verification | Automated checks and desktop/375px walkthroughs pass after P1.3g; subjective approval remains G1 |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -33,15 +33,14 @@ one implementation item may be `in_progress`.
 
 ## Current update
 
-- Completed: P1.3a–P1.3e. Purchase is type-first and single-kind; Purchase and
-  Opening use an explicit link fetch with loading/recovery states; Bulk and
-  pulled cards share the same progressive Card Contents Editor; Review is
-  read-only and requires Confirm; unknown historical cost is distinct from £0.
-- Current: G1 scaffold review. Automated checks and the primary desktop/phone
-  walkthrough pass; the user can now judge terminology, density, transitions,
-  and overall feel before backend work.
-- Next: collect G1 feedback, reopen any affected checklist item if needed, and
-  begin Phase 2 only after explicit G1 approval.
+- Completed: P1.3g. Sealed forms now show only Product name and Product edition;
+  Purchase and Opening share seller/source including Gift and Other; visible
+  inventory provenance is gone; Review is read-only until explicit confirmation;
+  and recoverable errors use destructive toasts.
+- Current: G1 scaffold review. Automated checks and desktop/375px walkthroughs
+  pass after the latest refinements.
+- Next: collect renewed G1 feedback or explicit approval. Phase 2 still requires
+  explicit approval.
 - Reviewable UI:
   - `/` — Library rename, target-only add language, global Add, per-card Record
     acquisition/View copies paths for signed-in users.
@@ -110,6 +109,13 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Development server cleanup | pass | Isolated port-3100 review server stopped; the user's existing port-3000 server was not stopped or changed |
 | 2026-07-17 | Final TypeScript, lint, and patch whitespace | pass | Checks rerun after promotional-card resolver changes; no errors or warnings |
 | 2026-07-17 | Final production build | pass | Isolated build compiled all 19 routes after the resolver acceptance fixes; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
+| 2026-07-17 | P1.3g TypeScript, lint, and patch whitespace | pass | Simplified sealed identity, shared source, hidden matching, Review confirmation, toasts, and reducers compile without warnings |
+| 2026-07-17 | P1.3g sealed resolver | pass | Spellcasters Command URL resolved Product name `Spellcasters Command Structure Deck` and Product edition `Unlimited Edition` without line/set/code fields |
+| 2026-07-17 | P1.3g desktop Purchase review | pass | Gift source, missing-required destructive toast, sealed fetch, two-option edition, dedicated Review, and explicit non-automatic confirmation verified |
+| 2026-07-17 | P1.3g desktop Opening review | pass | Shared Gift/Other source, no visible provenance/matching controls, product edition, pulled-card summary, explicit Review boundary, confirmation, and exact-link inventory consumption verified |
+| 2026-07-17 | P1.3g phone review | pass | 375×812 had no horizontal overflow or visible controls below 40px; destructive toast stayed inside the viewport |
+| 2026-07-17 | P1.3g production build | pass | Isolated build compiled all 19 routes; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
+| 2026-07-17 | P1.3g development server cleanup | pass | Isolated port-3100 server stopped; the user's existing port-3000 server remained untouched |
 
 ## Feedback and implementation notes
 
@@ -143,6 +149,13 @@ one implementation item may be `in_progress`.
   unknown-cost and is excluded from known-spend totals rather than falsely
   recorded as £0. Remaining low-risk flow choices use the recommendations in the
   approved subplan after the user requested uninterrupted implementation.
+- Feedback classification: the latest sealed/source/review/error request is a
+  Product/UX correction that replaces visible provenance and sealed metadata
+  fields. Recommendation applied with one terminology correction: use
+  `Unlimited Edition`, not `Second Edition`, because that is the actual
+  TCGplayer/Yu-Gi-Oh printing label. Automatic exact-link matching preserves
+  coherent inventory without exposing its mechanics. P1.3d–P1.3f return to
+  review and P1.3g becomes the single active item.
 - Implementation detail: a development-only `NEXT_PUBLIC_RECORDS_UI_PREVIEW=1`
   flag permits local visual review without credentials. It is ignored in
   production; normal Records routes remain authenticated.

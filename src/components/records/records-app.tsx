@@ -483,7 +483,7 @@ function InventoryView() {
           {snapshot.sealedUnits.map((item) => (
             <article className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm" key={item.id}>
               <div className="flex items-start justify-between gap-3"><PackageCheck className="size-6 text-[#8a1f2d]" /><span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-bold capitalize text-zinc-600">{item.status}</span></div>
-              <h3 className="mt-4 font-bold">{item.name}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Quantity {item.quantity}</p>
+              <h3 className="mt-4 font-bold">{item.name}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{item.edition ? `${item.edition} · ` : ""}Quantity {item.quantity}</p>
               {item.status === "sealed" ? <Link className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white" href={`/records/new/opening?sealedId=${encodeURIComponent(item.id)}`}><PackageOpen className="size-4" /> Open product</Link> : null}
             </article>
           ))}

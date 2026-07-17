@@ -1,7 +1,7 @@
 # Purchase and Pack Opening scaffold redesign
 
-Status: Implemented and ready for G1 scaffold review. Backend and database work
-remain blocked by G1.
+Status: G1 refinements implemented and verified; ready for scaffold review.
+Backend and database work remain blocked by G1.
 
 ## Authority and scope
 
@@ -52,6 +52,32 @@ more specific. The main plan's decision log must still record every replacement.
   scaffold results; the Phase 2 adapter will call the server resolver.
 - Resolution must preserve the user's link and draft when navigating backward,
   retrying, or leaving and returning to the route.
+- For a sealed product, the editable derived fields are only Product name and
+  Product edition. Do not show Product line, Set, or Product code. Product
+  edition is required and uses `1st Edition` or `Unlimited Edition`; the latter
+  is the marketplace/card-game term replacing the requested but inaccurate
+  `Second Edition` label. Resolve it from the link when possible.
+
+### Shared seller or source control
+
+- Purchase and Pack Opening use the same labeled seller/source selector.
+- Options are eBay, TCGplayer, Cardmarket, Facebook Marketplace, Local card
+  shop, Private seller, Gift, and Other.
+- Other reveals one required free-text source field. Gift is a real zero-cost
+  source; every other unpriced Opening source has unknown historical cost.
+- Pack Opening does not expose inventory-provenance language, matching-unit
+  selection, or imported-acquisition mechanics. An exact unopened URL match is
+  consumed automatically in the preview; without a match, the selected source
+  creates and immediately consumes the necessary acquisition behind the scenes.
+
+### Validation feedback
+
+- Missing required values and other recoverable form errors use an accessible
+  destructive toast with a clear correction message and dismiss action.
+- The same feedback is used by Purchase, Pack Opening, and the shared Card
+  Contents Editor so nested card validation does not fail silently.
+- Toasts never steal focus and auto-dismiss after five seconds. The form still
+  preserves every entered value.
 
 ### Metadata resolver acceptance fixtures
 
@@ -130,7 +156,9 @@ The page branches by the type selected in stage 1:
   rarity control, and quantity. Quantity may exceed one, but every Copy created
   here must share that exact TCGplayer product/printing.
 - `Sealed Product`: required TCGplayer product link, resolved product preview,
-  explicit `Fetch details`, populated product fields, and quantity.
+  explicit `Fetch details`, Product name, required Product edition with only
+  `1st Edition` and `Unlimited Edition`, and quantity. Product line, Set, and
+  Product code are not shown.
 - `Bulk Lot`: the shared Card Contents Editor. The generic lot-description and
   estimated-card-count experience is removed. At least one identified card is
   required. The user explicitly marks whether more cards remain unitemized.
@@ -149,6 +177,9 @@ The page branches by the type selected in stage 1:
   required and shows pending, success, and recoverable error feedback.
 - Optional purchase notes are entered on Purchase Details and displayed
   read-only on Review. Review contains no editable form fields.
+- Review is rendered as a dedicated summary state rather than a continuation of
+  the data-entry layout. Entering it never calls a create method; only its
+  explicit confirmation button may submit.
 
 ## Pack Opening wizard
 
@@ -165,8 +196,10 @@ Pack Opening remains three stages:
 - Resolve and show its product name and image. Do not ask the user to type the
   product name from the URL alone; use the explicit `Fetch details` action and
   populate the product fields.
-- Keep the opening date. Match the fetched URL to already-owned Sealed Units
-  using the provenance behavior in `D2`.
+- Show only Product name and required Product edition (`1st Edition` or
+  `Unlimited Edition`) for the sealed product identity.
+- Keep the opening date and use the shared seller/source selector. Do not expose
+  inventory provenance or sealed-unit matching controls.
 
 ### P1.3-O2 Pulled cards
 
@@ -221,13 +254,12 @@ Pack Opening remains three stages:
   remain editable. Manual changes are visibly distinguished from fetched values.
   Re-fetching asks before replacing any manual correction and never overwrites it
   silently.
-- `D2 Opening provenance`: Fetching the required product link first matches
-  unopened Sealed Units by TCGplayer product identity. One match is selected
-  automatically; multiple matches require choosing a Copy. With no match, the
-  user chooses Gift, Old collection, or Other before continuing. Gift creates a
-  zero-cost Imported Acquisition; Old collection/Other creates an unknown-cost
-  Imported Acquisition excluded from known-spend totals. The Opening then
-  consumes that unit, so no opening is orphaned from inventory history.
+- `D2 Opening source and hidden inventory continuity`: The visible flow uses the
+  same seller/source selector as Purchase, including Gift and Other. The term
+  `inventory provenance` and matching-unit picker are removed. The preview
+  silently consumes an exact unopened URL match; otherwise it creates and
+  immediately consumes an acquisition from the selected source. Gift is £0;
+  other unpriced sources remain unknown-cost and excluded from known spend.
 - `D3 Single quantity`: A Single Card purchase may create several Copies only
   when all share the same exact TCGplayer product/printing.
 - `D4 Pull identity`: Every pulled card requires its own valid TCGplayer product
@@ -248,9 +280,10 @@ Pack Opening remains three stages:
 | P1.3a | done | Close entry-flow decisions | Every listed decision resolved and recorded without contradictory acceptance criteria |
 | P1.3b | done | Shared metadata and rarity UI | One resolver boundary, one rarity list/control, visible async and recovery states |
 | P1.3c | done | Shared Card Contents Editor | Bulk and Opening share collapsed rows, single expanded editor, Add card, Edit, Remove, summaries |
-| P1.3d | done | Purchase rewrite | Type-first four-stage single-kind flow and explicit confirmation match this specification |
-| P1.3e | done | Pack Opening rewrite | Link-first product, shared pulls editor, read-only Review with Edit routes, and explicit confirmation match this specification |
-| P1.3f | done | Verification | Automated checks, supplied metadata fixtures, and primary desktop/375px/focus walkthroughs pass; G1 remains the manual review point for subjective feel and remaining stress cases |
+| P1.3d | done | Purchase rewrite | Type-first four-stage flow now includes simplified sealed fields, shared source, dedicated Review, and explicit confirmation |
+| P1.3e | done | Pack Opening rewrite | Link-first product and pulls flow now hides inventory mechanics, shares source, and requires explicit confirmation from Review |
+| P1.3f | done | Verification | Automated checks, supplied metadata fixtures, desktop walkthroughs, and 375px/focus/touch checks pass |
+| P1.3g | done | G1 form refinements | Sealed fields, shared source, dedicated Review, destructive toast, reducers, and responsive verification match this specification |
 
 ## Review gate
 

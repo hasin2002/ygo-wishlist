@@ -138,6 +138,7 @@ export function RecordsPreviewProvider({ children }: { children: ReactNode }) {
           metadata?: {
             title?: string;
             imageUrl?: string;
+            edition?: "1st Edition" | "Unlimited Edition";
             rarity?: string;
             setName?: string;
             setCode?: string;
@@ -155,6 +156,7 @@ export function RecordsPreviewProvider({ children }: { children: ReactNode }) {
           metadata: {
             title: payload.metadata.title || "",
             imageUrl: payload.metadata.imageUrl || null,
+            edition: payload.metadata.edition || "",
             rarity: payload.metadata.rarity || "",
             setName: payload.metadata.setName || "",
             setCode: payload.metadata.setCode || "",

@@ -15,6 +15,7 @@ export type LinkMetadata = {
   title?: string;
   imageUrl?: string;
   priceText?: string;
+  edition?: "1st Edition" | "Unlimited Edition";
   rarity?: string;
   setName?: string;
   setCode?: string;
@@ -140,7 +141,11 @@ function titleCaseFromSlug(slug: string) {
 }
 
 function titleFromUnmatchedTcgplayerSlug(slug: string) {
-  const tokens = slug.replace(/^yugioh-/, "").split("-").filter(Boolean);
+  const tokens = slug
+    .replace(/^yugioh-/, "")
+    .replace(/-(?:1st|unlimited)-edition$/i, "")
+    .split("-")
+    .filter(Boolean);
 
   for (let length = Math.floor(tokens.length / 2); length >= 1; length -= 1) {
     for (let start = 0; start + (length * 2) <= tokens.length; start += 1) {
@@ -212,6 +217,22 @@ function tcgplayerProductDetails(url: string) {
     productId,
     productSlug,
   };
+}
+
+function editionFromTcgplayerSlug(productSlug: string | undefined) {
+  if (!productSlug) {
+    return undefined;
+  }
+
+  if (/(?:^|-)1st-edition(?:-|$)/i.test(productSlug)) {
+    return "1st Edition" as const;
+  }
+
+  if (/(?:^|-)unlimited-edition(?:-|$)/i.test(productSlug)) {
+    return "Unlimited Edition" as const;
+  }
+
+  return undefined;
 }
 
 function rarityFromTcgplayerSlug(productSlug: string | undefined) {
@@ -332,6 +353,7 @@ async function tcgplayerMetadataFallback(url: string) {
       ? `https://tcgplayer-cdn.tcgplayer.com/product/${productId}_in_1000x1000.jpg`
       : undefined,
     cardType: details.cardType,
+    edition: editionFromTcgplayerSlug(productSlug),
     rarity: parsedRarity?.rarity ?? details.rarity,
     setCode: details.setCode,
     setName: details.setName,
@@ -414,6 +436,7 @@ export async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
     imageUrl: absoluteUrl(rawImage, parsedUrl) ?? tcgplayerFallback?.imageUrl,
     priceText: pickPrice($),
     cardType: tcgplayerFallback?.cardType,
+    edition: tcgplayerFallback?.edition,
     rarity: tcgplayerFallback?.rarity,
     setCode: tcgplayerFallback?.setCode,
     setName: tcgplayerFallback?.setName,

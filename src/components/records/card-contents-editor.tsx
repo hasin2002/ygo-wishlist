@@ -3,6 +3,7 @@
 import { Check, CirclePlus, Pencil, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
+import { DestructiveToast } from "@/components/records/entry-form-ui";
 import {
   blankProductIdentity,
   isTcgplayerProductUrl,
@@ -75,6 +76,7 @@ export function CardContentsEditor({
 
   return (
     <div className="grid gap-3">
+      <DestructiveToast message={error} onDismiss={() => setError(null)} />
       <div className="flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <strong>{rows.length} {rows.length === 1 ? "card type" : "card types"}</strong>
         <span className="text-sm font-medium text-zinc-500">{copyCount} physical {copyCount === 1 ? "copy" : "copies"}</span>
@@ -104,7 +106,6 @@ export function CardContentsEditor({
             <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
             <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} required type="number" value={row.quantity} />
           </label>
-          {error ? <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-800" role="alert">{error}</p> : null}
           <button className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white sm:w-auto" onClick={finishCard} type="button"><Check className="size-4" /> Done with this card</button>
         </article>
       ) : (
