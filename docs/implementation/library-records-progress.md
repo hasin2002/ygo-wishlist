@@ -132,6 +132,7 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Changed-link state isolation | pass | A stale link now creates a blank pending identity containing only the new URL before resolving; failures retain the new URL and blank fields, and superseded requests cannot repopulate an edited link |
 | 2026-07-17 | Exact metadata/state production build | pass | An isolated webpack build compiled all 19 routes without writing into the user's active `.next` dev session; expected Better Auth warnings because review credentials were intentionally omitted |
 | 2026-07-17 | Rarity status-label alignment | pass | The Rarity Auto-filled/Edited indicator now appears beside the label and required marker, matching the other derived fields; TypeScript, lint, and patch whitespace pass |
+| 2026-07-17 | Card-list action ordering | pass | The shared Card Contents Editor now places Add another card above the existing card summaries; behavior and touch-target styling are unchanged |
 
 ## Feedback and implementation notes
 
@@ -199,6 +200,9 @@ one implementation item may be `in_progress`.
 - Implementation detail: the shared Rarity combobox accepts an inline label
   suffix so its Auto-filled/Edited indicator appears beside the label rather
   than below the input; field behaviour is unchanged.
+- Implementation detail: the shared Card Contents Editor places its add action
+  before existing card summaries so the action precedes the content it creates;
+  add/edit/remove behaviour is unchanged.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment

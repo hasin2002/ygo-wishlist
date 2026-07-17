@@ -82,6 +82,10 @@ export function CardContentsEditor({
         <span className="text-sm font-medium text-zinc-500">{copyCount} physical {copyCount === 1 ? "copy" : "copies"}</span>
       </div>
 
+      {!active ? (
+        <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-dashed border-zinc-300 bg-white px-4 text-sm font-bold hover:border-zinc-950" onClick={addCard} type="button"><CirclePlus className="size-4" /> Add another card</button>
+      ) : null}
+
       {rows.map((row, index) => row.id === activeId ? (
         <article className="records-step-enter rounded-lg border border-[#8a1f2d]/40 bg-white p-4 shadow-sm" key={row.id}>
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -122,10 +126,6 @@ export function CardContentsEditor({
           </div>
         </article>
       ))}
-
-      {!active ? (
-        <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-dashed border-zinc-300 bg-white px-4 text-sm font-bold hover:border-zinc-950" onClick={addCard} type="button"><CirclePlus className="size-4" /> Add another card</button>
-      ) : null}
     </div>
   );
 }
