@@ -116,6 +116,7 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | P1.3g phone review | pass | 375×812 had no horizontal overflow or visible controls below 40px; destructive toast stayed inside the viewport |
 | 2026-07-17 | P1.3g production build | pass | Isolated build compiled all 19 routes; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
 | 2026-07-17 | P1.3g development server cleanup | pass | Isolated port-3100 server stopped; the user's existing port-3000 server remained untouched |
+| 2026-07-17 | P1.3g currency-prefix alignment | pass | The All-in amount paid prefix now uses a full-height flex overlay with tight line height so the pound glyph is vertically centred without changing the input geometry |
 
 ## Feedback and implementation notes
 
@@ -159,6 +160,9 @@ one implementation item may be `in_progress`.
 - Implementation detail: a development-only `NEXT_PUBLIC_RECORDS_UI_PREVIEW=1`
   flag permits local visual review without credentials. It is ignored in
   production; normal Records routes remain authenticated.
+- Implementation detail: the All-in amount paid currency prefix is optically
+  centred with a non-interactive full-height flex overlay; form behaviour and
+  the approved product contract are unchanged.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment
