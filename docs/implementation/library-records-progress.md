@@ -93,6 +93,9 @@ one implementation item may be `in_progress`.
   an unitemized Bulk Lot as a sellable card selection.
   New acquired cards require edition and default to `1st Edition`; Sale impact
   is explanatory information rather than an error-looking Wishlist warning.
+  Bulk Lot cost allocation is required: a fixed total-card count is the
+  denominator, each itemized Copy receives its predetermined share, and later
+  itemization never rebases earlier allocations.
 - Blockers: no scaffold implementation blocker. A fresh isolated production
   build remains unavailable after the runner rejection, and the in-app browser's
   viewport override did not apply for an exact P1.3i 375px rerun; both gaps stay
@@ -251,6 +254,12 @@ one implementation item may be `in_progress`.
   clarity correction, not a Wishlist rule. Bulk still requires two or more
   Copies; when exactly one is selected, the form now explains that requirement
   and offers a direct switch to Single sale without dropping the selection.
+- Feedback classification: Bulk allocation is a product/accounting correction.
+  Recommendation accepted: require the lot's exact total-card count and divide
+  its all-in cost across that stable denominator, rather than the temporarily
+  identified subset. This reopens Bulk Purchase, Bulk Itemization, and the
+  Phase 2 allocation model; no backend or preview-model change is made before
+  renewed G1 review and explicit backend approval.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment
