@@ -21,9 +21,9 @@ one implementation item may be `in_progress`.
 | P0.1 | done | Clean feature branch and durable docs | `agent/collection-records` is checked out in the primary project directory; the abandoned Stardust experiment and redundant local branch were removed; plan, progress, context, ADR created |
 | P1.1 | done | Preview contract and session state | Typed `RecordsDataSource`, legacy mapping, preview fixtures and resettable session state compile |
 | P1.2 | done | Records shell | Overview, History, Inventory routes and responsive navigation compile |
-| P1.3 | review | Entry workflows | P1.3g refinements are implemented and verified; Purchase and Pack Opening await renewed G1 review |
+| P1.3 | review | Entry workflows | Generalized printing matching now resolves all six supplied card links exactly; Purchase and Pack Opening await renewed G1 review |
 | P1.4 | done | Library and global integration | Library rename, global Add, prefilled acquisition, removal of one-click ownership toggle; `/spend` preserved |
-| P1.5 | done | Scaffold verification | Automated checks and desktop/375px walkthroughs pass after P1.3g; subjective approval remains G1 |
+| P1.5 | done | Scaffold verification | Lint, TypeScript, production build, six-link live metadata regression, and additional matcher edge checks pass |
 | G1 | review | Scaffold review | User reviews all listed UI before backend work starts |
 | P2.1 | blocked | Real model and integration | Blocked by G1 |
 | G2 | blocked | Backend approval | Blocked by P2.1 |
@@ -33,12 +33,13 @@ one implementation item may be `in_progress`.
 
 ## Current update
 
-- Completed: P1.3g. Sealed forms now show only Product name and Product edition;
+- Completed: P1.3g UI behavior and the generalized metadata resolver correction.
+  Sealed forms show only Product name and Product edition;
   Purchase and Opening share seller/source including Gift and Other; visible
   inventory provenance is gone; Review is read-only until explicit confirmation;
   and recoverable errors use destructive toasts.
-- Current: G1 scaffold review. Automated checks and desktop/375px walkthroughs
-  pass after the latest refinements.
+- Current: G1 scaffold review. The resolver correction is implemented and
+  verified without product-ID exceptions.
 - Next: collect renewed G1 feedback or explicit approval. Phase 2 still requires
   explicit approval.
 - Reviewable UI:
@@ -65,8 +66,9 @@ one implementation item may be `in_progress`.
   sealed-product fetch/loading, Opening inventory match, pulled-card
   name/rarity/set/code resolution, add/collapse/remove cards, Review boundaries,
   explicit confirmation, keyboard focus, and 375px no-overflow/touch sizing. All
-  three user-supplied promotional/standard metadata fixtures resolve the exact
-  expected name, rarity, and set code.
+  six user-supplied metadata fixtures resolve the exact expected name, rarity,
+  and set code. Additional probes cover repeated card names inside a set slug,
+  apostrophes, and same-set rarity disambiguation.
 - Changed decisions: Purchase type moves first and becomes single-kind;
   TCGplayer links become required primary identity for cards/sealed products;
   Bulk repeats cards rather than purchase items; Opening reuses that card editor;
@@ -117,6 +119,10 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | P1.3g production build | pass | Isolated build compiled all 19 routes; expected Better Auth warnings because real auth secret/base URL were intentionally omitted |
 | 2026-07-17 | P1.3g development server cleanup | pass | Isolated port-3100 server stopped; the user's existing port-3000 server remained untouched |
 | 2026-07-17 | P1.3g currency-prefix alignment | pass | The All-in amount paid prefix now uses a full-height flex overlay with tight line height so the pound glyph is vertically centred without changing the input geometry |
+| 2026-07-17 | Six-link live metadata regression | pass | Products 66848, 108220, 66832, 22954, 702350, and 22940 resolved every supplied name, rarity, and set code exactly against live TCGplayer pages and YGOPRODeck data |
+| 2026-07-17 | Metadata matcher edge probes | pass | Repeated Blue-Eyes card/set wording resolved LOB-001; apostrophe-normalized Jack's Knight resolved KICO-EN028 Collector's Rare; rarity-suffixed Big Shield Gardna resolved BP02-EN032 Mosaic Rare |
+| 2026-07-17 | Resolver TypeScript, lint, and patch whitespace | pass | Generalized context scoring and possessive normalization compile without errors or lint warnings |
+| 2026-07-17 | Resolver production build | pass | Isolated build compiled all 19 routes after the matcher correction |
 
 ## Feedback and implementation notes
 
@@ -157,6 +163,15 @@ one implementation item may be `in_progress`.
   TCGplayer/Yu-Gi-Oh printing label. Automatic exact-link matching preserves
   coherent inventory without exposing its mechanics. P1.3d–P1.3f return to
   review and P1.3g becomes the single active item.
+- Feedback classification: the additional Dark Paladin, Right Leg of the
+  Forbidden One, and Big Shield Gardna links are a resolver correction under
+  P1.3, not a new product behavior. The correction must generalize across
+  marketplace/catalog naming differences and repeated card-name occurrences;
+  product-ID exceptions would hide rather than fix the reliability defect.
+- Implementation detail: printing resolution now scores every occurrence of the
+  card name against set text on both sides, tolerates meaningful marketplace
+  prefixes/suffixes, normalizes possessive apostrophes, and uses a URL rarity
+  suffix to disambiguate otherwise identical set matches.
 - Implementation detail: a development-only `NEXT_PUBLIC_RECORDS_UI_PREVIEW=1`
   flag permits local visual review without credentials. It is ignored in
   production; normal Records routes remain authenticated.

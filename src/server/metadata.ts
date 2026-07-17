@@ -164,6 +164,7 @@ function titleFromUnmatchedTcgplayerSlug(slug: string) {
 function slugify(value: string) {
   return value
     .toLowerCase()
+    .replace(/[’']/g, "")
     .replace(/&/g, " and ")
     .replace(/@/g, " ")
     .replace(/[^a-z0-9]+/g, "-")
@@ -174,21 +175,134 @@ function containsSlug(candidate: string, value: string) {
   return `-${candidate}-`.includes(`-${value}-`);
 }
 
-function contextAroundSlug(candidate: string, value: string) {
+type SlugContext = {
+  after: string;
+  before: string;
+};
+
+function contextsAroundSlug(candidate: string, value: string) {
   const paddedCandidate = `-${candidate}-`;
   const paddedValue = `-${value}-`;
-  const matchIndex = paddedCandidate.indexOf(paddedValue);
+  const contexts: SlugContext[] = [];
+  let searchFrom = 0;
+  let matchIndex = paddedCandidate.indexOf(paddedValue, searchFrom);
 
-  if (matchIndex < 0) {
-    return null;
+  while (matchIndex >= 0) {
+    contexts.push({
+      after: paddedCandidate
+        .slice(matchIndex + paddedValue.length)
+        .replace(/^-+|-+$/g, ""),
+      before: paddedCandidate.slice(0, matchIndex).replace(/^-+|-+$/g, ""),
+    });
+    searchFrom = matchIndex + 1;
+    matchIndex = paddedCandidate.indexOf(paddedValue, searchFrom);
   }
 
-  return {
-    after: paddedCandidate
-      .slice(matchIndex + paddedValue.length)
-      .replace(/^-+|-+$/g, ""),
-    before: paddedCandidate.slice(0, matchIndex).replace(/^-+|-+$/g, ""),
-  };
+  return contexts;
+}
+
+const setMatchStopWords = new Set([
+  "a",
+  "an",
+  "and",
+  "card",
+  "cards",
+  "edition",
+  "gi",
+  "oh",
+  "the",
+  "yu",
+  "yugioh",
+]);
+
+function meaningfulSlugTokens(value: string) {
+  return value
+    .split("-")
+    .filter((token) => token && !setMatchStopWords.has(token));
+}
+
+function setContextScore(setSlug: string, context: string) {
+  if (!context) {
+    return 0;
+  }
+
+  if (setSlug === context) {
+    return 10_000;
+  }
+
+  if (containsSlug(context, setSlug)) {
+    return 9_000 + setSlug.length;
+  }
+
+  if (containsSlug(setSlug, context)) {
+    return 8_500 + context.length;
+  }
+
+  const setTokens = meaningfulSlugTokens(setSlug);
+  const contextTokens = meaningfulSlugTokens(context);
+  const contextTokenSet = new Set(contextTokens);
+  const sharedCount = setTokens.filter((token) =>
+    contextTokenSet.has(token),
+  ).length;
+
+  if (sharedCount < 2 || !setTokens.length || !contextTokens.length) {
+    return 0;
+  }
+
+  const smallerCoverage =
+    sharedCount / Math.min(setTokens.length, contextTokens.length);
+  const unionSize = new Set([...setTokens, ...contextTokens]).size;
+  const similarity = sharedCount / unionSize;
+
+  if (smallerCoverage < 0.6 && similarity < 0.5) {
+    return 0;
+  }
+
+  return Math.round(
+    1_000 +
+      (smallerCoverage * 500) +
+      (similarity * 250) +
+      (sharedCount * 10),
+  );
+}
+
+function matchingCardSet(
+  cardSets: YgoProDeckCard["card_sets"],
+  contexts: SlugContext[],
+  parsedRarity: string | undefined,
+) {
+  let bestMatch: {
+    score: number;
+    set: NonNullable<YgoProDeckCard["card_sets"]>[number];
+  } | null = null;
+
+  for (const set of cardSets ?? []) {
+    const setSlug = slugify(set.set_name);
+    const contextScore = contexts.reduce(
+      (best, context) => Math.max(
+        best,
+        setContextScore(setSlug, context.before),
+        setContextScore(setSlug, context.after),
+      ),
+      0,
+    );
+
+    if (!contextScore) {
+      continue;
+    }
+
+    const rarityScore =
+      parsedRarity && slugify(set.set_rarity ?? "") === slugify(parsedRarity)
+        ? 250
+        : 0;
+    const score = contextScore + rarityScore;
+
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { score, set };
+    }
+  }
+
+  return bestMatch?.set;
 }
 
 function titleForMatchedPrinting(
@@ -321,18 +435,12 @@ async function cardDetailsFromTcgplayerSlug(productSlug: string | undefined) {
   }
 
   const cardSlug = slugify(matchedCard.name);
-  const cardContext = contextAroundSlug(candidateSlug, cardSlug);
-  const matchedSet = matchedCard.card_sets?.find((set) => {
-    const setSlug = slugify(set.set_name);
-
-    return (
-      setSlug === cardContext?.before ||
-      setSlug === cardContext?.after ||
-      Boolean(
-        cardContext?.after && containsSlug(setSlug, cardContext.after),
-      )
-    );
-  });
+  const cardContexts = contextsAroundSlug(candidateSlug, cardSlug);
+  const matchedSet = matchingCardSet(
+    matchedCard.card_sets,
+    cardContexts,
+    parsedRarity?.rarity,
+  );
 
   return {
     cardType: matchedCard.type,
