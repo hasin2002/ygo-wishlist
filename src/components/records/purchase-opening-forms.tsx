@@ -129,7 +129,6 @@ type PurchaseDraft = {
   card: CardContentsDraft;
   sealed: SealedDraft;
   bulkCards: CardContentsDraft[];
-  moreToItemize: boolean | null;
   supplyCategory: SupplyCategory;
   supplyOther: string;
   supplyQuantity: number;
@@ -148,7 +147,6 @@ function purchaseDraft(prefilledName: string): PurchaseDraft {
     card: blankCardContents(prefilledName),
     sealed: { ...blankProductIdentity(), quantity: 1 },
     bulkCards: [blankCardContents()],
-    moreToItemize: null,
     supplyCategory: "sleeves",
     supplyOther: "",
     supplyQuantity: 1,
@@ -247,7 +245,6 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
         const problem = cardContentsError(card);
         if (problem) return `${card.name || "A bulk card"}: ${problem}`;
       }
-      if (draft.moreToItemize === null) return "Say whether more cards remain to itemize.";
     }
     if (draft.kind === "supply") {
       if (draft.supplyCategory === "other" && !draft.supplyOther.trim()) return "Name the other supply or extra.";
@@ -281,7 +278,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
       : draft.kind === "sealed"
         ? source.createPurchase({ ...common, kind: "sealed", product: { ...productInput(draft.sealed), quantity: draft.sealed.quantity } })
         : draft.kind === "bulk"
-          ? source.createPurchase({ ...common, kind: "bulk", cards: draft.bulkCards.map((card) => ({ ...productInput(card), id: card.id, quantity: card.quantity })), moreToItemize: draft.moreToItemize === true })
+          ? source.createPurchase({ ...common, kind: "bulk", cards: draft.bulkCards.map((card) => ({ ...productInput(card), id: card.id, quantity: card.quantity })), moreToItemize: false })
           : source.createPurchase({ ...common, kind: "supply", category: draft.supplyCategory, otherName: draft.supplyOther.trim(), quantity: draft.supplyQuantity });
 
     setPending(false);
@@ -321,7 +318,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
       {step === 3 ? <StepPanel step={step}><FormSection description="Fetch the TCGplayer details, check the populated fields, and correct anything that is incomplete." number={3} title={`${selectedKind?.label || "Item"} details`}>
         {draft.kind === "card" ? <div className="grid gap-4"><ProductIdentityEditor kind="card" onChange={(identity) => setDraft((current) => ({ ...current, card: { ...current.card, ...identity } }))} value={draft.card} /><label className="sm:max-w-52"><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><input className={fieldClass} min="1" onChange={(event) => setDraft((current) => ({ ...current, card: { ...current.card, quantity: Number(event.target.value) } }))} onFocus={selectNumberOnFocus} required type="number" value={draft.card.quantity} /></label></div> : null}
         {draft.kind === "sealed" ? <div className="grid gap-4"><ProductIdentityEditor kind="sealed" onChange={(identity) => setDraft((current) => ({ ...current, sealed: { ...current.sealed, ...identity } }))} value={draft.sealed} /><label className="sm:max-w-52"><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><input className={fieldClass} min="1" onChange={(event) => setDraft((current) => ({ ...current, sealed: { ...current.sealed, quantity: Number(event.target.value) } }))} onFocus={selectNumberOnFocus} required type="number" value={draft.sealed.quantity} /></label></div> : null}
-        {draft.kind === "bulk" ? <div className="grid gap-4"><CardContentsEditor onChange={(bulkCards) => setDraft((current) => ({ ...current, bulkCards }))} rows={draft.bulkCards} /><fieldset className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"><legend className="px-1 text-sm font-bold text-zinc-700">Are there more cards to identify? <span className="text-rose-700">*</span></legend><div className="mt-2 grid gap-2 sm:grid-cols-2">{[{ value: true, label: "Yes, keep this lot open", hint: "Add or correct cards later without new spend." }, { value: false, label: "No, this lot is complete", hint: "Everything currently known has been entered." }].map((option) => <button aria-pressed={draft.moreToItemize === option.value} className={`min-h-20 rounded-md border p-3 text-left ${draft.moreToItemize === option.value ? "border-[#8a1f2d] bg-rose-50" : "border-zinc-300 bg-white"}`} key={String(option.value)} onClick={() => setDraft((current) => ({ ...current, moreToItemize: option.value }))} type="button"><strong className="block">{option.label}</strong><span className="mt-1 block text-xs font-medium text-zinc-500">{option.hint}</span></button>)}</div></fieldset></div> : null}
+        {draft.kind === "bulk" ? <CardContentsEditor onChange={(bulkCards) => setDraft((current) => ({ ...current, bulkCards }))} rows={draft.bulkCards} /> : null}
         {draft.kind === "supply" ? <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">Supply or extra <span className="text-rose-700">*</span></span><select className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, supplyCategory: event.target.value as SupplyCategory }))} value={draft.supplyCategory}><option value="sleeves">Sleeves</option><option value="binder">Binder</option><option value="storage">Storage</option><option value="playmat">Playmat</option><option value="other">Other</option></select></label><label><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><input className={fieldClass} min="1" onChange={(event) => setDraft((current) => ({ ...current, supplyQuantity: Number(event.target.value) }))} onFocus={selectNumberOnFocus} required type="number" value={draft.supplyQuantity} /></label>{draft.supplyCategory === "other" ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">What is it? <span className="text-rose-700">*</span></span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, supplyOther: event.target.value }))} required value={draft.supplyOther} /></label> : null}</div> : null}
       </FormSection></StepPanel> : null}
 
@@ -332,7 +329,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
           <div className="flex items-center justify-between"><h3 className="font-bold">{selectedKind?.label}</h3><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button></div>
           {draft.kind === "card" ? <ProductReview item={draft.card} quantity={draft.card.quantity} /> : null}
           {draft.kind === "sealed" ? <ProductReview item={draft.sealed} kind="sealed" quantity={draft.sealed.quantity} /> : null}
-          {draft.kind === "bulk" ? <><div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium">{cardCountSummary(draft.bulkCards)} · {draft.moreToItemize ? "More remain to itemize" : "Lot complete"}</div>{draft.bulkCards.map((card) => <ProductReview item={card} key={card.id} quantity={card.quantity} />)}</> : null}
+          {draft.kind === "bulk" ? <><div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium">{cardCountSummary(draft.bulkCards)}</div>{draft.bulkCards.map((card) => <ProductReview item={card} key={card.id} quantity={card.quantity} />)}</> : null}
           {draft.kind === "supply" ? <div className="rounded-lg border border-zinc-200 p-3"><p className="font-bold capitalize">{draft.supplyCategory === "other" ? draft.supplyOther : draft.supplyCategory}</p><p className="mt-1 text-sm font-medium text-zinc-500">Quantity {draft.supplyQuantity}</p></div> : null}
         </div>
         <div className="mt-4 rounded-lg border border-zinc-200 p-3"><span className="text-xs font-bold uppercase text-zinc-500">Notes</span><p className="mt-1 whitespace-pre-wrap text-sm font-medium text-zinc-700">{draft.notes || "No purchase notes."}</p></div>

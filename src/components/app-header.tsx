@@ -2,7 +2,6 @@
 
 import {
   BookOpen,
-  Boxes,
   CircleDot,
   FileClock,
   ListChecks,
@@ -59,18 +58,6 @@ const addItems = [
     href: "/records/new/sale",
     icon: ReceiptText,
     label: "Sale",
-  },
-  {
-    description: "Explain an inventory correction",
-    href: "/records/new/adjustment",
-    icon: ListChecks,
-    label: "Adjustment",
-  },
-  {
-    description: "Identify cards in an existing lot",
-    href: "/records/new/bulk-itemization",
-    icon: Boxes,
-    label: "Bulk itemization",
   },
 ] as const;
 

@@ -10,24 +10,22 @@ changed.
   printings, copies, collection context, and market estimates. It replaces the
   old user-facing name “Tracker”.
 - **Records** is the private operational area for acquisitions, openings,
-  sales, adjustments, sealed goods, bulk lots, supplies, cost, and realized
-  results.
+  sales, sealed goods, bulk lots, supplies, cost, and realized results.
 - A **Wishlist Target** describes a desired card and quantity. It is not proof
   of ownership.
 - A **Card Printing** identifies an exact set/code plus TCGplayer metadata.
 - A **Copy** is one physical card. Ownership changes through record history,
   never through an unexplained status toggle.
-- A **Record Entry** is one dated Purchase, Pack Opening, Sale, Adjustment,
-  Imported Acquisition, or Bulk Itemization event. An entry can contain several
-  lines.
+- A **Record Entry** is one dated Purchase, Pack Opening, Sale, or Imported
+  Acquisition event. An entry can contain several lines.
 - A **Pack Opening** consumes one Sealed Unit and creates the physical card
   Copies pulled from it. If that unit was not previously recorded, an explicit
   Imported Acquisition establishes its provenance first; gifts have zero cost,
   while unknown historical cost is not treated as zero.
-- A **Bulk Lot** is one grouped card acquisition that may be only partially
-  identified when purchased. At least one card is identified initially; later
-  itemization adds or corrects its known contents without creating a second cash
-  expense, while preserving any later history that depends on those Copies.
+- A **Bulk Lot** is one grouped card acquisition. Its known contents belong to
+  the original Purchase; future inline Record editing will add or correct those
+  contents without creating a second cash expense, while preserving any later
+  history that depends on those Copies.
 - A **Supply** is a non-card collecting expense. Initial categories are sleeves,
   binder, storage, playmat, and other.
 - **Actual cost** and **net proceeds** belong in Records. Market estimates belong

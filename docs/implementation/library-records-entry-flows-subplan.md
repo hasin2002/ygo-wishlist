@@ -8,8 +8,9 @@ Backend and database work remain blocked by G1.
 
 This subplan is the detailed specification for `P1.3 Entry workflows` in
 [`library-records-plan.md`](./library-records-plan.md). It covers Purchase, Pack
-Opening, and Sale. Adjustment and standalone Bulk Itemization remain unchanged
-until separately reviewed.
+Opening, and Sale. Adjustment and standalone Bulk Itemization are removed from
+the scaffold. Future inline editing of the original Record Entry replaces those
+workflows and requires its own reviewed subplan.
 
 If this file conflicts with the main plan on either covered flow, this file is
 more specific. The main plan's decision log must still record every replacement.
@@ -326,15 +327,14 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
 ## Resolved decisions
 
 - `D1 Bulk completion`: A Bulk Purchase requires at least one identified card
-  and an explicit `More cards remain to itemize` choice. It also requires the
-  exact total number of cards in the lot. A partial lot remains open. The
-  all-in cost is allocated per Copy against that fixed total—not the number
-  identified so far—so later Bulk Itemization adds no new spend and gives every
-  added Copy its predetermined share. Remainder pennies are assigned in stable
-  itemization order, so allocations always total exactly to the purchase amount
-  and never rebase an earlier Copy. Backend dependency rules must reject a
-  correction that would invalidate later history, such as a Sale of a Copy being
-  removed.
+  and the exact total number of cards in the lot. Its all-in cost is allocated
+  per Copy against that fixed total—not the number identified so far. A future
+  inline edit of that original Purchase may add or correct known contents with
+  no new spend, while assigning later Copies their predetermined share. Remainder
+  pennies are assigned in stable inline-edit order, so allocations always total
+  exactly to the purchase amount and never rebase an earlier Copy. Backend
+  dependency rules must reject an edit that would invalidate later history, such
+  as a Sale of a Copy being removed.
 - `D7 Metadata trigger`: Details are fetched only after the user presses the
   labeled button. The UI shows an accessible loading identifier, prevents a
   duplicate request, populates fields appropriate to the item kind, and marks

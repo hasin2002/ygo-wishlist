@@ -60,9 +60,6 @@ one implementation item may be `in_progress`.
     Review and Confirm.
   - `/records/new/sale` — four-step Single/Bulk exact-copy Sale with thumbnail
     search, rarity and Selected-only filters, pagination, Review, and Confirm.
-  - `/records/new/adjustment` — reasoned add/remove correction flow.
-  - `/records/new/bulk-itemization` — existing-lot itemization with explicit £0
-    new spend.
   - `/spend` — intentionally preserved for comparison.
 - Checks: TypeScript, lint, patch whitespace, and an isolated production build
   pass. Browser walkthroughs covered Purchase Other-source/listing input,
@@ -95,7 +92,7 @@ one implementation item may be `in_progress`.
   is explanatory information rather than an error-looking Wishlist warning.
   Bulk Lot cost allocation is required: a fixed total-card count is the
   denominator, each itemized Copy receives its predetermined share, and later
-  itemization never rebases earlier allocations.
+  inline entry editing never rebases earlier allocations.
 - Blockers: no scaffold implementation blocker. A fresh isolated production
   build remains unavailable after the runner rejection, and the in-app browser's
   viewport override did not apply for an exact P1.3i 375px rerun; both gaps stay
@@ -166,6 +163,7 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | P1.3i production build | not run | The earlier isolated build runner rejection remains in effect; TypeScript, lint, live route compilation, and desktop browser behavior pass |
 | 2026-07-17 | P1.3i development server cleanup | pass | The isolated port-3100 review server stopped; the user's existing port-3000 server remained untouched |
 | 2026-07-17 | P1.3i Bulk-to-Single correction | pass | TypeScript, lint, and patch whitespace pass. A one-Copy Bulk selection now identifies the two-Copy minimum and offers an in-place Single switch that preserves the selected Copy; Library impact remains informational only |
+| 2026-07-17 | Removed Adjustment and Bulk Itemization scaffold routes | pass | Next route type generation, TypeScript, lint, and patch whitespace pass. The two pages, forms, Add-menu entries, Inventory CTA, and stale Bulk Purchase continuation prompt are removed |
 
 ## Feedback and implementation notes
 
@@ -257,9 +255,13 @@ one implementation item may be `in_progress`.
 - Feedback classification: Bulk allocation is a product/accounting correction.
   Recommendation accepted: require the lot's exact total-card count and divide
   its all-in cost across that stable denominator, rather than the temporarily
-  identified subset. This reopens Bulk Purchase, Bulk Itemization, and the
-  Phase 2 allocation model; no backend or preview-model change is made before
-  renewed G1 review and explicit backend approval.
+  identified subset. This reopens Bulk Purchase, future inline-entry editing,
+  and the Phase 2 allocation model; no backend or preview-model change is made
+  before renewed G1 review and explicit backend approval.
+- Feedback classification: removing Adjustment and standalone Bulk Itemization
+  is a product/navigation replacement. Both pages, forms, Add-menu choices, and
+  Inventory itemization CTA are removed. Inline editing of the original Record
+  Entry is explicitly deferred; it is not falsely represented as implemented.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment

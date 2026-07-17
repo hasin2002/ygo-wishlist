@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  Archive,
   ArrowDownLeft,
   ArrowUpRight,
   Boxes,
@@ -496,7 +495,6 @@ function InventoryView() {
             <article className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm" key={lot.id}>
               <div className="flex items-start justify-between gap-3"><Boxes className="size-6 text-[#8a1f2d]" /><span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-bold capitalize text-amber-800">{lot.status}</span></div>
               <h3 className="mt-4 font-bold">{lot.name}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{lot.itemizedQuantity} itemized{lot.estimatedQuantity ? ` of about ${lot.estimatedQuantity}` : ""}</p>
-              <Link className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white" href={`/records/new/bulk-itemization?bulkId=${encodeURIComponent(lot.id)}`}><Archive className="size-4" /> Itemize lot</Link>
             </article>
           ))}
         </section>

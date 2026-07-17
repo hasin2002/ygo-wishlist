@@ -62,8 +62,7 @@ The detailed, authoritative field and interaction specification for Purchase and
 Pack Opening is [`library-records-entry-flows-subplan.md`](./library-records-entry-flows-subplan.md).
 Its open decisions must be closed before either flow is rewritten.
 
-- Global Add exposes Purchase, Pack opening, Sale, Adjustment, and Bulk
-  itemization.
+- Global Add exposes Purchase, Pack opening, and Sale.
 - Purchase uses four stages: item-type choice, purchase details, item details,
   and review. One Purchase records one Single Card, one Sealed Product, one Bulk
   Lot with card contents, or one Supply/Extra; it does not mix inventory kinds.
@@ -84,13 +83,14 @@ Its open decisions must be closed before either flow is rewritten.
 - Every card added through Single Card Purchase, Bulk Lot contents, or Pack
   Opening pulls requires Card edition. New card rows default to `1st Edition`;
   the user may change the visible field to `Unlimited Edition` before Review.
-- A Bulk Purchase requires at least one identified card and records whether more
-  cards remain. It also requires the exact total number of physical cards in
-  the lot. Its all-in cost is automatically and permanently allocated across
-  that fixed count from the first identified Copy; later itemization receives
+- A Bulk Purchase requires at least one identified card. It also requires the
+  exact total number of physical cards in the lot. Its all-in cost is
+  automatically and permanently allocated across that fixed count from the
+  first identified Copy; later inline edits receive
   the same per-Copy allocation and never changes an earlier Copy's allocation.
-  Partial lots can be updated/itemized later without new spend; dependency rules
-  prevent corrections that would contradict later history.
+  A future inline edit of the original Purchase, rather than a separate Record
+  Entry, will add or correct those known contents without new spend; dependency
+  rules prevent corrections that would contradict later history.
 - Entering the Review stage never creates a record. Review shows the purchase
   facts and selected acquisition, and creation requires a separate explicit
   confirmation.
@@ -98,8 +98,6 @@ Its open decisions must be closed before either flow is rewritten.
   copies, and also requires an explicit confirmation from Review. It consumes a
   matching unopened Sealed Unit or creates an explicit Gift/unknown-cost
   Imported Acquisition before opening, so provenance is never orphaned.
-- Bulk itemization attaches discovered contents to an existing lot with zero new
-  spend.
 - Sale uses four stages: sale type, sale details, cards sold, and Review. Single
   selects exactly one available physical Copy; Bulk selects two or more tracked
   Copies within one Sale record. This does not sell an unitemized Bulk Lot.
@@ -112,12 +110,10 @@ Its open decisions must be closed before either flow is rewritten.
   for a new TCGplayer link.
 - Entering Sale Review never creates a record; a separate confirmation records
   net proceeds and marks the selected Copies sold.
-- Adjustment explicitly captures reason and direction; it is not a shortcut for
-  normal acquisitions or sales.
 - Forms preserve a preview draft while navigating in the current session and
   clearly state that submission is simulated.
 - Use short, progressive multi-step flows where the task has distinct decisions:
-  purchase, pack opening, sale, adjustment, and bulk itemization. Keep each step
+  purchase, pack opening, and sale. Keep each step
   focused, show progress and a compact running summary, and avoid artificial
   steps for fields that belong together.
 - Use a subtle directional step transition. Respect `prefers-reduced-motion` and
@@ -208,6 +204,9 @@ Review complete real-data behavior before deployment or landing on `main`.
 - Sales of sealed products, bulk lots, or supplies.
 - Automated marketplace/order importing.
 - TCGplayer developer-credential integrations.
+- Inline Record editing, including adding or correcting a Bulk Purchase's card
+  contents. It replaces the removed Adjustment and standalone Bulk Itemization
+  flows and needs its own review before implementation.
 - Deployment, production migration, and landing on `main` until their gates.
 
 ## Decision change log
@@ -226,3 +225,4 @@ Review complete real-data behavior before deployment or landing on `main`.
 | 2026-07-17 | Sale was a two-step unfiltered text-row list with unrestricted multi-selection and submission from its final editing page | Four-stage Single/Bulk card Sale with details before inventory selection, paginated searchable/filterable thumbnail cards, read-only Review, and explicit confirmation | G1 feedback requires scalable discovery and a Purchase-like flow while continuing to operate on already-tracked Copies | P1.3, P1.5 |
 | 2026-07-17 | Card edition was omitted for Single/Bulk/Pull cards; Sale displayed a target-reopening warning that looked like an unexplained error | Require visible Card edition defaulted to `1st Edition` for every acquired card; use one consistent Single/Bulk selection surface with inline minimum progress and a neutral plain-language Library-impact summary | Edition is part of target identity, while implementation terms such as “reopens Wishlist” do not explain the real effect to the user | P1.3, P1.5, preview target matching |
 | 2026-07-17 | Bulk per-card allocation was optional/absent | Require a fixed total-card count for every Bulk Lot and automatically allocate its all-in cost across that count from first itemization; later cards receive their original share without rebasing earlier cards | Dividing by identified cards makes cost and realised results change as sorting progresses; the advertised/known lot count is the stable denominator | P1.3 Bulk, Bulk Itemization, P2 allocation model |
+| 2026-07-17 | Global Add exposed Adjustment and standalone Bulk Itemization, while a Bulk Purchase could promise a separate later-itemization workflow | Remove both pages/forms and every visible entry point. Defer inline editing of the original Record Entry as the replacement for later Bulk contents and corrections | The two specialist flows add unnecessary bookkeeping concepts before the main Records workflow is coherent; edits should be found where the original entry lives | P1.3, P1.5, future inline-entry editing subplan |
