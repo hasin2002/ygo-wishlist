@@ -82,6 +82,8 @@ one implementation item may be `in_progress`.
   itemized and be updated later without new spend; Pack Opening uses
   match-or-explain provenance; every pull requires link and rarity; notes move
   before read-only Review; both Reviews require explicit confirmation.
+  Gift now forces Purchase spend to £0 while selected, and quantity fields
+  select their existing value on focus for one-keystroke replacement.
 - Blockers: no scaffold implementation blocker. Phase 2 remains intentionally
   blocked by explicit G1 approval.
 
@@ -133,6 +135,7 @@ one implementation item may be `in_progress`.
 | 2026-07-17 | Exact metadata/state production build | pass | An isolated webpack build compiled all 19 routes without writing into the user's active `.next` dev session; expected Better Auth warnings because review credentials were intentionally omitted |
 | 2026-07-17 | Rarity status-label alignment | pass | The Rarity Auto-filled/Edited indicator now appears beside the label and required marker, matching the other derived fields; TypeScript, lint, and patch whitespace pass |
 | 2026-07-17 | Card-list action ordering | pass | The shared Card Contents Editor now places Add another card above the existing card summaries; behavior and touch-target styling are unchanged |
+| 2026-07-17 | Gift amount and quantity input UX | pass | Gift forces the Purchase amount to a read-only £0; Records quantity inputs select their current value on focus so a typed number replaces the default immediately; TypeScript, lint, and patch whitespace pass |
 
 ## Feedback and implementation notes
 
@@ -203,6 +206,10 @@ one implementation item may be `in_progress`.
 - Implementation detail: the shared Card Contents Editor places its add action
   before existing card summaries so the action precedes the content it creates;
   add/edit/remove behaviour is unchanged.
+- Feedback classification: Gift amount behavior is a product/UX correction and
+  quantity replacement is a form interaction correction under P1.3. Gift is
+  enforced as zero-cost in both the visible field and submitted preview data;
+  quantity validation and stored values are otherwise unchanged.
 - Worktree update: after G1 scaffold completion, the temporary checkout was
   removed and `agent/collection-records` was switched into the primary project
   directory at the user's request. The uncommitted Stardust modelling experiment

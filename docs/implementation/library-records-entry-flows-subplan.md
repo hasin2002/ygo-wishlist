@@ -67,7 +67,9 @@ more specific. The main plan's decision log must still record every replacement.
 - Options are eBay, TCGplayer, Cardmarket, Facebook Marketplace, Local card
   shop, Private seller, Gift, and Other.
 - Other reveals one required free-text source field. Gift is a real zero-cost
-  source; every other unpriced Opening source has unknown historical cost.
+  source; for Purchase it forces All-in amount paid to £0 and makes the field
+  read-only until another source is selected. Every other unpriced Opening
+  source has unknown historical cost.
 - Pack Opening does not expose inventory-provenance language, matching-unit
   selection, or imported-acquisition mechanics. An exact unopened URL match is
   consumed automatically in the preview; without a match, the selected source
@@ -154,6 +156,8 @@ Purchase is four stages in this order:
 
 - Keep purchase date, seller/source selector, conditional `Other` source name,
   optional purchase listing URL, and all-in amount paid.
+- Selecting Gift automatically sets the amount to £0 and prevents contradictory
+  editing while Gift remains selected.
 - Keep purchase-level facts independent of the chosen inventory kind so Back
   navigation does not discard them.
 
@@ -175,6 +179,8 @@ The page branches by the type selected in stage 1:
 - `Supply or Extra`: one required category selector containing Sleeves, Binder,
   Storage, Playmat, and Other; choosing Other reveals a required free-text name.
   Do not show a second duplicate supply-name field. Keep quantity.
+- Every quantity input selects its current value when focused, allowing a typed
+  number to replace the default `1` immediately.
 
 ### P1.3-P4 Review and confirmation
 

@@ -3,7 +3,10 @@
 import { Check, CirclePlus, Pencil, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
-import { DestructiveToast } from "@/components/records/entry-form-ui";
+import {
+  DestructiveToast,
+  selectNumberOnFocus,
+} from "@/components/records/entry-form-ui";
 import {
   blankProductIdentity,
   isTcgplayerProductUrl,
@@ -108,7 +111,7 @@ export function CardContentsEditor({
           <ProductIdentityEditor kind="card" onChange={(identity) => update(row.id, identity)} value={row} />
           <label className="mt-4 block sm:max-w-52">
             <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
-            <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} required type="number" value={row.quantity} />
+            <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} onFocus={selectNumberOnFocus} required type="number" value={row.quantity} />
           </label>
           <button className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white sm:w-auto" onClick={finishCard} type="button"><Check className="size-4" /> Done with this card</button>
         </article>

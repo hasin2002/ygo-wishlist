@@ -9,7 +9,7 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type FocusEvent, type ReactNode } from "react";
 
 export const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
 export const textAreaClass = "mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
@@ -25,6 +25,10 @@ export function poundsToPence(value: string) {
 
 export function penceToPounds(value: number) {
   return (value / 100).toFixed(2);
+}
+
+export function selectNumberOnFocus(event: FocusEvent<HTMLInputElement>) {
+  event.currentTarget.select();
 }
 
 export function rowId(prefix: string) {

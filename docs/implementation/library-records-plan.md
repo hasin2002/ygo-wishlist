@@ -69,6 +69,8 @@ Its open decisions must be closed before either flow is rewritten.
   Lot with card contents, or one Supply/Extra; it does not mix inventory kinds.
 - Purchase details include an optional source listing URL and a source selector.
   Choosing `Other` reveals a required free-text source name.
+  Choosing `Gift` forces the all-in amount paid to £0 and makes that amount
+  read-only until another source is selected.
 - Item type is selected with labeled, icon-backed buttons rather than a compact
   dropdown. TCGplayer product URLs are the required primary identity field for
   new cards and sealed products. A labeled `Fetch details` action shows an
@@ -103,6 +105,8 @@ Its open decisions must be closed before either flow is rewritten.
   steps for fields that belong together.
 - Use a subtle directional step transition. Respect `prefers-reduced-motion` and
   never make animation necessary to understand or operate the form.
+- Quantity inputs select their current value on focus so typing replaces the
+  default `1` without cursor positioning or manual deletion.
 
 ### P1.4 Library and global integration
 
