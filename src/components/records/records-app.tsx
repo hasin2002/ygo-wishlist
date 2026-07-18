@@ -29,7 +29,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import {
   CardContentsEditor,
@@ -1181,20 +1181,40 @@ function InventoryView() {
   const [cardPage, setCardPage] = useState(1);
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const cardPageSize = 24;
-  const inventoryCards = snapshot.targets.map((target) => {
-    const printings = snapshot.printings.filter((printing) => printing.targetId === target.id);
-    const printingIds = new Set(printings.map((printing) => printing.id));
-    const copies = snapshot.copies.filter((copy) => printingIds.has(copy.printingId));
-    const ownedCopies = copies.filter((copy) => copy.status === "available");
-    return {
-      copies,
-      hasKnownPurchaseValue: ownedCopies.some((copy) => copy.allocationPence !== null),
-      libraryStatus: getLibraryCardStatus(target.desiredQuantity, ownedCopies.length),
-      printings,
-      purchaseValuePence: ownedCopies.reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0),
-      target,
-    };
-  });
+  const inventoryCards = useMemo(() => {
+    const printingsByTarget = new Map<string, CardPrinting[]>();
+    const targetIdByPrintingId = new Map<string, string>();
+    const copiesByTarget = new Map<string, CardCopy[]>();
+
+    for (const printing of snapshot.printings) {
+      targetIdByPrintingId.set(printing.id, printing.targetId);
+      const printings = printingsByTarget.get(printing.targetId) ?? [];
+      printings.push(printing);
+      printingsByTarget.set(printing.targetId, printings);
+    }
+
+    for (const copy of snapshot.copies) {
+      const targetId = targetIdByPrintingId.get(copy.printingId);
+      if (!targetId) continue;
+      const copies = copiesByTarget.get(targetId) ?? [];
+      copies.push(copy);
+      copiesByTarget.set(targetId, copies);
+    }
+
+    return snapshot.targets.map((target) => {
+      const printings = printingsByTarget.get(target.id) ?? [];
+      const copies = copiesByTarget.get(target.id) ?? [];
+      const ownedCopies = copies.filter((copy) => copy.status === "available");
+      return {
+        copies,
+        hasKnownPurchaseValue: ownedCopies.some((copy) => copy.allocationPence !== null),
+        libraryStatus: getLibraryCardStatus(target.desiredQuantity, ownedCopies.length),
+        printings,
+        purchaseValuePence: ownedCopies.reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0),
+        target,
+      };
+    });
+  }, [snapshot.copies, snapshot.printings, snapshot.targets]);
   const rarityOptions = Array.from(new Set(snapshot.targets.map((target) => target.rarity))).sort();
   const editionOptions = Array.from(new Set(snapshot.targets.map((target) => target.edition))).sort();
   const filteredTargets = inventoryCards.filter(({ libraryStatus, target }) => {
@@ -1253,7 +1273,7 @@ function InventoryView() {
                   {target.imageUrl ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img alt={`${target.name} card`} className="h-full w-full object-cover" src={target.imageUrl} />
+                      <img alt={`${target.name} card`} className="h-full w-full object-cover" decoding="async" loading="lazy" src={target.imageUrl} />
                     </>
                   ) : (
                     <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />

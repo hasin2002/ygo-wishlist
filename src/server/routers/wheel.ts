@@ -60,12 +60,16 @@ function serializeTarget(target: typeof cardTargets.$inferSelect) {
   };
 }
 
+type WheelTarget = typeof cardTargets.$inferSelect;
+type WheelEntry = typeof targetWheelEntries.$inferSelect;
+type WheelRow = { target: WheelTarget; entry: WheelEntry };
+
 function serializeWheelItem({
   target,
   entry,
 }: {
-  target: typeof cardTargets.$inferSelect;
-  entry: typeof targetWheelEntries.$inferSelect;
+  target: WheelTarget;
+  entry: WheelEntry;
 }) {
   const { ownerId, targetId, ...serializedEntry } = entry;
   void ownerId;
@@ -83,7 +87,24 @@ function serializeWheelItem({
   };
 }
 
-async function wishlistTargetIds(ownerId: string) {
+function serializePendingWheelItem(target: WheelTarget) {
+  return {
+    card: serializeTarget(target),
+    entry: {
+      cardId: target.id,
+      createdAt: target.createdAt.toISOString(),
+      id: `pending-${target.id}`,
+      selectedAt: null,
+      selectedOrder: null,
+      sortOrder: Number.MAX_SAFE_INTEGER,
+      updatedAt: target.updatedAt.toISOString(),
+    },
+    priceValue: marketValue(target),
+    weight: wheelWeight(target),
+  };
+}
+
+async function wishlistTargets(ownerId: string) {
   const [targets, printings, copies] = await Promise.all([
     db.select().from(cardTargets).where(eq(cardTargets.ownerId, ownerId)),
     db.select().from(cardPrintings).where(eq(cardPrintings.ownerId, ownerId)),
@@ -98,22 +119,22 @@ async function wishlistTargetIds(ownerId: string) {
     if (targetId) ownedCount.set(targetId, (ownedCount.get(targetId) ?? 0) + 1);
   }
   return targets
-    .filter((target) => (ownedCount.get(target.id) ?? 0) < target.desiredQuantity)
-    .map((target) => target.id);
+    .filter((target) => (ownedCount.get(target.id) ?? 0) < target.desiredQuantity);
 }
 
-async function syncWishlistEntries(ownerId: string) {
-  const wishlistIds = await wishlistTargetIds(ownerId);
-  if (!wishlistIds.length) return;
-  const targets = await db.select().from(cardTargets).where(and(
-    eq(cardTargets.ownerId, ownerId), inArray(cardTargets.id, wishlistIds),
-  )).orderBy(asc(cardTargets.name));
+async function syncWishlistEntries(
+  ownerId: string,
+  targets: WheelTarget[],
+) {
+  if (!targets.length) return;
   const existing = await db.select().from(targetWheelEntries).where(
     eq(targetWheelEntries.ownerId, ownerId),
   );
   const existingIds = new Set(existing.map((entry) => entry.targetId));
   const nextSortOrder = existing.reduce((highest, entry) => Math.max(highest, entry.sortOrder), -1) + 1;
-  const missing = targets.filter((target) => !existingIds.has(target.id));
+  const missing = targets
+    .filter((target) => !existingIds.has(target.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
   if (!missing.length) return;
   const now = new Date();
   await db.insert(targetWheelEntries).values(missing.map((target, index) => ({
@@ -121,24 +142,38 @@ async function syncWishlistEntries(ownerId: string) {
   })));
 }
 
-async function wheelRows(ownerId: string) {
-  const wishlistIds = new Set(await wishlistTargetIds(ownerId));
-  const rows = await db.select({ target: cardTargets, entry: targetWheelEntries })
-    .from(targetWheelEntries)
-    .innerJoin(cardTargets, eq(targetWheelEntries.targetId, cardTargets.id))
-    .where(and(
-      eq(cardTargets.ownerId, ownerId), eq(targetWheelEntries.ownerId, ownerId),
-    ))
-    .orderBy(asc(targetWheelEntries.sortOrder));
-  return rows.filter(({ target }) => wishlistIds.has(target.id));
+async function wheelRows(ownerId: string, targets: WheelTarget[]): Promise<WheelRow[]> {
+  if (!targets.length) return [];
+  const entries = await db.select().from(targetWheelEntries).where(and(
+    eq(targetWheelEntries.ownerId, ownerId),
+    inArray(targetWheelEntries.targetId, targets.map((target) => target.id)),
+  )).orderBy(asc(targetWheelEntries.sortOrder));
+  const targetById = new Map(targets.map((target) => [target.id, target]));
+  return entries.flatMap((entry) => {
+    const target = targetById.get(entry.targetId);
+    return target ? [{ target, entry }] : [];
+  });
 }
 
 export const wheelRouter = router({
   state: authenticatedProcedure.query(async ({ ctx }) => {
-    await syncWishlistEntries(ctx.collectionOwnerId);
-    const rows = await wheelRows(ctx.collectionOwnerId);
+    const targets = await wishlistTargets(ctx.collectionOwnerId);
+    const rows = await wheelRows(ctx.collectionOwnerId, targets);
+    const rowByTargetId = new Map(rows.map((row) => [row.target.id, row]));
+    const active = targets
+      .filter((target) => !rowByTargetId.get(target.id)?.entry.selectedAt)
+      .sort((left, right) => {
+        const leftOrder = rowByTargetId.get(left.id)?.entry.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = rowByTargetId.get(right.id)?.entry.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        return leftOrder - rightOrder || left.name.localeCompare(right.name);
+      })
+      .map((target) => {
+        const row = rowByTargetId.get(target.id);
+        return row ? serializeWheelItem(row) : serializePendingWheelItem(target);
+      });
+
     return {
-      active: rows.filter(({ entry }) => !entry.selectedAt).map(serializeWheelItem),
+      active,
       history: rows.filter(({ entry }) => entry.selectedAt)
         .sort((left, right) => (left.entry.selectedOrder ?? 0) - (right.entry.selectedOrder ?? 0))
         .map(serializeWheelItem),
@@ -150,8 +185,9 @@ export const wheelRouter = router({
     maxPrice: z.number().min(0).optional(),
     minPrice: z.number().min(0).optional(),
   }).optional()).mutation(async ({ ctx, input }) => {
-    await syncWishlistEntries(ctx.collectionOwnerId);
-    const activeRows = (await wheelRows(ctx.collectionOwnerId)).filter(({ target, entry }) => (
+    const targets = await wishlistTargets(ctx.collectionOwnerId);
+    await syncWishlistEntries(ctx.collectionOwnerId, targets);
+    const activeRows = (await wheelRows(ctx.collectionOwnerId, targets)).filter(({ target, entry }) => (
       !entry.selectedAt
       && matchesChaseFilter(target, input?.chaseLevels ?? [])
       && matchesPriceFilter(target, input?.minPrice, input?.maxPrice)
@@ -185,8 +221,9 @@ export const wheelRouter = router({
   }),
 
   reset: authenticatedProcedure.mutation(async ({ ctx }) => {
-    await syncWishlistEntries(ctx.collectionOwnerId);
-    const wishlistIds = await wishlistTargetIds(ctx.collectionOwnerId);
+    const targets = await wishlistTargets(ctx.collectionOwnerId);
+    await syncWishlistEntries(ctx.collectionOwnerId, targets);
+    const wishlistIds = targets.map((target) => target.id);
     if (!wishlistIds.length) return { ok: true, resetCount: 0 };
     const resettable = await db.select({ id: targetWheelEntries.id }).from(targetWheelEntries).where(and(
       eq(targetWheelEntries.ownerId, ctx.collectionOwnerId),

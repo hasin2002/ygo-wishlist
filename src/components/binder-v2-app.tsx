@@ -22,6 +22,7 @@ import {
 } from "react";
 import { PageFlip } from "page-flip";
 import { AppHeader } from "@/components/app-header";
+import { useInitialAuth } from "@/app/providers";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
@@ -29,6 +30,7 @@ import {
   rarityAbbreviation,
 } from "@/lib/rarity-abbreviations";
 import { useSession } from "@/lib/auth-client";
+import { useClientReady } from "@/lib/use-client-ready";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -329,6 +331,7 @@ function PageValuePills({
 }
 
 export function BinderV2App() {
+  const clientReady = useClientReady();
   const bookHostRef = useRef<HTMLDivElement | null>(null);
   const pageFlipRef = useRef<PageFlip | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
@@ -344,22 +347,25 @@ export function BinderV2App() {
   const [swapFromPage, setSwapFromPage] = useState("1");
   const [swapToPage, setSwapToPage] = useState("2");
   const [swapError, setSwapError] = useState("");
-  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
-    typeof window === "undefined"
-      ? false
-      : Math.min(window.innerWidth, window.screen.width) < 768,
-  );
+  // Start with the desktop-compatible tree on both server and client. The
+  // viewport effect below switches to the mobile board after hydration, which
+  // avoids building two different trees for the same initial render.
+  const [isNarrowViewport, setIsNarrowViewport] = useState(false);
   const [stagingPage, setStagingPage] = useState(1);
   const [currentPage, setCurrentPage] = useState(0);
   const [pageInput, setPageInput] = useState("1");
   const currentPageRef = useRef(0);
   const { data: session } = useSession();
-  const canEdit = Boolean(session);
+  const initialAuth = useInitialAuth();
+  const canEdit = Boolean(session) || initialAuth.isAuthenticated;
   const utils = trpc.useUtils();
   const cardsQuery = trpc.cards.binderList.useQuery(undefined, {
+    enabled: clientReady,
     staleTime: 30_000,
   });
-  const layoutQuery = trpc.binder.layout.useQuery();
+  const layoutQuery = trpc.binder.layout.useQuery(undefined, {
+    enabled: clientReady,
+  });
   const setSlot = trpc.binder.setSlot.useMutation({
     onSuccess: () => void utils.binder.layout.invalidate(),
   });

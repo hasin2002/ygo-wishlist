@@ -28,6 +28,7 @@ import { DataLoadError } from "@/components/data-load-error";
 import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
+import { useClientReady } from "@/lib/use-client-ready";
 
 type WheelItem = inferRouterOutputs<AppRouter>["wheel"]["state"]["active"][number];
 type ChaseFilterValue = "unset" | "5" | "4" | "3" | "2" | "1";
@@ -357,8 +358,11 @@ function Pager({
 }
 
 export function WheelApp() {
+  const clientReady = useClientReady();
   const utils = trpc.useUtils();
-  const wheelQuery = trpc.wheel.state.useQuery();
+  const wheelQuery = trpc.wheel.state.useQuery(undefined, {
+    enabled: clientReady,
+  });
   const spinWheel = trpc.wheel.spin.useMutation();
   const markOwned = trpc.cards.markOwned.useMutation({
     onSuccess: () => {

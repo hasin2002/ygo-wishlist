@@ -25,7 +25,9 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useInitialAuth } from "@/app/providers";
 import { authClient, useSession } from "@/lib/auth-client";
+import { useClientReady } from "@/lib/use-client-ready";
 import { clearPersistedQueryCache, trpc } from "@/trpc/client";
 
 const navItems = [
@@ -256,68 +258,23 @@ export function AppHeader({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(true);
   const { data: session, isPending: sessionPending } = useSession();
+  const initialAuth = useInitialAuth();
+  const clientReady = useClientReady();
   const localPreviewReview =
     process.env.NODE_ENV !== "production" &&
     process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
-  const hasSession = Boolean(session);
+  const hasSession = Boolean(session) || initialAuth.isAuthenticated;
   const isAuthenticated = hasSession || localPreviewReview;
-  const isAdmin = session?.user.role === "admin";
+  const isAdmin = session?.user.role === "admin" || initialAuth.role === "admin";
   const visibleNavItems = isAuthenticated
     ? [...navItems, ...(isAdmin ? adminNavItems : [])]
     : navItems.filter((item) => item.href === "/" || item.href === "/binder-v2");
-  const utils = trpc.useUtils();
   const currentMonth = trpc.spend.currentMonth.useQuery(undefined, {
-    enabled: hasSession,
+    enabled: clientReady && hasSession && !localPreviewReview,
     staleTime: 60_000,
   });
   const monthlyTotal = currentMonth.data?.total ?? 0;
   const monthlyLabel = currentMonth.data?.label ?? "This month";
-
-  useEffect(() => {
-    if (!hasSession) {
-      return;
-    }
-
-    const prefetchLikelyRoutes = () => {
-      void utils.cards.list.prefetch(
-        { status: "owned", query: "" },
-        { staleTime: 30_000 },
-      );
-      void utils.spend.monthlyFavourites.prefetch(undefined, {
-        staleTime: 30_000,
-      });
-
-      if (pathname !== "/") {
-        void utils.cards.trackerPage.prefetch(
-          {
-            chaseFilters: [],
-            page: 1,
-            pageSize: 8,
-            priceMax: "",
-            priceMin: "",
-            priceSignalFilters: [],
-            query: "",
-            rarityFilters: [],
-            sort: "updated",
-            status: "all",
-            typeFilters: [],
-          },
-          { staleTime: 30_000 },
-        );
-      }
-
-      if (pathname !== "/assign-chase") {
-        void utils.cards.chaseQueue.prefetch(undefined, { staleTime: 30_000 });
-      }
-
-      // Binder and Wheel payloads are intentionally not prefetched here; they are
-      // larger planner views and can compete with the Spend data users expect fast.
-    };
-
-    const timeoutId = window.setTimeout(prefetchLikelyRoutes, 750);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [hasSession, pathname, utils]);
 
   async function signOut() {
     await authClient.signOut();

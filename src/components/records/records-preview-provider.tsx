@@ -35,6 +35,7 @@ import {
   type ResolveProductResult,
 } from "@/lib/records/types";
 import { trpc } from "@/trpc/client";
+import { useClientReady } from "@/lib/use-client-ready";
 
 const emptySnapshot: RecordsSnapshot = {
   version: 1,
@@ -242,10 +243,21 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
   return <RecordsDataSourceContext.Provider value={value}>{children}</RecordsDataSourceContext.Provider>;
 }
 
-function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
+function RecordsLiveStateProvider({
+  children,
+  initialSnapshot,
+}: {
+  children: ReactNode;
+  initialSnapshot?: RecordsSnapshot;
+}) {
+  const clientReady = useClientReady();
   const [drafts, setDrafts] = useState<RecordsDrafts>({});
   const [draftsHydrated, setDraftsHydrated] = useState(false);
-  const snapshotQuery = trpc.records.snapshot.useQuery(undefined, { staleTime: 5_000 });
+  const snapshotQuery = trpc.records.snapshot.useQuery(undefined, {
+    enabled: clientReady,
+    initialData: initialSnapshot,
+    staleTime: 30_000,
+  });
   const utils = trpc.useUtils();
   const createPurchase = trpc.records.createPurchase.useMutation();
   const createOpening = trpc.records.createOpening.useMutation();
@@ -390,14 +402,28 @@ const loadingValue: RecordsDataSource = {
   clearDraft: () => undefined,
 };
 
-export function RecordsDataProvider({ children }: { children: ReactNode }) {
+export function RecordsDataProvider({
+  children,
+  initiallyAuthenticated = false,
+  initialSnapshot,
+}: {
+  children: ReactNode;
+  initiallyAuthenticated?: boolean;
+  initialSnapshot?: RecordsSnapshot;
+}) {
   const { data: session, isPending } = useSession();
   const previewReview = process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
   if (previewReview) return <RecordsPreviewStateProvider>{children}</RecordsPreviewStateProvider>;
-  if (isPending || !session) {
+  if ((!initiallyAuthenticated && isPending) || (!initiallyAuthenticated && !session)) {
     return <RecordsDataSourceContext.Provider value={loadingValue}>{children}</RecordsDataSourceContext.Provider>;
   }
-  return <RecordsLiveStateProvider>{children}</RecordsLiveStateProvider>;
+  return (
+    <RecordsLiveStateProvider
+      initialSnapshot={initialSnapshot}
+    >
+      {children}
+    </RecordsLiveStateProvider>
+  );
 }
 
 // Kept as a compatibility export while call sites move to the source-neutral name.
