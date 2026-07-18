@@ -30,7 +30,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { AppHeader } from "@/components/app-header";
 import {
   CardContentsEditor,
   type CardContentsDraft,
@@ -92,7 +91,7 @@ function recordAmount(record: RecordEntry) {
   return "No cashflow";
 }
 
-function PreviewBanner() {
+export function PreviewBanner() {
   const source = useRecordsDataSource();
 
   if (source.mode !== "preview") return null;
@@ -127,7 +126,7 @@ function PreviewBanner() {
   );
 }
 
-function RecordsNavigation({ view }: { view: RecordsView }) {
+export function RecordsNavigation({ view }: { view: RecordsView }) {
   const items = [
     { href: "/records", label: "Overview", value: "overview" },
     { href: "/records/history", label: "History", value: "history" },
@@ -1345,22 +1344,17 @@ export function RecordsApp({ view }: { view: RecordsView }) {
   const source = useRecordsDataSource();
 
   return (
-    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <AppHeader eyebrow="Private collection records" title="Records" />
-        <PreviewBanner />
-        <RecordsNavigation view={view} />
-        {source.status === "loading" ? (
-          <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
-            <div className="text-center"><Clock3 className="mx-auto size-7 animate-pulse text-[#8a1f2d]" /><p className="mt-3 font-bold">Preparing Records</p></div>
-          </div>
-        ) : source.status === "error" ? (
-          <div className="rounded-lg border border-rose-300 bg-rose-50 px-5 py-8 text-center text-rose-950" role="alert">
-            <p className="font-black">Records could not be loaded</p>
-            <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6">{source.errorMessage || "Refresh the page and try again."}</p>
-          </div>
-        ) : view === "overview" ? <Overview /> : view === "history" ? <HistoryView /> : <InventoryView />}
-      </div>
-    </main>
+    <>
+      {source.status === "loading" ? (
+        <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
+          <div className="text-center"><Clock3 className="mx-auto size-7 animate-pulse text-[#8a1f2d]" /><p className="mt-3 font-bold">Preparing Records</p></div>
+        </div>
+      ) : source.status === "error" ? (
+        <div className="rounded-lg border border-rose-300 bg-rose-50 px-5 py-8 text-center text-rose-950" role="alert">
+          <p className="font-black">Records could not be loaded</p>
+          <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6">{source.errorMessage || "Refresh the page and try again."}</p>
+        </div>
+      ) : view === "overview" ? <Overview /> : view === "history" ? <HistoryView /> : <InventoryView />}
+    </>
   );
 }
