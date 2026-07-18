@@ -20,6 +20,7 @@ import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
+import { useClientReady } from "@/lib/use-client-ready";
 
 type Card = inferRouterOutputs<AppRouter>["cards"]["list"][number];
 type MonthlyFavourite =
@@ -545,6 +546,7 @@ function SpendSkeleton() {
 }
 
 export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
+  const clientReady = useClientReady();
   const currentMonth = currentMonthKey();
   const currentYear = Number(currentMonth.slice(0, 4));
   const utils = trpc.useUtils();
@@ -559,11 +561,13 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
   const list = trpc.cards.list.useQuery(
     { status: "owned", query: "" },
     {
+      enabled: clientReady,
       initialData: initialCards === undefined ? undefined : initialCards,
       staleTime: 30_000,
     },
   );
   const favourites = trpc.spend.monthlyFavourites.useQuery(undefined, {
+    enabled: clientReady,
     staleTime: 30_000,
   });
   const setMonthlyFavourite = trpc.spend.setMonthlyFavourite.useMutation({

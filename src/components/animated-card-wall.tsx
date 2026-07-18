@@ -79,7 +79,7 @@ export function AnimatedCardWall({
                           className={styles.image}
                           draggable={false}
                           height={600}
-                          loading="eager"
+                          loading="lazy"
                           sizes="(min-width: 1280px) 14vw, (min-width: 1024px) 16vw, 22vw"
                           src={src}
                           width={412}

@@ -20,6 +20,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { trpc } from "@/trpc/client";
+import { useClientReady } from "@/lib/use-client-ready";
 
 type Idea = { id: string; text: string; x: number; y: number };
 type Connection = { from: string; id: string; to: string; type: "arrow" | "line" };
@@ -164,6 +165,7 @@ function connectionPoints(page: IdeaPage, connection: Connection) {
 }
 
 export function FeatureIdeasApp() {
+  const clientReady = useClientReady();
   const [pages, setPages] = useState<IdeaPage[]>([samplePage()]);
   const [activePageId, setActivePageId] = useState("feature-planning");
   const [databaseReady, setDatabaseReady] = useState(false);
@@ -176,7 +178,10 @@ export function FeatureIdeasApp() {
   const connectionLeaveTimerRef = useRef<number | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const hydratedRef = useRef(false);
-  const pagesQuery = trpc.featureIdeas.list.useQuery(undefined, { retry: 1 });
+  const pagesQuery = trpc.featureIdeas.list.useQuery(undefined, {
+    enabled: clientReady,
+    retry: 1,
+  });
   const createPageMutation = trpc.featureIdeas.create.useMutation();
   const updatePageMutation = trpc.featureIdeas.update.useMutation();
 

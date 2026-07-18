@@ -1,13 +1,38 @@
 "use client";
 
 import { TrpcProvider } from "@/trpc/client";
-import type { ReactNode } from "react";
-import { RecordsDataProvider } from "@/components/records/records-preview-provider";
+import {
+  createContext,
+  useContext,
+  type ReactNode,
+} from "react";
 
-export function Providers({ children }: { children: ReactNode }) {
+export type InitialAuthState = {
+  isAuthenticated: boolean;
+  role: string | null;
+};
+
+const InitialAuthContext = createContext<InitialAuthState>({
+  isAuthenticated: false,
+  role: null,
+});
+
+export function useInitialAuth() {
+  return useContext(InitialAuthContext);
+}
+
+export function Providers({
+  children,
+  initialAuth,
+}: {
+  children: ReactNode;
+  initialAuth: InitialAuthState;
+}) {
   return (
     <TrpcProvider>
-      <RecordsDataProvider>{children}</RecordsDataProvider>
+      <InitialAuthContext.Provider value={initialAuth}>
+        {children}
+      </InitialAuthContext.Provider>
     </TrpcProvider>
   );
 }

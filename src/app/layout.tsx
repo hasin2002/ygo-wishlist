@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
 import { Providers } from "./providers";
 import "./globals.css";
+import { getCurrentSession } from "@/server/session";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,22 +32,31 @@ export const viewport: Viewport = {
   width: "device-width",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await getCurrentSession();
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitializer }} />
+      </head>
       <body className="min-h-full flex flex-col">
-        <Providers>{children}</Providers>
-        <Script id="theme-initializer" strategy="beforeInteractive">
-          {themeInitializer}
-        </Script>
+        <Providers
+          initialAuth={{
+            isAuthenticated: Boolean(session),
+            role: session?.user.role ?? null,
+          }}
+        >
+          {children}
+        </Providers>
       </body>
     </html>
   );

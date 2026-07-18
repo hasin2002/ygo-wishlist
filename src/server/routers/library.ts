@@ -98,31 +98,51 @@ function currency(pence: number | null) {
 type LibraryCard = Awaited<ReturnType<typeof loadLibraryCards>>[number];
 
 async function loadLibraryCards(ownerId: string, includeSpend = true) {
+  const recordsPromise = includeSpend
+    ? db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId))
+    : Promise.resolve([] as (typeof recordEntries.$inferSelect)[]);
   const [targets, printings, copies, records] = await Promise.all([
     db.select().from(cardTargets).where(eq(cardTargets.ownerId, ownerId)).orderBy(desc(cardTargets.updatedAt)),
     db.select().from(cardPrintings).where(eq(cardPrintings.ownerId, ownerId)),
     db.select().from(cardCopies).where(eq(cardCopies.ownerId, ownerId)),
-    db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId)),
+    recordsPromise,
   ]);
   const targetIdByPrintingId = new Map(printings.map((printing) => [printing.id, printing.targetId]));
   const recordById = new Map(records.map((record) => [record.id, record]));
-  const copiesByTarget = new Map<string, typeof copies>();
+  const availableQuantityByTarget = new Map<string, number>();
+  const paidPenceByTarget = new Map<string, number>();
+  const latestAcquisitionByTarget = new Map<string, typeof recordEntries.$inferSelect>();
+
   for (const copy of copies) {
     const targetId = targetIdByPrintingId.get(copy.printingId);
-    if (targetId) copiesByTarget.set(targetId, [...(copiesByTarget.get(targetId) ?? []), copy]);
+    if (!targetId) continue;
+
+    if (copy.status === "available") {
+      availableQuantityByTarget.set(
+        targetId,
+        (availableQuantityByTarget.get(targetId) ?? 0) + 1,
+      );
+    }
+
+    if (!includeSpend) continue;
+
+    const record = recordById.get(copy.acquiredRecordId);
+    if (!record) continue;
+
+    paidPenceByTarget.set(
+      targetId,
+      (paidPenceByTarget.get(targetId) ?? 0) + (copy.allocationPence ?? 0),
+    );
+    const latest = latestAcquisitionByTarget.get(targetId);
+    if (!latest || record.occurredOn > latest.occurredOn) {
+      latestAcquisitionByTarget.set(targetId, record);
+    }
   }
 
   return targets.map((target) => {
-    const targetCopies = copiesByTarget.get(target.id) ?? [];
-    const availableQuantity = targetCopies.filter((copy) => copy.status === "available").length;
-    const acquisitions = targetCopies.flatMap((copy) => {
-      const record = recordById.get(copy.acquiredRecordId);
-      return record ? [{ copy, record }] : [];
-    });
-    const paidPence = acquisitions.reduce((sum, item) => sum + (item.copy.allocationPence ?? 0), 0);
-    const latestAcquisition = [...acquisitions].sort((left, right) => (
-      right.record.occurredOn.localeCompare(left.record.occurredOn)
-    ))[0]?.record;
+    const availableQuantity = availableQuantityByTarget.get(target.id) ?? 0;
+    const paidPence = paidPenceByTarget.get(target.id) ?? 0;
+    const latestAcquisition = latestAcquisitionByTarget.get(target.id);
     const status = getLibraryCardStatus(target.desiredQuantity, availableQuantity).status;
     return {
       id: target.id,
@@ -332,7 +352,7 @@ export const libraryRouter = router({
 
   binderList: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.collectionOwnerId) return [];
-    return (await loadLibraryCards(ctx.collectionOwnerId, Boolean(ctx.session))).map((card) => ({
+    return (await loadLibraryCards(ctx.collectionOwnerId, false)).map((card) => ({
       cardType: card.cardType, id: card.id, imageUrl: card.imageUrl,
       marketPriceText: card.marketPriceText, name: card.name, notes: card.notes,
       priceText: card.priceText, rarity: card.rarity, status: card.status,
@@ -340,7 +360,7 @@ export const libraryRouter = router({
   }),
 
   chaseQueue: authenticatedProcedure.query(async ({ ctx }) => (
-    await loadLibraryCards(ctx.collectionOwnerId)
+    await loadLibraryCards(ctx.collectionOwnerId, false)
   ).filter((card) => card.status === "wishlist" && !card.chaseLevel).map((card) => ({
     chaseLevel: card.chaseLevel, ebaySearchUrl: card.ebaySearchUrl,
     id: card.id, imageUrl: card.imageUrl, name: card.name, rarity: card.rarity,

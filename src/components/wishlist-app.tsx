@@ -18,6 +18,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import {
   FormEvent,
   MouseEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -32,6 +33,7 @@ import { RarityGuidePopover } from "@/components/rarity-guide-popover";
 import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
+import { useClientReady } from "@/lib/use-client-ready";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -1341,6 +1343,7 @@ function CardImagePreviewDialog({
 export function WishlistApp() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const clientReady = useClientReady();
   const {
     chaseFilters,
     filter,
@@ -1353,6 +1356,7 @@ export function WishlistApp() {
     sort,
     typeFilters,
   } = useMemo(() => trackerUrlState(searchParams), [searchParams]);
+  const [searchInput, setSearchInput] = useState(query);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [addFormOpen, setAddFormOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -1363,7 +1367,7 @@ export function WishlistApp() {
   const [pricingRun, setPricingRun] = useState<PricingRun | null>(null);
   const utils = trpc.useUtils();
 
-  function updateTrackerUrl(
+  const updateTrackerUrl = useCallback(function updateTrackerUrl(
     updates: Partial<
       Record<TrackerUrlParam, string | string[] | null | undefined>
     >,
@@ -1389,7 +1393,25 @@ export function WishlistApp() {
     } else {
       window.history.pushState(null, "", href);
     }
-  }
+  }, [pathname, searchParams]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSearchInput(query);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [query]);
+
+  useEffect(() => {
+    if (searchInput === query) return;
+    const timeoutId = window.setTimeout(() => {
+      updateTrackerUrl(
+        { page: null, q: searchInput || null },
+        { replace: true },
+      );
+    }, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [query, searchInput, updateTrackerUrl]);
 
   function invalidateCardsAndSpend() {
     void utils.cards.binderList.invalidate();
@@ -1431,6 +1453,8 @@ export function WishlistApp() {
     ],
   );
   const list = trpc.cards.trackerPage.useQuery(trackerInput, {
+    enabled: clientReady,
+    placeholderData: (previousData) => previousData,
     staleTime: 30_000,
   });
   const create = trpc.cards.create.useMutation({
@@ -1724,13 +1748,8 @@ export function WishlistApp() {
                 <label className="relative w-full md:max-w-xs">
                   <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
                   <input
-                    value={query}
-                    onChange={(event) => {
-                      updateTrackerUrl(
-                        { page: null, q: event.target.value || null },
-                        { replace: true },
-                      );
-                    }}
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
                     className="h-10 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
                     placeholder="Search cards, rarity, notes"
                   />
@@ -1792,7 +1811,7 @@ export function WishlistApp() {
                 onRetry={() => void list.refetch()}
                 title="We couldn’t open the collection"
               />
-            ) : list.isLoading ? (
+            ) : !clientReady || list.isLoading ? (
               <div className="grid min-h-80 place-items-center rounded-lg border border-zinc-300 bg-white">
                 <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
               </div>
@@ -1978,7 +1997,7 @@ export function WishlistApp() {
                   <nav className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white px-3 py-3 text-sm text-zinc-600 shadow-sm sm:flex-row sm:items-center sm:justify-between">
                     <span>
                       Showing {firstVisibleCard}-{lastVisibleCard} of{" "}
-                      {cards.length}
+                      {totalCards}
                     </span>
                     <div className="flex items-center gap-2">
                       <button

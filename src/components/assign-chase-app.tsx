@@ -9,6 +9,7 @@ import {
 import { useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { DataLoadError } from "@/components/data-load-error";
+import { useClientReady } from "@/lib/use-client-ready";
 import { trpc } from "@/trpc/client";
 
 const levels = [
@@ -38,10 +39,12 @@ function ebaySearchUrl(card: {
 }
 
 export function AssignChaseApp() {
+  const clientReady = useClientReady();
   const [assignedIds, setAssignedIds] = useState<string[]>([]);
   const [leaving, setLeaving] = useState(false);
   const utils = trpc.useUtils();
   const list = trpc.cards.chaseQueue.useQuery(undefined, {
+    enabled: clientReady,
     staleTime: 30_000,
   });
   const setChaseLevel = trpc.cards.setChaseLevel.useMutation({
@@ -97,7 +100,7 @@ export function AssignChaseApp() {
             onRetry={() => void list.refetch()}
             title="Could not load wishlist cards"
           />
-        ) : list.isLoading ? (
+        ) : !clientReady || list.isLoading ? (
           <section className="grid flex-1 place-items-center rounded-lg border border-zinc-300 bg-white">
             <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
           </section>

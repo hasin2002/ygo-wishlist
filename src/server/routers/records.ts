@@ -336,7 +336,7 @@ async function insertLine(
   return values.id;
 }
 
-async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
+export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnapshot> {
   const [records, lines, targets, printings, copies, lineCopyLinks, sealed, lots, supplies] = await Promise.all([
     db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId)).orderBy(desc(recordEntries.occurredOn), desc(recordEntries.createdAt)),
     db.select().from(recordLines).where(eq(recordLines.ownerId, ownerId)).orderBy(asc(recordLines.position)),
@@ -352,7 +352,12 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
   const entityIdsByLine = new Map<string, string[]>();
   const addEntity = (lineId: string | null, entityId: string) => {
     if (!lineId) return;
-    entityIdsByLine.set(lineId, [...(entityIdsByLine.get(lineId) ?? []), entityId]);
+    const entities = entityIdsByLine.get(lineId);
+    if (entities) {
+      entities.push(entityId);
+    } else {
+      entityIdsByLine.set(lineId, [entityId]);
+    }
   };
   for (const copy of copies) {
     addEntity(copy.acquiredLineId, copy.id);
@@ -373,10 +378,16 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
       entityIds: entityIdsByLine.get(line.id) ?? [],
       detail: line.detail,
     };
-    linesByRecord.set(line.recordId, [...(linesByRecord.get(line.recordId) ?? []), serialized]);
+    const recordLines = linesByRecord.get(line.recordId);
+    if (recordLines) {
+      recordLines.push(serialized);
+    } else {
+      linesByRecord.set(line.recordId, [serialized]);
+    }
   }
 
   const attention: PreviewAttentionItem[] = [];
+  const targetById = new Map(targets.map((target) => [target.id, target]));
   for (const target of targets) {
     if (normalizeEdition(target.edition) === "unknown edition") {
       attention.push({
@@ -397,8 +408,9 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
       });
     }
   }
-  for (const printing of printings.filter((item) => item.metadataNeedsAttention)) {
-    const target = targets.find((item) => item.id === printing.targetId);
+  for (const printing of printings) {
+    if (!printing.metadataNeedsAttention) continue;
+    const target = targetById.get(printing.targetId);
     attention.push({
       id: `attention-printing-${printing.id}`,
       targetId: printing.targetId,
@@ -408,9 +420,8 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
       field: "tcgplayer",
     });
   }
-  for (const record of records.filter((item) => (
-    item.type === "imported-acquisition" && !item.amountKnown
-  ))) {
+  for (const record of records) {
+    if (record.type !== "imported-acquisition" || record.amountKnown) continue;
     attention.push({
       id: `attention-cost-${record.id}`,
       targetId: null,
@@ -499,7 +510,7 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
 }
 
 export const recordsRouter = router({
-  snapshot: authenticatedProcedure.query(({ ctx }) => loadSnapshot(ctx.collectionOwnerId)),
+  snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
 
   resolveCardAttention: authenticatedProcedure.input(resolveCardAttentionSchema).mutation(async ({ ctx, input }) => {
     const now = new Date();
