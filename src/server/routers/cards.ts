@@ -779,3 +779,21 @@ export const cardsRouter = router({
       return { ok: true };
     }),
 });
+
+export const legacyCardsReadRouter = router({
+  list: authenticatedProcedure
+    .input(
+      z.object({
+        status: statusFilterSchema.default("all"),
+        query: z.string().trim().default(""),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const filters = [eq(cards.ownerId, ctx.collectionOwnerId), ...queryFilters(input.query)];
+      if (input.status !== "all") filters.push(eq(cards.status, input.status));
+      const rows = await db.select().from(cards)
+        .where(and(...filters))
+        .orderBy(desc(cards.updatedAt));
+      return rows.map((card) => serializeCard(card));
+    }),
+});

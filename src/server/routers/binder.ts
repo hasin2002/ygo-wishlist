@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { binderSlots, cards } from "@/db/schema";
+import { cardTargets, targetBinderSlots } from "@/db/schema";
 import { authenticatedProcedure, publicProcedure, router } from "@/server/trpc";
 
 const maxPages = 40;
@@ -23,12 +23,13 @@ const swapPagesInput = z
     path: ["targetPageIndex"],
   });
 
-function serializeSlot(slot: typeof binderSlots.$inferSelect) {
+function serializeSlot(slot: typeof targetBinderSlots.$inferSelect) {
   const { ownerId, ...serializedSlot } = slot;
   void ownerId;
 
   return {
     ...serializedSlot,
+    cardId: slot.targetId,
     updatedAt: slot.updatedAt.toISOString(),
   };
 }
@@ -41,22 +42,22 @@ export const binderRouter = router({
 
     const rows = await db
       .select()
-      .from(binderSlots)
-      .where(eq(binderSlots.ownerId, ctx.collectionOwnerId));
+      .from(targetBinderSlots)
+      .where(eq(targetBinderSlots.ownerId, ctx.collectionOwnerId));
     return rows.map(serializeSlot);
   }),
 
   setSlot: authenticatedProcedure
     .input(
       slotInput.extend({
-        cardId: z.number().int().positive(),
+        cardId: z.string().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const [card] = await db
         .select()
-        .from(cards)
-        .where(and(eq(cards.id, input.cardId), eq(cards.ownerId, ctx.collectionOwnerId)));
+        .from(cardTargets)
+        .where(and(eq(cardTargets.id, input.cardId), eq(cardTargets.ownerId, ctx.collectionOwnerId)));
 
       if (!card) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Card not found." });
@@ -65,27 +66,27 @@ export const binderRouter = router({
       const now = new Date();
       const updated = await db.transaction(async (tx) => {
         await tx
-          .delete(binderSlots)
+          .delete(targetBinderSlots)
           .where(
             and(
-              eq(binderSlots.cardId, input.cardId),
-              eq(binderSlots.ownerId, ctx.collectionOwnerId),
+              eq(targetBinderSlots.targetId, input.cardId),
+              eq(targetBinderSlots.ownerId, ctx.collectionOwnerId),
             ),
           );
         await tx
-          .delete(binderSlots)
+          .delete(targetBinderSlots)
           .where(
             and(
-              eq(binderSlots.pageIndex, input.pageIndex),
-              eq(binderSlots.slotIndex, input.slotIndex),
-              eq(binderSlots.ownerId, ctx.collectionOwnerId),
+              eq(targetBinderSlots.pageIndex, input.pageIndex),
+              eq(targetBinderSlots.slotIndex, input.slotIndex),
+              eq(targetBinderSlots.ownerId, ctx.collectionOwnerId),
             ),
           );
 
         const [slot] = await tx
-          .insert(binderSlots)
+          .insert(targetBinderSlots)
           .values({
-            cardId: input.cardId,
+            targetId: input.cardId,
             ownerId: ctx.collectionOwnerId,
             pageIndex: input.pageIndex,
             slotIndex: input.slotIndex,
@@ -101,12 +102,12 @@ export const binderRouter = router({
 
   clearSlot: authenticatedProcedure.input(slotInput).mutation(async ({ ctx, input }) => {
     await db
-      .delete(binderSlots)
+      .delete(targetBinderSlots)
       .where(
         and(
-          eq(binderSlots.pageIndex, input.pageIndex),
-          eq(binderSlots.slotIndex, input.slotIndex),
-          eq(binderSlots.ownerId, ctx.collectionOwnerId),
+          eq(targetBinderSlots.pageIndex, input.pageIndex),
+          eq(targetBinderSlots.slotIndex, input.slotIndex),
+          eq(targetBinderSlots.ownerId, ctx.collectionOwnerId),
         ),
       );
 
@@ -114,14 +115,14 @@ export const binderRouter = router({
   }),
 
   clearCard: authenticatedProcedure
-    .input(z.object({ cardId: z.number().int().positive() }))
+    .input(z.object({ cardId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await db
-        .delete(binderSlots)
+        .delete(targetBinderSlots)
         .where(
           and(
-            eq(binderSlots.cardId, input.cardId),
-            eq(binderSlots.ownerId, ctx.collectionOwnerId),
+            eq(targetBinderSlots.targetId, input.cardId),
+            eq(targetBinderSlots.ownerId, ctx.collectionOwnerId),
           ),
         );
       return { ok: true };
@@ -134,28 +135,28 @@ export const binderRouter = router({
     await db.transaction(async (tx) => {
       const slots = await tx
         .select()
-        .from(binderSlots)
+        .from(targetBinderSlots)
         .where(
           and(
-            inArray(binderSlots.pageIndex, pagesToSwap),
-            eq(binderSlots.ownerId, ctx.collectionOwnerId),
+            inArray(targetBinderSlots.pageIndex, pagesToSwap),
+            eq(targetBinderSlots.ownerId, ctx.collectionOwnerId),
           ),
         );
 
       await tx
-        .delete(binderSlots)
+        .delete(targetBinderSlots)
         .where(
           and(
-            inArray(binderSlots.pageIndex, pagesToSwap),
-            eq(binderSlots.ownerId, ctx.collectionOwnerId),
+            inArray(targetBinderSlots.pageIndex, pagesToSwap),
+            eq(targetBinderSlots.ownerId, ctx.collectionOwnerId),
           ),
         );
 
       for (const slot of slots) {
         await tx
-          .insert(binderSlots)
+          .insert(targetBinderSlots)
           .values({
-            cardId: slot.cardId,
+            targetId: slot.targetId,
             ownerId: ctx.collectionOwnerId,
             pageIndex:
               slot.pageIndex === input.sourcePageIndex
@@ -172,8 +173,8 @@ export const binderRouter = router({
 
   clearAll: authenticatedProcedure.mutation(async ({ ctx }) => {
     await db
-      .delete(binderSlots)
-      .where(eq(binderSlots.ownerId, ctx.collectionOwnerId));
+      .delete(targetBinderSlots)
+      .where(eq(targetBinderSlots.ownerId, ctx.collectionOwnerId));
     return { ok: true };
   }),
 });

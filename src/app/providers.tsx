@@ -2,12 +2,12 @@
 
 import { TrpcProvider } from "@/trpc/client";
 import type { ReactNode } from "react";
-import { RecordsPreviewProvider } from "@/components/records/records-preview-provider";
+import { RecordsDataProvider } from "@/components/records/records-preview-provider";
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <TrpcProvider>
-      <RecordsPreviewProvider>{children}</RecordsPreviewProvider>
+      <RecordsDataProvider>{children}</RecordsDataProvider>
     </TrpcProvider>
   );
 }

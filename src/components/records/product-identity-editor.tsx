@@ -2,17 +2,18 @@
 
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
-import type { ProductEdition } from "@/lib/records/types";
+import type { LibraryCardSuggestion, ProductEdition } from "@/lib/records/types";
 
 const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
 
 export type ProductFetchStatus = "idle" | "fetching" | "resolved" | "attention" | "stale";
 
 export type ProductIdentityDraft = {
+  selectedTargetId: string | null;
   tcgplayerUrl: string;
   name: string;
   imageUrl: string | null;
@@ -33,6 +34,7 @@ export function blankProductIdentity(
   edition: ProductEdition | "" = "",
 ): ProductIdentityDraft {
   return {
+    selectedTargetId: null,
     tcgplayerUrl: "",
     name,
     imageUrl: null,
@@ -80,10 +82,21 @@ export function ProductIdentityEditor({
   const source = useRecordsDataSource();
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const closeSuggestionsTimeout = useRef<number | null>(null);
   const requestId = useRef(0);
+  const suggestions = useMemo(
+    () => kind === "card" ? source.searchLibraryCards(value.name) : [],
+    [kind, source, value.name],
+  );
   const fetched =
     value.fetchAttempted &&
     (value.fetchStatus === "resolved" || value.fetchStatus === "attention");
+
+  useEffect(() => () => {
+    if (closeSuggestionsTimeout.current !== null) window.clearTimeout(closeSuggestionsTimeout.current);
+  }, []);
 
   function updateField(field: keyof ProductIdentityDraft, nextValue: string) {
     const editedFields = value.editedFields.includes(field)
@@ -92,12 +105,62 @@ export function ProductIdentityEditor({
     onChange({ ...value, [field]: nextValue, editedFields });
   }
 
+  function applyLibrarySuggestion(suggestion: LibraryCardSuggestion) {
+    const complete = Boolean(
+      suggestion.tcgplayerUrl &&
+      suggestion.name &&
+      suggestion.rarity &&
+      suggestion.edition &&
+      suggestion.setName &&
+      suggestion.setCode,
+    );
+    onChange({
+      ...value,
+      selectedTargetId: suggestion.targetId,
+      tcgplayerUrl: suggestion.tcgplayerUrl ?? "",
+      name: suggestion.name,
+      imageUrl: suggestion.imageUrl,
+      edition: suggestion.edition,
+      rarity: suggestion.rarity,
+      setName: suggestion.setName,
+      setCode: suggestion.setCode,
+      fetchAttempted: true,
+      fetchStatus: complete ? "resolved" : "attention",
+      fetchMessage: complete
+        ? "Details loaded from your Library. Check them before continuing."
+        : "Details loaded from your Library. Complete anything missing before continuing.",
+      metadataNeedsAttention: !complete,
+      editedFields: [],
+    });
+    setSuggestionsOpen(false);
+  }
+
+  function handleSuggestionKeys(event: KeyboardEvent<HTMLInputElement>) {
+    if (!suggestionsOpen || !suggestions.length) {
+      if (event.key === "ArrowDown" && suggestions.length) setSuggestionsOpen(true);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => Math.min(current + 1, suggestions.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSuggestionIndex((current) => Math.max(current - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      applyLibrarySuggestion(suggestions[activeSuggestionIndex]);
+    } else if (event.key === "Escape") {
+      setSuggestionsOpen(false);
+    }
+  }
+
   async function fetchDetails(force = false) {
     const replacingProduct = value.fetchStatus === "stale";
     const requestedUrl = value.tcgplayerUrl.trim();
     const requestValue: ProductIdentityDraft = replacingProduct
       ? {
           ...blankProductIdentity("", kind === "card" ? "1st Edition" : ""),
+          selectedTargetId: value.selectedTargetId,
           tcgplayerUrl: requestedUrl,
           fetchAttempted: true,
         }
@@ -194,6 +257,7 @@ export function ProductIdentityEditor({
         <label className="block">
           <span className="text-sm font-bold text-zinc-700">TCGplayer product link <span className="text-rose-700">*</span></span>
           <input
+            autoComplete="off"
             className={fieldClass}
             inputMode="url"
             onChange={(event) => {
@@ -269,9 +333,65 @@ export function ProductIdentityEditor({
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="sm:col-span-2">
+        <label className="relative sm:col-span-2">
           <span className="text-sm font-bold text-zinc-700">{kind === "card" ? "Card name" : "Product name"} <span className="text-rose-700">*</span><FieldOrigin edited={value.editedFields.includes("name")} fetched={fetched && Boolean(value.name)} /></span>
-          <input className={fieldClass} onChange={(event) => updateField("name", event.target.value)} required value={value.name} />
+          <input
+            autoComplete="off"
+            aria-activedescendant={suggestionsOpen && suggestions.length ? `library-card-suggestion-${activeSuggestionIndex}` : undefined}
+            aria-autocomplete={kind === "card" ? "list" : undefined}
+            aria-controls={kind === "card" ? "library-card-suggestions" : undefined}
+            aria-expanded={kind === "card" && suggestionsOpen && suggestions.length > 0}
+            className={fieldClass}
+            onBlur={() => {
+              closeSuggestionsTimeout.current = window.setTimeout(() => setSuggestionsOpen(false), 120);
+            }}
+            onChange={(event) => {
+              const nextName = event.target.value;
+              const editedFields = value.editedFields.includes("name")
+                ? value.editedFields
+                : [...value.editedFields, "name"];
+              onChange({
+                ...value,
+                name: nextName,
+                selectedTargetId: nextName === value.name ? value.selectedTargetId : null,
+                editedFields,
+              });
+              setActiveSuggestionIndex(0);
+              setSuggestionsOpen(true);
+            }}
+            onFocus={() => {
+              if (kind === "card" && suggestions.length) setSuggestionsOpen(true);
+            }}
+            onKeyDown={kind === "card" ? handleSuggestionKeys : undefined}
+            required
+            role={kind === "card" ? "combobox" : undefined}
+            value={value.name}
+          />
+          {kind === "card" && suggestionsOpen && suggestions.length ? (
+            <div
+              className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
+              id="library-card-suggestions"
+              role="listbox"
+            >
+              <p className="px-3 pb-1 pt-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Matches from your Wishlist</p>
+              {suggestions.map((suggestion, index) => (
+                <button
+                  aria-selected={index === activeSuggestionIndex}
+                  className={`flex min-h-11 w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm transition ${index === activeSuggestionIndex ? "bg-rose-50 text-rose-950" : "hover:bg-zinc-50"}`}
+                  id={`library-card-suggestion-${index}`}
+                  key={`${suggestion.targetId}-${suggestion.printingId ?? "target"}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveSuggestionIndex(index)}
+                  onClick={() => applyLibrarySuggestion(suggestion)}
+                  role="option"
+                  type="button"
+                >
+                  <span className="truncate font-semibold">{suggestion.name}</span>
+                  <span className="truncate text-zinc-500">&nbsp;· {suggestion.rarity || "Unknown rarity"} · {suggestion.edition || "Unknown edition"} · {suggestion.setName || "Unknown set"}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </label>
         {kind === "card" ? (
           <RarityCombobox
@@ -297,6 +417,7 @@ export function ProductIdentityEditor({
             >
               <option value="1st Edition">1st Edition</option>
               <option value="Unlimited Edition">Unlimited Edition</option>
+              <option value="Limited Edition">Limited Edition</option>
             </select>
             <span className="mt-1 block text-xs font-medium text-zinc-500">Defaults to 1st Edition. Change it when the physical card says Unlimited Edition.</span>
           </label>
@@ -324,6 +445,7 @@ export function ProductIdentityEditor({
               <option value="">Choose edition</option>
               <option value="1st Edition">1st Edition</option>
               <option value="Unlimited Edition">Unlimited Edition</option>
+              <option value="Limited Edition">Limited Edition</option>
             </select>
           </label>
         )}

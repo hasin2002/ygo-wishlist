@@ -38,7 +38,7 @@ function ebaySearchUrl(card: {
 }
 
 export function AssignChaseApp() {
-  const [assignedIds, setAssignedIds] = useState<number[]>([]);
+  const [assignedIds, setAssignedIds] = useState<string[]>([]);
   const [leaving, setLeaving] = useState(false);
   const utils = trpc.useUtils();
   const list = trpc.cards.chaseQueue.useQuery(undefined, {

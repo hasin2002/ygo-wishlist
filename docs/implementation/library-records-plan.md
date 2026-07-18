@@ -25,6 +25,11 @@ Copy, and Record Entry. Rename Tracker to Library. Add private Records routes fo
 Overview, History, and Inventory. Deliver one complete release, with a UI review
 before backend or database work.
 
+Use `Wishlist` and `Owned` as computed Library identifiers. Wishlist means
+available Copies are below desired quantity, including partially collected
+targets; Owned means desired quantity is met. Do not use Satisfied/Open as
+user-facing status labels or store either identifier as ownership truth.
+
 The domain language and boundaries in [`CONTEXT.md`](../../CONTEXT.md) and the
 separation decision in ADR 0001 are normative.
 
@@ -48,11 +53,36 @@ separation decision in ADR 0001 are normative.
 
 - Add authenticated production-intended routes for Records Overview, History,
   and Inventory.
-- Overview shows actual purchase cost, net proceeds, realized balance, recent
-  entries, attention items, and clear routes into common tasks.
-- History supports type/status filters and void/restore actions.
+- Overview shows a simple all-time/preset/custom date-range selector above the
+  cashflow summary cards, then actual purchase cost, net proceeds, realized
+  balance, the always-current Physical copies count, recent entries, and
+  attention items. Do not duplicate the global Add menu with event-specific
+  Overview shortcuts.
+- History supports search, type/status filters, pagination, and void/restore
+  actions. Each entry has a type-aware Edit dialog: all Records allow controlled
+  editing of identifying details (name, date, source, notes); Purchases and
+  imported acquisitions also expose listing/cost, while Sales expose net
+  proceeds. The `Items` panel provides dependency-safe CRUD down to the
+  individual recorded item, as specified in
+  [`library-records-inline-editing-subplan.md`](./library-records-inline-editing-subplan.md).
+  Do not hard-delete the last subject or a dependent ledger entry; Void/Restore
+  preserves audit history and dependency safety.
+- History keeps explicit record-type labels while making Purchases blue and
+  Sales green for faster scanning. Card-backed entries show a compact thumbnail;
+  multi-card and Bulk entries show no more than three overlapping card images
+  without obscuring the title, amount, or actions. Every row reserves the same
+  visual lead column, using a quiet non-card marker where no card image exists,
+  so titles and metadata share one clean alignment edge.
 - Inventory distinguishes Cards, Sealed, Bulk, and Supplies without pretending
-  supplies are card copies.
+  supplies are card copies. Card targets use the computed `Owned` and `Wishlist`
+  identifiers with explicit wanted/owned quantities for partial targets. Every
+  card target is interactive and opens a responsive Card Inventory dialog. The
+  dialog shows physical Copies grouped by their originating Purchase, Pack
+  Opening, or Imported Acquisition, including source, date, listing, printing,
+  condition, and any later Sale. Editing from Inventory opens that originating
+  Record's Items panel with the relevant card selected; Inventory never creates
+  a second independent mutation path or changes a Copy without its source
+  Record.
 - Phone and desktop navigation use labeled controls with at least 44px touch
   targets and visible focus states.
 
@@ -67,6 +97,7 @@ Its open decisions must be closed before either flow is rewritten.
   and review. One Purchase records one Single Card, one Sealed Product, one Bulk
   Lot with card contents, or one Supply/Extra; it does not mix inventory kinds.
 - Purchase details include an optional source listing URL and a source selector.
+  They also include a required short Record name used as the History title.
   Choosing `Other` reveals a required free-text source name.
   Choosing `Gift` forces the all-in amount paid to £0 and makes that amount
   read-only until another source is selected.
@@ -87,7 +118,7 @@ Its open decisions must be closed before either flow is rewritten.
   exact total number of physical cards in the lot. Its all-in cost is
   automatically and permanently allocated across that fixed count from the
   first identified Copy; later inline edits receive
-  the same per-Copy allocation and never changes an earlier Copy's allocation.
+  the same per-Copy allocation and never change an earlier Copy's allocation.
   A future inline edit of the original Purchase, rather than a separate Record
   Entry, will add or correct those known contents without new spend; dependency
   rules prevent corrections that would contradict later history.
@@ -95,12 +126,15 @@ Its open decisions must be closed before either flow is rewritten.
   facts and selected acquisition, and creation requires a separate explicit
   confirmation.
 - Opening is link-first, records the sealed product opened and resulting pulled
-  copies, and also requires an explicit confirmation from Review. It consumes a
+  copies, requires a short Record name, and also requires an explicit confirmation from Review. It consumes a
   matching unopened Sealed Unit or creates an explicit Gift/unknown-cost
   Imported Acquisition before opening, so provenance is never orphaned.
 - Sale uses four stages: sale type, sale details, cards sold, and Review. Single
   selects exactly one available physical Copy; Bulk selects two or more tracked
   Copies within one Sale record. This does not sell an unitemized Bulk Lot.
+- Sale details include an optional short Record name. If blank, confirmation
+  generates a compact title from the selected cards, such as `Sold Dark Magician`
+  or `Sold Dark Magician + 2 more`, never exceeding 80 characters.
 - Sale card selection uses the same paginated thumbnail grid and selection
   feedback for Single and Bulk, with search, rarity filtering, a selected-only
   view, persistent selection across filters, and inline progress toward the
@@ -145,10 +179,21 @@ Stop implementation before schema/backend changes. Report every reviewable route
 known scaffold limitation, check result, and changed decision. Collect approval
 or feedback and update this plan before Phase 2.
 
-## Phase 2 — real model and integration (blocked by G1)
+## Phase 2 — real model and integration
 
-- Implement owner-scoped card groups, targets, printings, copies, record
-  entries/lines, sealed units, bulk lots, supplies, and highlights.
+Phase 2 starts only after reconciling this specification with the implemented
+G1 scaffold. The implemented routes, form inputs, editing behavior, and
+`RecordsDataSource` operations are audited together; intentional G1 decisions
+replace older model assumptions, while omissions that contradict an accepted
+invariant are fixed before persistence. In particular, Adjustment and standalone
+Bulk Itemization must not reappear in the live interface, and Bulk Purchase must
+collect the exact total-card count required by its fixed allocation rule.
+
+- Implement owner-scoped targets, printings, copies, record entries/lines,
+  sealed units, bulk lots, supplies, and existing highlight integrations. A
+  separate Card Group is not persisted: the implemented aggregate is the
+  Wishlist Target identified by normalized Card Name + Rarity + Edition, with
+  exact Card Printings nested beneath it.
 - Store GBP as integer pence. Purchase amount is all-in cost; Sale amount is net
   proceeds. Bulk-Lot per-Copy allocations are required and derived from the
   all-in cost divided by the lot's fixed total-card count; deterministic penny
@@ -163,24 +208,34 @@ or feedback and update this plan before Phase 2.
   marketplace product detail keyed by the required product link, then use the
   current link parser and YGOPRODeck set data as fallbacks. Do not depend on
   unavailable TCGplayer developer credentials.
-- Replace the preview data source with a tRPC adapter satisfying the same
-  contract.
+- Deepen the `RecordsDataSource` seam so preview and authenticated live adapters
+  satisfy the same UI-facing interface. Remove preview-only markers and the
+  stale Adjustment/Bulk Itemization operations from that shared interface;
+  browser-session draft persistence remains a client concern.
 - Integrate Library, Binder, Wheel, Assign Chase, navigation, authentication,
   public/private views, highlights, and eventual `/spend` redirect.
+- Cut over Library and every card consumer to the same Target → Printing → Copy
+  model. Adding a Wishlist Target changes only desired inventory; recording an
+  acquisition creates the Record and Copy consumed by both Library and Records.
+  The legacy `cards` table is read only for migration, and no permanent dual
+  writes or parallel ownership states are allowed.
 - Keep mutations transactional and block removal when later history depends on
   an entry.
 
-### G2 Backend approval
+### V2 Phase 2 integrity verification
 
-Review contracts, arithmetic, dependencies, owner isolation, and integration
-behavior before migration work.
+Verify contracts, deterministic penny arithmetic, dependency chains, optimistic
+concurrency, owner isolation, and integration behavior continuously during
+Phase 2. This is an implementation acceptance checklist and report, not a user
+approval pause. Failures reopen the relevant Phase 2 item before migration work.
 
-## Phase 3 — migration and UX hardening (blocked by G2)
+## Phase 3 — migration and UX hardening (blocked by completed Phase 2/V2)
 
 - Prepare an additive, idempotent migration and dry-run report.
 - Merge legacy rows by normalized name, rarity, and Unknown edition.
-- Give each owned legacy row desired quantity 1 and one Copy. Convert numeric paid
-  prices into editable Imported Acquisitions.
+- Let every grouped legacy row contribute one to the Target's desired quantity;
+  give each owned legacy row one physical Copy. Convert numeric paid prices into
+  editable Imported Acquisitions.
 - Preserve month precision, binder slots, wheel/chase state, and favourites.
 - Surface incomplete data without making legacy records unusable.
 - Apply database changes only after explicit G3 approval; do not permanently dual
@@ -192,7 +247,9 @@ behavior before migration work.
 
 ### G3 Migration approval
 
-Review the dry-run report before applying any database change.
+Run and review the read-only `npm run records:migrate:dry-run` report before
+applying any database change. Only after explicit approval may the additive
+schema and idempotent import be applied with the separately reported commands.
 
 ### G4 Final site review
 
@@ -204,9 +261,6 @@ Review complete real-data behavior before deployment or landing on `main`.
 - Sales of sealed products, bulk lots, or supplies.
 - Automated marketplace/order importing.
 - TCGplayer developer-credential integrations.
-- Inline Record editing, including adding or correcting a Bulk Purchase's card
-  contents. It replaces the removed Adjustment and standalone Bulk Itemization
-  flows and needs its own review before implementation.
 - Deployment, production migration, and landing on `main` until their gates.
 
 ## Decision change log
@@ -226,3 +280,12 @@ Review complete real-data behavior before deployment or landing on `main`.
 | 2026-07-17 | Card edition was omitted for Single/Bulk/Pull cards; Sale displayed a target-reopening warning that looked like an unexplained error | Require visible Card edition defaulted to `1st Edition` for every acquired card; use one consistent Single/Bulk selection surface with inline minimum progress and a neutral plain-language Library-impact summary | Edition is part of target identity, while implementation terms such as “reopens Wishlist” do not explain the real effect to the user | P1.3, P1.5, preview target matching |
 | 2026-07-17 | Bulk per-card allocation was optional/absent | Require a fixed total-card count for every Bulk Lot and automatically allocate its all-in cost across that count from first itemization; later cards receive their original share without rebasing earlier cards | Dividing by identified cards makes cost and realised results change as sorting progresses; the advertised/known lot count is the stable denominator | P1.3 Bulk, Bulk Itemization, P2 allocation model |
 | 2026-07-17 | Global Add exposed Adjustment and standalone Bulk Itemization, while a Bulk Purchase could promise a separate later-itemization workflow | Remove both pages/forms and every visible entry point. Defer inline editing of the original Record Entry as the replacement for later Bulk contents and corrections | The two specialist flows add unnecessary bookkeeping concepts before the main Records workflow is coherent; edits should be found where the original entry lives | P1.3, P1.5, future inline-entry editing subplan |
+| 2026-07-17 | Records History titles were generated only from transaction data | Add a short required Record name to Purchase and Pack Opening; add an optional Sale Record name with a compact selected-card fallback | User-defined labels make History easier to scan, while an optional Sale label should not slow the fast sale workflow | P1.3, P1.5, Phase 2 record contract |
+| 2026-07-17 | Records Overview repeated the global Add menu and its metric cards had no time context; History could grow into one long list | Remove duplicate event shortcuts; add compact period/custom-date controls for cash metrics and paginate filtered History | A single global Add is the clear action entry point; period context makes financial metrics interpretable, while Physical copies remains a clear current-state number | P1.2, P1.5 |
+| 2026-07-17 | History had only immediate Void/Restore, with no place to correct a record's identifying, financial, or individual item details | Add a two-panel type-aware editor with dependency-safe item CRUD and exact-Copy Sale selection; retain Void/Restore for the last subject or dependent ledger entry | Item corrections are useful, but every mutation must preserve later Copy/opening history and remain understandable on mobile | P1.2, P1.5, inline-editing subplan |
+| 2026-07-17 | Inventory used Satisfied/Open identifiers that did not match the established collection language | Define computed `Owned` and `Wishlist` domain states and use them throughout Inventory; keep explicit wanted/owned quantities for partial targets | The familiar labels are clearer, but must remain derived from Copy quantities so duplicates and partial collection are represented honestly | P1.2, P1.5, CONTEXT, ADR 0001, Phase 2 query model |
+| 2026-07-17 | Inventory cards summarized quantities but did not expose provenance or editing | Make every card target open a responsive provenance dialog; group Copies by acquisition Record and hand edits into the exact source Record and card line | Editing an Inventory-only projection would allow its facts to diverge from Purchase, Bulk Purchase, Pack Opening, or imported history; source-routed editing preserves one authoritative ledger and gives the user the requested context | P1.2, P1.5, inline-editing subplan, Phase 2 query/mutation model |
+| 2026-07-17 | History rows used neutral type badges and did not surface the cards involved | Keep explicit record-type labels, style Purchase blue and Sale green, and show linked card thumbnail(s), capped at a three-card overlapping stack for Bulk/multi-card entries | The colour improves scanning but does not replace the text label; a capped, lazy image stack adds recognition without turning a ledger row into a gallery | P1.2, P1.5 |
+| 2026-07-17 | Variable thumbnail widths made History titles start at different horizontal positions | Reserve one fixed visual lead column in every row; use a muted generic marker for non-card entries and align all text after the column | A blank gutter would look accidental, while a uniform card-sized image would imply a card exists; the neutral marker preserves alignment without inventing imagery | P1.2, P1.5 |
+| 2026-07-17 | G2 was a separate user approval pause; Phase 2 still named Card Groups and exposed preview-only Adjustment/Bulk Itemization operations; Bulk allocation required a denominator absent from the implemented form | Treat G1 as approved, replace G2 with internal V2 verification, reconcile the live contract to the implemented UI, omit a separate Card Group, remove the stale operations, and restore required exact Bulk total-card count | The user approved continuing through backend implementation without a second pause. The UI/domain aggregate is already Wishlist Target → Printing → Copy, and fixed bulk allocation is impossible without its exact denominator | G1, P2.0–P2.5, V2, P1.3 Bulk correction |
+| 2026-07-17 | Phase 2 could be interpreted as keeping legacy Library cards beside new Records inventory | Make Target → Printing → Copy plus Record Entry the single live owner-scoped dataset; Library target edits and Records ownership events operate on that model, while legacy card IDs exist only as migration references | Two live datasets would drift whenever a card is acquired, sold, edited, placed in Binder, or used by Wheel/highlights | P2.1–P2.4, V2, G3 migration/cutover |

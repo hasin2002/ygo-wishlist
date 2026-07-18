@@ -202,11 +202,11 @@ function buildPageElement({
   pageIndex,
   pageTotals,
 }: {
-  cardById: Map<number, Card>;
+  cardById: Map<string, Card>;
   canEdit: boolean;
   dimWishlistCards: boolean;
-  highlightedCardId: number | null;
-  layout: Map<string, { cardId: number }>;
+  highlightedCardId: string | null;
+  layout: Map<string, { cardId: string }>;
   pageIndex: number;
   pageTotals: Map<number, { owned: number; wishlist: number }>;
 }) {
@@ -331,10 +331,10 @@ function PageValuePills({
 export function BinderV2App() {
   const bookHostRef = useRef<HTMLDivElement | null>(null);
   const pageFlipRef = useRef<PageFlip | null>(null);
-  const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
-  const [draggedCardId, setDraggedCardId] = useState<number | null>(null);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [finderQuery, setFinderQuery] = useState("");
-  const [highlightedCardId, setHighlightedCardId] = useState<number | null>(null);
+  const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typeFilters, setTypeFilters] = useState<CardTypeFilter[]>([]);
   const [closed, setClosed] = useState(false);
@@ -593,7 +593,7 @@ export function BinderV2App() {
     pageTotals,
   ]);
 
-  function placeCard(pageIndex: number, slotIndex: number, cardId: number) {
+  function placeCard(pageIndex: number, slotIndex: number, cardId: string) {
     if (!canEdit) {
       return;
     }
@@ -602,7 +602,7 @@ export function BinderV2App() {
     setSelectedCardId(null);
   }
 
-  function removeCardFromBinder(cardId: number | null = draggedCardId) {
+  function removeCardFromBinder(cardId: string | null = draggedCardId) {
     if (!canEdit || !cardId) {
       return;
     }
@@ -621,7 +621,7 @@ export function BinderV2App() {
     setStagingPage(1);
   }
 
-  function stagingPageForCard(cardId: number) {
+  function stagingPageForCard(cardId: string) {
     const index = stagingCards.findIndex((card) => card.id === cardId);
     return index >= 0 ? Math.floor(index / stagingPageSize) + 1 : 1;
   }
@@ -672,7 +672,7 @@ export function BinderV2App() {
 
     const pageIndex = Number(slot.dataset.pageIndex);
     const slotIndex = Number(slot.dataset.slotIndex);
-    const cardId = slot.dataset.cardId ? Number(slot.dataset.cardId) : null;
+    const cardId = slot.dataset.cardId || null;
 
     if (selectedCard) {
       placeCard(pageIndex, slotIndex, selectedCard.id);
@@ -698,7 +698,7 @@ export function BinderV2App() {
     }
 
     event.stopPropagation();
-    setDraggedCardId(Number(slot.dataset.cardId));
+    setDraggedCardId(slot.dataset.cardId);
   }
 
   function handleBookDrop(event: DragEvent<HTMLDivElement>) {

@@ -57,11 +57,17 @@ export function FormSection({
   );
 }
 
-export function PreviewNotice({ children }: { children: ReactNode }) {
+export function PreviewNotice({
+  children,
+  label = "Preview only.",
+}: {
+  children: ReactNode;
+  label?: string;
+}) {
   return (
     <aside className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium leading-5 text-amber-900">
       <AlertCircle className="mt-0.5 size-5 shrink-0" />
-      <div><strong className="font-black">Preview only.</strong> {children}</div>
+      <div><strong className="font-black">{label}</strong> {children}</div>
     </aside>
   );
 }
@@ -69,9 +75,11 @@ export function PreviewNotice({ children }: { children: ReactNode }) {
 export function DestructiveToast({
   message,
   onDismiss,
+  title = "Check the form",
 }: {
   message: string | null;
   onDismiss: () => void;
+  title?: string;
 }) {
   useEffect(() => {
     if (!message) {
@@ -94,7 +102,7 @@ export function DestructiveToast({
     >
       <CircleX className="mt-0.5 size-5 shrink-0" />
       <div className="min-w-0 flex-1">
-        <strong className="block font-black">Check the form</strong>
+        <strong className="block font-black">{title}</strong>
         <p className="mt-0.5 font-medium leading-5">{message}</p>
       </div>
       <button
@@ -158,7 +166,7 @@ export function WizardActions({
       {step < totalSteps ? (
         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5" disabled={nextDisabled || pending} onClick={onNext} type="button">Continue <ArrowRight className="size-4" /></button>
       ) : (
-        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? "Saving preview…" : finalLabel}</button>
+        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? "Saving…" : finalLabel}</button>
       )}
     </div>
   );

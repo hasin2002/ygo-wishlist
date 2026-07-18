@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:records": "node --experimental-strip-types --test tests/records-domain.test.ts",
     "price:ebay": "node scripts/price-ebay.mjs",
     "price:qcsr": "node scripts/price-qcsr-ebay.mjs",
     "cards:types": "node scripts/backfill-card-types.mjs",
@@ -16,7 +17,11 @@
     "db:push": "drizzle-kit push --config drizzle.config.ts",
     "db:studio": "drizzle-kit studio --config drizzle.config.ts",
     "db:studio:pg": "drizzle-kit studio --config drizzle.config.ts",
-    "db:studio:sqlite": "drizzle-kit studio --config drizzle.sqlite.config.ts"
+    "db:studio:sqlite": "drizzle-kit studio --config drizzle.sqlite.config.ts",
+    "records:migrate:dry-run": "node scripts/migrate-library-records.mjs",
+    "records:migrate:apply": "node scripts/migrate-library-records.mjs --apply",
+    "wishlist:seed-json": "node scripts/seed-wishlist-from-combined-json.mjs",
+    "wishlist:backfill-types": "node scripts/backfill-unified-card-types.mjs"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.6.23",

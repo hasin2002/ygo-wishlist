@@ -42,15 +42,27 @@ export function cardContentsError(row: CardContentsDraft) {
 }
 
 export function CardContentsEditor({
+  allowAdd = true,
+  allowExistingIncomplete = false,
+  allowRemoveLast = false,
+  initialActiveId = null,
   noun = "card",
   onChange,
   rows,
 }: {
+  allowAdd?: boolean;
+  allowExistingIncomplete?: boolean;
+  allowRemoveLast?: boolean;
+  initialActiveId?: string | null;
   noun?: "card" | "pulled card";
   onChange: (rows: CardContentsDraft[]) => void;
   rows: CardContentsDraft[];
 }) {
-  const [activeId, setActiveId] = useState<string | null>(() => rows.find((row) => !row.name)?.id ?? null);
+  const [activeId, setActiveId] = useState<string | null>(() => (
+    rows.some((row) => row.id === initialActiveId)
+      ? initialActiveId
+      : rows.find((row) => !row.name)?.id ?? null
+  ));
   const [error, setError] = useState<string | null>(null);
   const active = rows.find((row) => row.id === activeId) ?? null;
   const copyCount = rows.reduce((sum, row) => sum + Math.max(0, row.quantity || 0), 0);
@@ -61,7 +73,18 @@ export function CardContentsEditor({
 
   function finishCard() {
     if (!active) return true;
-    const problem = cardContentsError(active);
+    const isExistingRow = !active.id.startsWith("card-");
+    const problem = allowExistingIncomplete && isExistingRow
+      ? (!active.name.trim()
+          ? "Add the card name."
+          : !active.edition
+            ? "Choose the card edition."
+            : !active.rarity.trim()
+              ? "Choose the card rarity."
+              : !Number.isInteger(active.quantity) || active.quantity < 1
+                ? "Quantity must be at least one."
+                : null)
+      : cardContentsError(active);
     if (problem) {
       setError(problem);
       return false;
@@ -74,7 +97,10 @@ export function CardContentsEditor({
   function addCard() {
     if (!finishCard()) return;
     const row = blankCardContents();
-    onChange([...rows, row]);
+    // A newly added card is the immediate next task. Put it above completed
+    // cards so its form opens directly below the add action rather than at the
+    // bottom of a long Bulk or Pack Opening list.
+    onChange([row, ...rows]);
     setActiveId(row.id);
   }
 
@@ -86,15 +112,17 @@ export function CardContentsEditor({
         <span className="text-sm font-medium text-zinc-500">{copyCount} physical {copyCount === 1 ? "copy" : "copies"}</span>
       </div>
 
-      {!active ? (
+      {!active && allowAdd ? (
         <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-dashed border-zinc-300 bg-white px-4 text-sm font-bold hover:border-zinc-950" onClick={addCard} type="button"><CirclePlus className="size-4" /> Add another card</button>
       ) : null}
 
       {rows.map((row, index) => row.id === activeId ? (
-        <article className="records-step-enter rounded-lg border border-[#8a1f2d]/40 bg-white p-4 shadow-sm" key={row.id}>
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <article className="records-step-enter rounded-lg border border-[#8a1f2d]/40 bg-white shadow-sm" key={row.id}>
+          <div className="sticky top-2 z-10 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-t-lg border-b border-zinc-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur-sm">
             <div><p className="text-xs font-black uppercase tracking-[0.12em] text-[#8a1f2d]">{noun} {index + 1}</p><p className="mt-1 text-sm font-medium text-zinc-500">Fetch, check, then collapse this card.</p></div>
-            {rows.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={finishCard} type="button"><Check className="size-4" /> Done with this card</button>
+              {rows.length > 1 || allowRemoveLast ? (
               <button
                 aria-label={`Remove ${noun} ${index + 1}`}
                 className="inline-flex min-h-11 items-center gap-2 rounded-md px-3 text-sm font-bold text-zinc-500 hover:bg-rose-50 hover:text-rose-700"
@@ -107,14 +135,16 @@ export function CardContentsEditor({
               >
                 <Trash2 className="size-4" /> Remove
               </button>
-            ) : null}
+              ) : null}
+            </div>
           </div>
-          <ProductIdentityEditor kind="card" onChange={(identity) => update(row.id, identity)} value={row} />
-          <label className="mt-4 block sm:max-w-52">
-            <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
-            <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} onFocus={selectNumberOnFocus} required type="number" value={row.quantity} />
-          </label>
-          <button className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white sm:w-auto" onClick={finishCard} type="button"><Check className="size-4" /> Done with this card</button>
+          <div className="px-4 pb-4">
+            <ProductIdentityEditor kind="card" onChange={(identity) => update(row.id, identity)} value={row} />
+            <label className="mt-4 block sm:max-w-52">
+              <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
+              <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} onFocus={selectNumberOnFocus} required type="number" value={row.quantity} />
+            </label>
+          </div>
         </article>
       ) : (
         <article className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between" key={row.id}>
@@ -126,7 +156,7 @@ export function CardContentsEditor({
           </div>
           <div className="flex gap-2">
             <button className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 sm:flex-none" onClick={() => { setActiveId(row.id); setError(null); }} type="button"><Pencil className="size-4" /> Edit</button>
-            {rows.length > 1 ? <button aria-label={`Remove ${noun} ${index + 1}`} className="grid size-11 place-items-center rounded-md border border-zinc-300 text-zinc-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700" onClick={() => onChange(rows.filter((item) => item.id !== row.id))} type="button"><Trash2 className="size-4" /></button> : null}
+            {rows.length > 1 || allowRemoveLast ? <button aria-label={`Remove ${noun} ${index + 1}`} className="grid size-11 place-items-center rounded-md border border-zinc-300 text-zinc-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700" onClick={() => onChange(rows.filter((item) => item.id !== row.id))} type="button"><Trash2 className="size-4" /></button> : null}
           </div>
         </article>
       ))}

@@ -1,16 +1,16 @@
 export const recordsPreviewStorageKey = "ygo-library:records-preview:v1";
+export const recordsDraftStorageKey = "ygo-library:records-drafts:v1";
 
 export type RecordEntryType =
   | "purchase"
   | "pack-opening"
   | "sale"
-  | "adjustment"
-  | "imported-acquisition"
-  | "bulk-itemization";
+  | "imported-acquisition";
 
 export type RecordStatus = "active" | "void";
+export type LibraryCardStatus = "wishlist" | "owned";
 export type InventoryKind = "card" | "sealed" | "bulk" | "supply";
-export type ProductEdition = "1st Edition" | "Unlimited Edition";
+export type ProductEdition = "1st Edition" | "Unlimited Edition" | "Limited Edition";
 export type SupplyCategory =
   | "sleeves"
   | "binder"
@@ -44,8 +44,10 @@ export type CardCopy = {
   printingId: string;
   acquiredRecordId: string;
   soldRecordId: string | null;
-  removedRecordId: string | null;
-  status: "available" | "sold" | "removed" | "void";
+  bulkLotId: string | null;
+  allocationIndex: number | null;
+  allocationPence: number | null;
+  status: "available" | "sold" | "void";
   condition: string;
 };
 
@@ -65,14 +67,15 @@ export type RecordEntry = {
   status: RecordStatus;
   date: string;
   title: string;
+  titleGenerated?: boolean;
   source: string;
   listingUrl: string | null;
   amountPence: number;
   amountKnown?: boolean;
   notes: string;
   lines: RecordLine[];
+  revision: number;
   createdAt: string;
-  preview: true;
 };
 
 export type SealedUnit = {
@@ -90,7 +93,7 @@ export type SealedUnit = {
 export type BulkLot = {
   id: string;
   name: string;
-  estimatedQuantity: number | null;
+  totalQuantity: number;
   itemizedQuantity: number;
   acquiredRecordId: string;
   status: "open" | "itemized" | "void";
@@ -137,10 +140,11 @@ export type ResolvedProductMetadata = {
 };
 
 export type ProductIdentityInput = {
+  selectedTargetId?: string | null;
   tcgplayerUrl: string;
   name: string;
   imageUrl: string | null;
-  edition: ProductEdition | "";
+  edition: ProductEdition;
   rarity: string;
   setName: string;
   setCode: string;
@@ -153,6 +157,7 @@ export type CardContentsInput = ProductIdentityInput & {
 };
 
 export type PurchaseInput = {
+  recordName: string;
   date: string;
   source: string;
   listingUrl: string;
@@ -161,11 +166,12 @@ export type PurchaseInput = {
 } & (
   | { kind: "card"; card: CardContentsInput }
   | { kind: "sealed"; product: ProductIdentityInput & { quantity: number } }
-  | { kind: "bulk"; cards: CardContentsInput[]; moreToItemize: boolean }
+  | { kind: "bulk"; cards: CardContentsInput[]; totalCardCount: number }
   | { kind: "supply"; category: SupplyCategory; otherName: string; quantity: number }
 );
 
 export type OpeningInput = {
+  recordName: string;
   date: string;
   notes: string;
   product: ProductIdentityInput;
@@ -175,6 +181,7 @@ export type OpeningInput = {
 };
 
 export type SaleInput = {
+  recordName: string;
   date: string;
   source: string;
   netProceedsPence: number;
@@ -182,58 +189,62 @@ export type SaleInput = {
   copyIds: string[];
 };
 
-export type AdjustmentInput = {
-  date: string;
-  direction: "add" | "remove";
-  reason: string;
-  notes: string;
-  name: string;
-  quantity: number;
-  copyIds: string[];
-  setName: string;
-  setCode: string;
-};
-
-export type BulkItemizationInput = {
-  date: string;
-  bulkLotId: string;
-  notes: string;
-  items: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    setName: string;
-    setCode: string;
-  }>;
-};
-
-export type PreviewDrafts = Partial<
-  Record<
-    "purchase" | "pack-opening" | "sale" | "adjustment" | "bulk-itemization",
-    unknown
-  >
+export type RecordsDrafts = Partial<
+  Record<"purchase" | "pack-opening" | "sale", unknown>
 >;
 
 export type DataSourceResult = { ok: true; id?: string } | { ok: false; message: string };
+export type RecordDetailsUpdate = {
+  title: string;
+  date: string;
+  source: string;
+  listingUrl: string | null;
+  amountPence: number;
+  notes: string;
+};
+export type RecordLineUpdate = {
+  name: string;
+  quantity: number;
+  detail: string;
+  edition?: ProductEdition;
+  category?: SupplyCategory;
+  totalQuantity?: number;
+};
 export type ResolveProductResult =
   | { ok: true; metadata: ResolvedProductMetadata }
   | { ok: false; message: string };
 
+export type LibraryCardSuggestion = {
+  targetId: string;
+  printingId: string | null;
+  name: string;
+  rarity: string;
+  edition: ProductEdition | "";
+  setName: string;
+  setCode: string;
+  tcgplayerUrl: string | null;
+  imageUrl: string | null;
+};
+
 export type RecordsDataSource = {
-  mode: "preview";
+  mode: "preview" | "live";
   status: "loading" | "ready" | "error";
   errorMessage: string | null;
   snapshot: RecordsSnapshot;
-  drafts: PreviewDrafts;
+  drafts: RecordsDrafts;
   resolveTcgplayerProduct: (url: string) => Promise<ResolveProductResult>;
-  createPurchase: (input: PurchaseInput) => DataSourceResult;
-  createOpening: (input: OpeningInput) => DataSourceResult;
-  createSale: (input: SaleInput) => DataSourceResult;
-  createAdjustment: (input: AdjustmentInput) => DataSourceResult;
-  itemizeBulk: (input: BulkItemizationInput) => DataSourceResult;
-  voidRecord: (recordId: string) => DataSourceResult;
-  restoreRecord: (recordId: string) => DataSourceResult;
-  setDraft: (key: keyof PreviewDrafts, value: unknown) => void;
-  clearDraft: (key: keyof PreviewDrafts) => void;
-  resetPreview: () => void;
+  searchLibraryCards: (query: string) => LibraryCardSuggestion[];
+  createPurchase: (input: PurchaseInput) => Promise<DataSourceResult>;
+  createOpening: (input: OpeningInput) => Promise<DataSourceResult>;
+  createSale: (input: SaleInput) => Promise<DataSourceResult>;
+  updateRecordDetails: (recordId: string, update: RecordDetailsUpdate) => Promise<DataSourceResult>;
+  replaceRecordCards: (recordId: string, cards: CardContentsInput[]) => Promise<DataSourceResult>;
+  replaceSaleCopies: (recordId: string, copyIds: string[]) => Promise<DataSourceResult>;
+  updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate) => Promise<DataSourceResult>;
+  deleteWishlistTarget: (targetId: string) => Promise<DataSourceResult>;
+  voidRecord: (recordId: string) => Promise<DataSourceResult>;
+  restoreRecord: (recordId: string) => Promise<DataSourceResult>;
+  setDraft: (key: keyof RecordsDrafts, value: unknown) => void;
+  clearDraft: (key: keyof RecordsDrafts) => void;
+  resetPreview?: () => void;
 };

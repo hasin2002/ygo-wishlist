@@ -1,4 +1,5 @@
 import { fetchLinkMetadata, normalizeUrl } from "@/server/metadata";
+import { getSessionFromHeaders } from "@/server/session";
 
 function isTcgplayerProductUrl(value: string) {
   try {
@@ -14,11 +15,11 @@ function isTcgplayerProductUrl(value: string) {
 }
 
 export async function POST(request: Request) {
-  if (
-    process.env.NODE_ENV === "production" &&
-    process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW !== "1"
-  ) {
-    return Response.json({ message: "Not found." }, { status: 404 });
+  const localPreviewReview = process.env.NODE_ENV !== "production"
+    && process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
+  const session = localPreviewReview ? null : await getSessionFromHeaders(request.headers);
+  if (!localPreviewReview && !session) {
+    return Response.json({ message: "Sign in to fetch product details." }, { status: 401 });
   }
 
   let url = "";

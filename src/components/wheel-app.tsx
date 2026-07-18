@@ -562,27 +562,21 @@ export function WheelApp() {
   function openPurchaseSheet(item: WheelItem) {
     setSelectedCardModal(null);
     setTilt({ x: 0, y: 0 });
-    setPurchaseTarget(item);
-    setPurchaseForm({
-      paidPriceText: "",
-      purchaseMonth: currentMonthKey(),
-    });
-    setPurchaseTouched(false);
+    window.location.assign(
+      `/records/new/purchase?cardName=${encodeURIComponent(item.card.name)}&targetId=${encodeURIComponent(item.card.id)}`,
+    );
   }
 
   function submitPurchase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPurchaseTouched(true);
 
-    if (!purchaseTarget || !purchasePaidPrice) {
+    if (!purchaseTarget) {
       return;
     }
-
-    markOwned.mutate({
-      id: purchaseTarget.card.id,
-      paidPriceText: purchasePaidPrice,
-      purchaseMonth: purchaseForm.purchaseMonth || currentMonthKey(),
-    });
+    window.location.assign(
+      `/records/new/purchase?cardName=${encodeURIComponent(purchaseTarget.card.name)}&targetId=${encodeURIComponent(purchaseTarget.card.id)}`,
+    );
   }
 
   function toggleChaseFilter(value: ChaseFilterValue) {

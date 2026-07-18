@@ -13,6 +13,15 @@ changed.
   sales, sealed goods, bulk lots, supplies, cost, and realized results.
 - A **Wishlist Target** describes a desired card and quantity. It is not proof
   of ownership.
+- **Wishlist** is the computed Library state when available Copies are below a
+  target's desired quantity. A partially collected target remains Wishlist and
+  shows how many Copies are still wanted.
+- **Owned** is the computed Library state when available Copies meet or exceed
+  the desired quantity. `Wishlist` and `Owned` are derived presentation
+  language, never a manually toggled source of truth.
+- Do not use `Satisfied`, `Open`, or `Reopened` as user-facing Library status
+  identifiers. Use `Owned` and `Wishlist`, with explicit wanted/owned quantities
+  when more detail is needed.
 - A **Card Printing** identifies an exact set/code plus TCGplayer metadata.
 - A **Copy** is one physical card. Ownership changes through record history,
   never through an unexplained status toggle.
@@ -34,12 +43,20 @@ changed.
 ## Product boundaries
 
 - Library may be public read-only; Records is owner-only.
+- Library and Records are projections of one owner-scoped collection model.
+  Library creates or edits Wishlist Targets; physical ownership is always
+  derived from the same Copies and Record Entries shown in Records. The legacy
+  `cards` table is migration input only after cutover and is never maintained by
+  permanent dual writes.
 - New card identities and sealed-product identities use a required TCGplayer
   product URL as their primary reference. Names, images, printing/set facts, and
   rarity are derived from that reference where possible. Legacy rows with
   missing metadata remain usable and are surfaced as needing attention.
 - Sales initially cover card copies only.
 - Binder location remains an integration with the existing Binder feature, not
-  a generalized inventory-location model.
-- Phase 1 is a UI-only preview. It may read existing cards but stores all preview
-  changes only in `sessionStorage` and never writes to the database.
+  a generalized inventory-location model. Binder, Wheel, chase, and highlights
+  reference the same Wishlist Targets/Copies after migration rather than a
+  parallel card row.
+- The approved Phase 1 UI preview remains a safe development adapter. Phase 2
+  adds an authenticated live adapter at the same Records seam; production data
+  migration remains separately gated and is never inferred from UI approval.

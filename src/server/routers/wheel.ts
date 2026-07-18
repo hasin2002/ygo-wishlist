@@ -2,315 +2,204 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { cards, wheelEntries } from "@/db/schema";
+import {
+  cardCopies,
+  cardPrintings,
+  cardTargets,
+  targetWheelEntries,
+} from "@/db/schema";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
-const chaseWeights: Record<number, number> = {
-  1: 1,
-  2: 1.7,
-  3: 2.7,
-  4: 4,
-  5: 6,
-};
-const chaseFilterSchema = z.union([
-  z.literal("unset"),
-  z.number().int().min(1).max(5),
-]);
+const chaseWeights: Record<number, number> = { 1: 1, 2: 1.7, 3: 2.7, 4: 4, 5: 6 };
+const chaseFilterSchema = z.union([z.literal("unset"), z.number().int().min(1).max(5)]);
 
-function priceValue(priceText: string | null) {
-  const match = priceText?.match(/\d+(?:[,.]\d{1,2})?/);
-  return match ? Number(match[0].replace(",", "")) : null;
+function marketValue(target: typeof cardTargets.$inferSelect) {
+  const pence = target.marketPricePence ?? target.estimatedPricePence;
+  return pence === null ? null : pence / 100;
 }
 
-function marketValue(card: typeof cards.$inferSelect) {
-  return priceValue(card.marketPriceText) ?? priceValue(card.priceText);
-}
-
-function wheelWeight(card: typeof cards.$inferSelect) {
-  const chaseWeight = chaseWeights[card.chaseLevel ?? 2] ?? chaseWeights[2];
-  const price = marketValue(card);
+function wheelWeight(target: typeof cardTargets.$inferSelect) {
+  const chaseWeight = chaseWeights[target.chaseLevel ?? 2] ?? chaseWeights[2];
+  const price = marketValue(target);
   const priceFactor = price ? 1 / (1 + Math.sqrt(price) / 35) : 1;
-
   return Number((chaseWeight * priceFactor).toFixed(3));
 }
 
 function matchesChaseFilter(
-  card: typeof cards.$inferSelect,
+  target: typeof cardTargets.$inferSelect,
   chaseLevels: z.infer<typeof chaseFilterSchema>[],
 ) {
-  if (!chaseLevels.length) {
-    return true;
-  }
-
-  if (!card.chaseLevel) {
-    return chaseLevels.includes("unset");
-  }
-
-  return chaseLevels.includes(card.chaseLevel);
+  if (!chaseLevels.length) return true;
+  return target.chaseLevel
+    ? chaseLevels.includes(target.chaseLevel)
+    : chaseLevels.includes("unset");
 }
 
 function matchesPriceFilter(
-  card: typeof cards.$inferSelect,
+  target: typeof cardTargets.$inferSelect,
   minPrice?: number,
   maxPrice?: number,
 ) {
-  if (minPrice === undefined && maxPrice === undefined) {
-    return true;
-  }
-
-  const price = marketValue(card);
-
-  if (price === null) {
-    return false;
-  }
-
-  if (minPrice !== undefined && price < minPrice) {
-    return false;
-  }
-
-  if (maxPrice !== undefined && price > maxPrice) {
-    return false;
-  }
-
-  return true;
+  if (minPrice === undefined && maxPrice === undefined) return true;
+  const price = marketValue(target);
+  return price !== null
+    && (minPrice === undefined || price >= minPrice)
+    && (maxPrice === undefined || price <= maxPrice);
 }
 
-function serializeCard(card: typeof cards.$inferSelect) {
+function serializeTarget(target: typeof cardTargets.$inferSelect) {
   return {
-    chaseLevel: card.chaseLevel,
-    ebaySearchUrl: card.ebaySearchUrl,
-    id: card.id,
-    imageUrl: card.imageUrl,
-    name: card.name,
-    notes: card.notes,
-    rarity: card.rarity,
-    url: card.url,
+    chaseLevel: target.chaseLevel,
+    ebaySearchUrl: target.ebaySearchUrl,
+    id: target.id,
+    imageUrl: target.imageUrl,
+    name: target.name,
+    notes: target.notes,
+    rarity: target.rarity,
+    url: target.tcgplayerUrl,
   };
 }
 
 function serializeWheelItem({
-  card,
+  target,
   entry,
 }: {
-  card: typeof cards.$inferSelect;
-  entry: typeof wheelEntries.$inferSelect;
+  target: typeof cardTargets.$inferSelect;
+  entry: typeof targetWheelEntries.$inferSelect;
 }) {
-  const { ownerId, ...serializedEntry } = entry;
+  const { ownerId, targetId, ...serializedEntry } = entry;
   void ownerId;
-
   return {
-    card: serializeCard(card),
+    card: serializeTarget(target),
     entry: {
       ...serializedEntry,
+      cardId: targetId,
       createdAt: entry.createdAt.toISOString(),
       selectedAt: entry.selectedAt?.toISOString() ?? null,
       updatedAt: entry.updatedAt.toISOString(),
     },
-    priceValue: marketValue(card),
-    weight: wheelWeight(card),
+    priceValue: marketValue(target),
+    weight: wheelWeight(target),
   };
 }
 
-async function syncWishlistEntries(ownerId: string) {
-  const wishlistCards = await db
-    .select()
-    .from(cards)
-    .where(and(eq(cards.ownerId, ownerId), eq(cards.status, "wishlist")))
-    .orderBy(asc(cards.name));
-  const existingEntries = await db
-    .select()
-    .from(wheelEntries)
-    .where(eq(wheelEntries.ownerId, ownerId));
-  const existingIds = new Set(existingEntries.map((entry) => entry.cardId));
-  const nextSortOrder =
-    existingEntries.reduce(
-      (highest, entry) => Math.max(highest, entry.sortOrder),
-      -1,
-    ) + 1;
-
-  const missingCards = wishlistCards.filter((card) => !existingIds.has(card.id));
-
-  if (!missingCards.length) {
-    return;
+async function wishlistTargetIds(ownerId: string) {
+  const [targets, printings, copies] = await Promise.all([
+    db.select().from(cardTargets).where(eq(cardTargets.ownerId, ownerId)),
+    db.select().from(cardPrintings).where(eq(cardPrintings.ownerId, ownerId)),
+    db.select().from(cardCopies).where(and(
+      eq(cardCopies.ownerId, ownerId), eq(cardCopies.status, "available"),
+    )),
+  ]);
+  const targetIdByPrintingId = new Map(printings.map((printing) => [printing.id, printing.targetId]));
+  const ownedCount = new Map<string, number>();
+  for (const copy of copies) {
+    const targetId = targetIdByPrintingId.get(copy.printingId);
+    if (targetId) ownedCount.set(targetId, (ownedCount.get(targetId) ?? 0) + 1);
   }
-
-  const now = new Date();
-
-  await db.insert(wheelEntries).values(
-    missingCards.map((card, index) => ({
-      cardId: card.id,
-      ownerId,
-      sortOrder: nextSortOrder + index,
-      createdAt: now,
-      updatedAt: now,
-    })),
-  );
+  return targets
+    .filter((target) => (ownedCount.get(target.id) ?? 0) < target.desiredQuantity)
+    .map((target) => target.id);
 }
 
-function wheelRows(ownerId: string) {
-  return db
-    .select({ card: cards, entry: wheelEntries })
-    .from(wheelEntries)
-    .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-    .where(
-      and(
-        eq(cards.ownerId, ownerId),
-        eq(wheelEntries.ownerId, ownerId),
-        eq(cards.status, "wishlist"),
-      ),
-    )
-    .orderBy(asc(wheelEntries.sortOrder));
+async function syncWishlistEntries(ownerId: string) {
+  const wishlistIds = await wishlistTargetIds(ownerId);
+  if (!wishlistIds.length) return;
+  const targets = await db.select().from(cardTargets).where(and(
+    eq(cardTargets.ownerId, ownerId), inArray(cardTargets.id, wishlistIds),
+  )).orderBy(asc(cardTargets.name));
+  const existing = await db.select().from(targetWheelEntries).where(
+    eq(targetWheelEntries.ownerId, ownerId),
+  );
+  const existingIds = new Set(existing.map((entry) => entry.targetId));
+  const nextSortOrder = existing.reduce((highest, entry) => Math.max(highest, entry.sortOrder), -1) + 1;
+  const missing = targets.filter((target) => !existingIds.has(target.id));
+  if (!missing.length) return;
+  const now = new Date();
+  await db.insert(targetWheelEntries).values(missing.map((target, index) => ({
+    ownerId, targetId: target.id, sortOrder: nextSortOrder + index, createdAt: now, updatedAt: now,
+  })));
+}
+
+async function wheelRows(ownerId: string) {
+  const wishlistIds = new Set(await wishlistTargetIds(ownerId));
+  const rows = await db.select({ target: cardTargets, entry: targetWheelEntries })
+    .from(targetWheelEntries)
+    .innerJoin(cardTargets, eq(targetWheelEntries.targetId, cardTargets.id))
+    .where(and(
+      eq(cardTargets.ownerId, ownerId), eq(targetWheelEntries.ownerId, ownerId),
+    ))
+    .orderBy(asc(targetWheelEntries.sortOrder));
+  return rows.filter(({ target }) => wishlistIds.has(target.id));
 }
 
 export const wheelRouter = router({
   state: authenticatedProcedure.query(async ({ ctx }) => {
     await syncWishlistEntries(ctx.collectionOwnerId);
-
     const rows = await wheelRows(ctx.collectionOwnerId);
-
     return {
-      active: rows
-        .filter(({ entry }) => !entry.selectedAt)
-        .map(serializeWheelItem),
-      history: rows
-        .filter(({ entry }) => entry.selectedAt)
-        .sort(
-          (a, b) => (a.entry.selectedOrder ?? 0) - (b.entry.selectedOrder ?? 0),
-        )
+      active: rows.filter(({ entry }) => !entry.selectedAt).map(serializeWheelItem),
+      history: rows.filter(({ entry }) => entry.selectedAt)
+        .sort((left, right) => (left.entry.selectedOrder ?? 0) - (right.entry.selectedOrder ?? 0))
         .map(serializeWheelItem),
     };
   }),
 
-  spin: authenticatedProcedure
-    .input(
-      z
-        .object({
-          chaseLevels: z.array(chaseFilterSchema).default([]),
-          maxPrice: z.number().min(0).optional(),
-          minPrice: z.number().min(0).optional(),
-        })
-        .optional(),
-    )
-    .mutation(async ({ ctx, input }) => {
-      await syncWishlistEntries(ctx.collectionOwnerId);
-
-      const activeRows = (
-        await db
-          .select({ card: cards, entry: wheelEntries })
-          .from(wheelEntries)
-          .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-          .where(
-            and(
-              eq(cards.ownerId, ctx.collectionOwnerId),
-              eq(wheelEntries.ownerId, ctx.collectionOwnerId),
-              eq(cards.status, "wishlist"),
-            ),
-          )
-          .orderBy(asc(wheelEntries.sortOrder))
-      ).filter(
-        ({ card, entry }) =>
-          !entry.selectedAt &&
-          matchesChaseFilter(card, input?.chaseLevels ?? []) &&
-          matchesPriceFilter(card, input?.minPrice, input?.maxPrice),
-      );
-
-      if (!activeRows.length) {
-        const hasFilters =
-          Boolean(input?.chaseLevels?.length) ||
-          input?.minPrice !== undefined ||
-          input?.maxPrice !== undefined;
-
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: hasFilters
-            ? "No cards match the current wheel filters."
-            : "No wishlist cards left on the wheel.",
-        });
-      }
-
-      const weightedRows = activeRows.map((row) => ({
-        ...row,
-        weight: wheelWeight(row.card),
-      }));
-      const totalWeight = weightedRows.reduce(
-        (total, row) => total + row.weight,
-        0,
-      );
-      let target = Math.random() * totalWeight;
-      const selected =
-        weightedRows.find((row) => {
-          target -= row.weight;
-          return target <= 0;
-        }) ?? weightedRows[weightedRows.length - 1];
-
-      const selectedRows = await db
-        .select()
-        .from(wheelEntries)
-        .where(
-          and(
-            eq(wheelEntries.ownerId, ctx.collectionOwnerId),
-            isNotNull(wheelEntries.selectedAt),
-          ),
-        )
-        .orderBy(desc(wheelEntries.selectedOrder));
-      const selectedOrder = (selectedRows[0]?.selectedOrder ?? 0) + 1;
-
-      const [updated] = await db
-        .update(wheelEntries)
-        .set({
-          selectedAt: new Date(),
-          selectedOrder,
-          updatedAt: new Date(),
-        })
-        .where(eq(wheelEntries.id, selected.entry.id))
-        .returning();
-
-      return {
-        selected: serializeWheelItem({ card: selected.card, entry: updated }),
-      };
-    }),
+  spin: authenticatedProcedure.input(z.object({
+    chaseLevels: z.array(chaseFilterSchema).default([]),
+    maxPrice: z.number().min(0).optional(),
+    minPrice: z.number().min(0).optional(),
+  }).optional()).mutation(async ({ ctx, input }) => {
+    await syncWishlistEntries(ctx.collectionOwnerId);
+    const activeRows = (await wheelRows(ctx.collectionOwnerId)).filter(({ target, entry }) => (
+      !entry.selectedAt
+      && matchesChaseFilter(target, input?.chaseLevels ?? [])
+      && matchesPriceFilter(target, input?.minPrice, input?.maxPrice)
+    ));
+    if (!activeRows.length) {
+      const hasFilters = Boolean(input?.chaseLevels?.length)
+        || input?.minPrice !== undefined || input?.maxPrice !== undefined;
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: hasFilters ? "No cards match the current wheel filters." : "No wishlist cards left on the wheel.",
+      });
+    }
+    const weighted = activeRows.map((row) => ({ ...row, weight: wheelWeight(row.target) }));
+    let draw = Math.random() * weighted.reduce((sum, row) => sum + row.weight, 0);
+    const selected = weighted.find((row) => {
+      draw -= row.weight;
+      return draw <= 0;
+    }) ?? weighted[weighted.length - 1];
+    const selectedRows = await db.select().from(targetWheelEntries).where(and(
+      eq(targetWheelEntries.ownerId, ctx.collectionOwnerId),
+      isNotNull(targetWheelEntries.selectedAt),
+    )).orderBy(desc(targetWheelEntries.selectedOrder));
+    const [updated] = await db.update(targetWheelEntries).set({
+      selectedAt: new Date(), selectedOrder: (selectedRows[0]?.selectedOrder ?? 0) + 1,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(targetWheelEntries.id, selected.entry.id),
+      eq(targetWheelEntries.ownerId, ctx.collectionOwnerId),
+    )).returning();
+    return { selected: serializeWheelItem({ target: selected.target, entry: updated }) };
+  }),
 
   reset: authenticatedProcedure.mutation(async ({ ctx }) => {
     await syncWishlistEntries(ctx.collectionOwnerId);
-
-    const resettableRows = await db
-      .select({ id: wheelEntries.id })
-      .from(wheelEntries)
-      .innerJoin(cards, eq(wheelEntries.cardId, cards.id))
-      .where(
-        and(
-          eq(cards.status, "wishlist"),
-          eq(cards.ownerId, ctx.collectionOwnerId),
-          eq(wheelEntries.ownerId, ctx.collectionOwnerId),
-          or(
-            isNotNull(wheelEntries.selectedAt),
-            isNotNull(wheelEntries.selectedOrder),
-          ),
-        ),
-      );
-
-    if (!resettableRows.length) {
-      return { ok: true, resetCount: 0 };
-    }
-
-    const updated = await db
-      .update(wheelEntries)
-      .set({
-        selectedAt: null,
-        selectedOrder: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(wheelEntries.ownerId, ctx.collectionOwnerId),
-          inArray(
-            wheelEntries.id,
-            resettableRows.map((row) => row.id),
-          ),
-        ),
-      )
-      .returning({ id: wheelEntries.id });
-
+    const wishlistIds = await wishlistTargetIds(ctx.collectionOwnerId);
+    if (!wishlistIds.length) return { ok: true, resetCount: 0 };
+    const resettable = await db.select({ id: targetWheelEntries.id }).from(targetWheelEntries).where(and(
+      eq(targetWheelEntries.ownerId, ctx.collectionOwnerId),
+      inArray(targetWheelEntries.targetId, wishlistIds),
+      or(isNotNull(targetWheelEntries.selectedAt), isNotNull(targetWheelEntries.selectedOrder)),
+    ));
+    if (!resettable.length) return { ok: true, resetCount: 0 };
+    const updated = await db.update(targetWheelEntries).set({
+      selectedAt: null, selectedOrder: null, updatedAt: new Date(),
+    }).where(and(
+      eq(targetWheelEntries.ownerId, ctx.collectionOwnerId),
+      inArray(targetWheelEntries.id, resettable.map((entry) => entry.id)),
+    )).returning({ id: targetWheelEntries.id });
     return { ok: true, resetCount: updated.length };
   }),
 });

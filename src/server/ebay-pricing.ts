@@ -51,6 +51,20 @@ const excludedTitlePatterns = [
   /\b(?:psa|bgs|cgc|sgc)\s*\d+(?:\.\d+)?\b/,
 ];
 const ebayCardCategoryId = "183454";
+const retryBaseDelayMs = 300;
+const retryMaxDelayMs = 8_000;
+const maxRetries = 4;
+
+class EbayHttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+let tokenCache: { accessToken: string; expiresAt: number } | null = null;
 
 function normalizeText(value: string | null | undefined) {
   return String(value ?? "")
@@ -226,6 +240,9 @@ export function buildEbaySearchUrl(card: { name: string; rarity: string | null }
 }
 
 async function getAccessToken() {
+  if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) {
+    return tokenCache.accessToken;
+  }
   const clientId = process.env.EBAY_CLIENT_ID;
   const clientSecret = process.env.EBAY_CLIENT_SECRET;
 
@@ -251,11 +268,19 @@ async function getAccessToken() {
     throw new Error(`eBay OAuth failed (${response.status}).`);
   }
 
-  const data = (await response.json()) as { access_token: string };
-  return data.access_token;
+  const data = (await response.json()) as { access_token: string; expires_in?: number };
+  tokenCache = {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + Math.max(60, data.expires_in ?? 7_200) * 1_000,
+  };
+  return tokenCache.accessToken;
 }
 
-export async function refreshEbayPricing(card: typeof cards.$inferSelect) {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function searchEbay(card: { name: string; rarity: string | null }) {
   const token = await getAccessToken();
   const query = [searchableCardName(card.name), card.rarity, "english"]
     .filter(Boolean)
@@ -278,13 +303,32 @@ export async function refreshEbayPricing(card: typeof cards.$inferSelect) {
   );
 
   if (!response.ok) {
-    throw new Error(`eBay search failed (${response.status}).`);
+    throw new EbayHttpError(response.status, `eBay search failed (${response.status}).`);
   }
 
   const data = (await response.json()) as {
     itemSummaries?: { title?: string; price?: { value?: string } }[];
   };
-  const prices = (data.itemSummaries ?? [])
+  return data.itemSummaries ?? [];
+}
+
+async function searchEbayWithRetry(card: { name: string; rarity: string | null }) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await searchEbay(card);
+    } catch (error) {
+      const retryable = error instanceof EbayHttpError
+        && (error.status === 429 || (error.status >= 500 && error.status <= 599));
+      if (!retryable || attempt === maxRetries) throw error;
+      const backoff = Math.min(retryMaxDelayMs, retryBaseDelayMs * 2 ** attempt);
+      await sleep(Math.round(backoff * (0.5 + Math.random())));
+    }
+  }
+  return [];
+}
+
+export async function fetchEbayPricing(card: { name: string; rarity: string | null }) {
+  const prices = (await searchEbayWithRetry(card))
     .filter((item) => item.title)
     .filter((item) => !shouldExclude(item.title ?? ""))
     .filter((item) => titleMatchesName(item.title ?? "", card.name))
@@ -295,18 +339,24 @@ export async function refreshEbayPricing(card: typeof cards.$inferSelect) {
   const ebaySearchUrl = buildEbaySearchUrl(card);
 
   if (!sample.length) {
-    const [updated] = await db
-      .update(cards)
-      .set({ ebaySearchUrl, updatedAt: new Date() })
-      .where(eq(cards.id, card.id))
-      .returning();
-    return updated;
+    return { ebaySearchUrl, estimatedPricePence: null, sampleSize: 0 };
   }
 
-  const priceText = `£${average(sample).toFixed(2)} avg (${sample.length})`;
+  return {
+    ebaySearchUrl,
+    estimatedPricePence: Math.round(average(sample) * 100),
+    sampleSize: sample.length,
+  };
+}
+
+export async function refreshEbayPricing(card: typeof cards.$inferSelect) {
+  const pricing = await fetchEbayPricing(card);
+  const priceText = pricing.estimatedPricePence === null
+    ? card.priceText
+    : `£${(pricing.estimatedPricePence / 100).toFixed(2)} avg (${pricing.sampleSize})`;
   const [updated] = await db
     .update(cards)
-    .set({ priceText, ebaySearchUrl, updatedAt: new Date() })
+    .set({ priceText, ebaySearchUrl: pricing.ebaySearchUrl, updatedAt: new Date() })
     .where(eq(cards.id, card.id))
     .returning();
 

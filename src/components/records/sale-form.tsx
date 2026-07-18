@@ -28,6 +28,7 @@ import {
   WizardProgress,
 } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { generatedSaleRecordName } from "@/lib/records/record-name";
 import type {
   CardCopy,
   CardPrinting,
@@ -39,8 +40,9 @@ const salePageSize = 20;
 type SaleKind = "single" | "bulk";
 
 type SaleDraft = {
-  version: 2;
+  version: 3;
   kind: SaleKind | null;
+  recordName: string;
   date: string;
   source: string;
   proceeds: string;
@@ -63,8 +65,9 @@ type LibraryImpact = {
 
 function newSaleDraft(): SaleDraft {
   return {
-    version: 2,
+    version: 3,
     kind: null,
+    recordName: "",
     date: today(),
     source: "eBay",
     proceeds: "",
@@ -123,8 +126,8 @@ function LibraryImpactNotice({ impacts }: { impacts: LibraryImpact[] }) {
 export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   const source = useRecordsDataSource();
   const stored = source.drafts.sale as Partial<SaleDraft> | undefined;
-  const legacyDraftReset = Boolean(stored && stored.version !== 2);
-  const [draft, setDraft] = useState<SaleDraft>(() => stored?.version === 2 ? stored as SaleDraft : newSaleDraft());
+  const legacyDraftReset = Boolean(stored && (stored as { version?: number }).version !== 3);
+  const [draft, setDraft] = useState<SaleDraft>(() => (stored as { version?: number } | undefined)?.version === 3 ? stored as SaleDraft : newSaleDraft());
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -219,7 +222,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
     setStep((current) => Math.min(4, current + 1));
   }
 
-  function submit() {
+  async function submit() {
     if (step !== 4) return;
     const problem = typeError() ?? detailsError() ?? selectionError();
     if (problem) {
@@ -227,7 +230,8 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       return;
     }
     setPending(true);
-    const result = source.createSale({
+    const result = await source.createSale({
+      recordName: draft.recordName.trim(),
       date: draft.date,
       source: draft.source.trim(),
       netProceedsPence: poundsToPence(draft.proceeds),
@@ -282,6 +286,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   }
 
   const saleLabel = draft.kind === "single" ? "Single card" : "Bulk cards";
+  const saleRecordName = draft.recordName.trim() || generatedSaleRecordName(selectedCopies.map((item) => item.target.name));
   const requiredCopies = draft.kind === "single" ? 1 : 2;
   const remainingCopies = Math.max(0, requiredCopies - draft.copyIds.length);
   const selectionComplete = draft.kind !== null && remainingCopies === 0;
@@ -289,10 +294,10 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   const resultEnd = Math.min(page * salePageSize, filteredCopies.length);
 
   return (
-    <form className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
+    <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
       <WizardProgress labels={["Sale type", "Sale details", "Cards sold", "Review"]} step={step} />
-      {legacyDraftReset ? <PreviewNotice>The earlier two-step Sale draft was reset because its selection rules have changed.</PreviewNotice> : null}
+      {legacyDraftReset ? <PreviewNotice label="Draft reset.">Your earlier Sale draft was reset because record names are now available.</PreviewNotice> : null}
 
       {step === 1 ? (
         <StepPanel step={step}>
@@ -339,6 +344,11 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
             title="Sale details"
           >
             <div className="grid gap-4 sm:grid-cols-2">
+              <label className="sm:col-span-2">
+                <span className="text-sm font-bold text-zinc-700">Record name <span className="font-medium text-zinc-400">(optional)</span></span>
+                <input className={fieldClass} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, recordName: event.target.value }))} placeholder="e.g. Weekend eBay sales" value={draft.recordName} />
+                <span className="mt-1 block text-xs font-medium text-zinc-500">Leave blank to generate a short name from the cards you select.</span>
+              </label>
               <label>
                 <span className="text-sm font-bold text-zinc-700">Sale date <span className="text-rose-700">*</span></span>
                 <input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required type="date" value={draft.date} />
@@ -518,7 +528,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       {step === 4 ? (
         <StepPanel step={step}>
           <div className="grid gap-4">
-            <PreviewNotice>This is a read-only review. Nothing has been saved; only the confirmation button below creates the preview Sale.</PreviewNotice>
+            <PreviewNotice label={source.mode === "preview" ? "Preview only." : "Review before saving."}>This is a read-only review. Nothing has been saved; only the confirmation button below creates the {source.mode === "preview" ? "preview " : ""}Sale.</PreviewNotice>
             <FormSection
               description="Check the transaction and every selected physical copy before confirming."
               number={4}
@@ -526,9 +536,9 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
             >
               <div className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                 <div>
-                  <span className="text-xs font-bold uppercase text-zinc-500">Sale</span>
-                  <p className="mt-1 font-black">{saleLabel} · £{penceToPounds(poundsToPence(draft.proceeds))}</p>
-                  <p className="mt-1 text-sm font-medium text-zinc-500">{draft.source} · {draft.date}</p>
+                  <span className="text-xs font-bold uppercase text-zinc-500">Record name</span>
+                  <p className="mt-1 font-black">{saleRecordName}</p>
+                  <p className="mt-1 text-sm font-medium text-zinc-500">{saleLabel} · £{penceToPounds(poundsToPence(draft.proceeds))} · {draft.source} · {draft.date}</p>
                 </div>
                 <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button>
               </div>
@@ -560,7 +570,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       ) : null}
 
       <WizardActions
-        finalLabel="Confirm preview sale"
+        finalLabel={`Confirm${source.mode === "preview" ? " preview" : ""} sale`}
         onBack={() => { setError(null); setStep((current) => Math.max(1, current - 1)); }}
         onConfirm={submit}
         onNext={nextStep}

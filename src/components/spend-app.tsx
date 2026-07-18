@@ -429,9 +429,9 @@ function PurchaseRow({
   pending,
   onToggleFavourite,
 }: {
-  favouriteByMonth: Map<string, number>;
+  favouriteByMonth: Map<string, string>;
   item: SpendCard;
-  onToggleFavourite: (month: string, cardId: number, isFavourite: boolean) => void;
+  onToggleFavourite: (month: string, cardId: string, isFavourite: boolean) => void;
   pending: boolean;
 }) {
   const month = item.card.purchaseMonth;
@@ -736,7 +736,7 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
     setPurchasePage(1);
   }
 
-  function toggleFavourite(month: string, cardId: number, isFavourite: boolean) {
+  function toggleFavourite(month: string, cardId: string, isFavourite: boolean) {
     setMonthlyFavourite.mutate({
       cardId: isFavourite ? null : cardId,
       month,

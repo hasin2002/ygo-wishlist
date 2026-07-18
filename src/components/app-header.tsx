@@ -33,7 +33,6 @@ const navItems = [
   { href: "/assign-chase", icon: Sparkles, label: "Assign chase" },
   { href: "/wheel", icon: CircleDot, label: "Wheel" },
   { href: "/binder-v2", icon: BookOpen, label: "Binder" },
-  { href: "/spend", icon: Wallet, label: "Spend" },
 ] satisfies {
   href: string;
   icon: LucideIcon;
@@ -151,8 +150,8 @@ function SpendSummaryLink({
       className={`inline-flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 shadow-sm transition duration-200 hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] ${
         className ?? ""
       }`}
-      href="/spend"
-      title={`Spend for ${monthlyLabel}`}
+      href="/records"
+      title={`Actual cost for ${monthlyLabel}`}
     >
       <Wallet className="size-4 shrink-0" />
       <span className="text-zinc-500">{monthlyLabel}</span>
@@ -457,8 +456,8 @@ export function AppHeader({
                   monthlyTotal,
                 )}`}
                 className="mt-3 inline-flex size-12 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
-                href="/spend"
-                title={`Spend for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}
+                href="/records"
+                title={`Actual cost for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}
               >
                 <Wallet className="size-4" />
               </Link>

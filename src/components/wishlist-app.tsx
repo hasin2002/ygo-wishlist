@@ -6,19 +6,15 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
-  Pencil,
   Plus,
   RefreshCw,
   Save,
   Search,
-  ShoppingBag,
   SlidersHorizontal,
   Star,
-  Trash2,
   X,
 } from "lucide-react";
 import type { inferRouterOutputs } from "@trpc/server";
-import Link from "next/link";
 import {
   FormEvent,
   MouseEvent,
@@ -34,6 +30,7 @@ import { DataLoadError } from "@/components/data-load-error";
 import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
 import { RarityCombobox } from "@/components/rarity-combobox";
+import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
@@ -73,15 +70,26 @@ type CardForm = {
   marketPriceText: string;
   purchaseMonth: string;
   rarity: string;
+  edition: "1st Edition" | "Unlimited Edition" | "Limited Edition";
   chaseLevel: string;
   status: CardStatus;
   notes: string;
 };
-type EditForm = CardForm & {
-  id: number;
+type EditForm = Omit<CardForm, "edition"> & {
+  id: string;
   ebayListingUrl: string;
   paidPriceText: string;
   chaseLevel: string;
+  edition: CardForm["edition"] | "Unknown edition";
+};
+type PricingRun = {
+  completed: number;
+  estimated: number;
+  failed: number;
+  minimized: boolean;
+  noMatch: number;
+  running: boolean;
+  total: number;
 };
 
 const pageSize = 8;
@@ -302,6 +310,9 @@ function editFormFromCard(card: Card): EditForm {
     purchaseMonth: card.purchaseMonth ?? "",
     ebayListingUrl: card.ebayListingUrl ?? "",
     rarity: card.rarity ?? "",
+    edition: card.edition === "Unlimited Edition" || card.edition === "1st Edition"
+      ? card.edition
+      : "Unknown edition",
     chaseLevel: card.chaseLevel ? String(card.chaseLevel) : "",
     status: card.status,
     notes: card.notes ?? "",
@@ -317,6 +328,7 @@ function emptyForm(): CardForm {
     marketPriceText: "",
     purchaseMonth: currentMonthKey(),
     rarity: "",
+    edition: "1st Edition",
     chaseLevel: "",
     status: "wishlist" as const,
     notes: "",
@@ -345,12 +357,14 @@ function EditCardModal({
   form,
   saving,
   onClose,
+  onDelete,
   onSave,
   setForm,
 }: {
   form: EditForm;
   saving: boolean;
   onClose: () => void;
+  onDelete: (id: string) => void;
   onSave: () => void;
   setForm: (updater: (current: EditForm) => EditForm) => void;
 }) {
@@ -415,41 +429,9 @@ function EditCardModal({
           </label>
 
           {form.status === "owned" ? (
-            <label className="block">
-              <span className="text-sm font-medium text-zinc-700">
-                Paid price
-              </span>
-              <input
-                className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    paidPriceText: event.target.value,
-                  }))
-                }
-                placeholder="£12.50"
-                value={form.paidPriceText}
-              />
-            </label>
-          ) : null}
-
-          {form.status === "owned" ? (
-            <label className="block">
-              <span className="text-sm font-medium text-zinc-700">
-                Bought month
-              </span>
-              <input
-                className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    purchaseMonth: event.target.value,
-                  }))
-                }
-                type="month"
-                value={form.purchaseMonth}
-              />
-            </label>
+            <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-medium leading-5 text-blue-950 sm:col-span-2">
+              Purchase cost, date, and physical Copy details come from Records. Open this card&apos;s Copies to edit the originating Purchase or Pack Opening.
+            </div>
           ) : null}
 
           <RarityCombobox
@@ -457,12 +439,23 @@ function EditCardModal({
             onChange={(rarity) => setForm((current) => ({ ...current, rarity }))}
           />
 
+          <label className="block">
+            <span className="text-sm font-medium text-zinc-700">Edition</span>
+            <select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => setForm((current) => ({ ...current, edition: event.target.value as EditForm["edition"] }))} value={form.edition}>
+              {form.edition === "Unknown edition" ? <option value="Unknown edition">Unknown edition — choose one</option> : null}
+              <option value="1st Edition">1st Edition</option>
+              <option value="Unlimited Edition">Unlimited Edition</option>
+              <option value="Limited Edition">Limited Edition</option>
+            </select>
+            {form.edition === "Unknown edition" ? <span className="mt-1 block text-xs font-semibold text-amber-700">Legacy data did not include an edition. Choose the physical card&apos;s edition before saving.</span> : null}
+          </label>
+
           <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
             <span className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
               Library state
             </span>
             <p className="mt-1 text-sm font-bold capitalize text-zinc-800">
-              {form.status === "wishlist" ? "Wishlist target" : "Owned legacy card"}
+              {form.status === "wishlist" ? "Wishlist target" : "Owned from Records"}
             </p>
             <p className="mt-1 text-xs font-medium leading-5 text-zinc-500">
               Ownership changes belong in Records so acquisition history is preserved.
@@ -532,7 +525,15 @@ function EditCardModal({
           </label>
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex items-center justify-between gap-2 border-t border-zinc-200 pt-4">
+          <button
+            className="h-10 rounded-md px-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 hover:text-rose-800"
+            onClick={() => onDelete(form.id)}
+            type="button"
+          >
+            Delete target
+          </button>
+          <div className="flex justify-end gap-2">
           <button
             className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
             onClick={onClose}
@@ -542,13 +543,14 @@ function EditCardModal({
           </button>
           <button
             className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-            disabled={saving}
+            disabled={saving || form.edition === "Unknown edition"}
             onClick={onSave}
             type="button"
           >
             {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
             Save
           </button>
+          </div>
         </div>
       </section>
     </div>
@@ -945,22 +947,94 @@ function AddCardForm({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   setForm: (updater: (current: CardForm) => CardForm) => void;
 }) {
+  const [extracting, setExtracting] = useState(false);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [extractedSummary, setExtractedSummary] = useState<string | null>(null);
+
+  async function extractFromTcgplayer() {
+    const url = form.url.trim();
+    if (!url) {
+      setExtractionError("Paste a TCGplayer product link first.");
+      return;
+    }
+    setExtracting(true);
+    setExtractionError(null);
+    setExtractedSummary(null);
+    setForm((current) => ({ ...current, name: "", rarity: "", imageUrl: "", priceText: "" }));
+    try {
+      const response = await fetch("/api/records/metadata", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const body = await response.json() as {
+        message?: string;
+        metadata?: {
+          edition?: CardForm["edition"];
+          imageUrl?: string;
+          rarity?: string;
+          setCode?: string;
+          setName?: string;
+          title?: string;
+        };
+      };
+      if (!response.ok || !body.metadata) {
+        throw new Error(body.message || "TCGplayer details could not be fetched. Try again or fill in the fields manually.");
+      }
+      const metadata = body.metadata;
+      setForm((current) => ({
+        ...current,
+        name: metadata.title || "",
+        rarity: metadata.rarity || "",
+        edition: metadata.edition || current.edition || "1st Edition",
+        imageUrl: metadata.imageUrl || "",
+      }));
+      setExtractedSummary([
+        metadata.title,
+        metadata.rarity,
+        [metadata.setName, metadata.setCode].filter(Boolean).join(" · "),
+      ].filter(Boolean).join(" — "));
+    } catch (error) {
+      setExtractionError(error instanceof Error ? error.message : "TCGplayer details could not be fetched.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
       <label className="block">
         <span className="text-sm font-medium text-zinc-700">
-          TCGplayer product link
+          TCGplayer product link <span className="text-rose-700">*</span>
         </span>
-        <input
-          autoFocus
-          className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-          onChange={(event) =>
-            setForm((current) => ({ ...current, url: event.target.value }))
-          }
-          placeholder="https://www.tcgplayer.com/product/..."
-          type="url"
-          value={form.url}
-        />
+        <div className="mt-1 flex gap-2">
+          <input
+            autoFocus
+            className="h-11 min-w-0 flex-1 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+            onChange={(event) => {
+              setExtractionError(null);
+              setExtractedSummary(null);
+              setForm((current) => ({ ...current, url: event.target.value }));
+            }}
+            placeholder="https://www.tcgplayer.com/product/..."
+            type="url"
+            value={form.url}
+          />
+          <button
+            className="inline-flex h-11 shrink-0 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
+            disabled={extracting || !form.url.trim()}
+            onClick={() => void extractFromTcgplayer()}
+            type="button"
+          >
+            <RefreshCw className={`size-4 ${extracting ? "animate-spin" : ""}`} />
+            {extracting ? "Fetching" : "Fetch details"}
+          </button>
+        </div>
+        <span className="mt-1 block text-xs font-medium text-zinc-500">
+          Fetch name, rarity, edition, set details, and image. Review the populated fields before adding.
+        </span>
+        {extractionError ? <p className="mt-2 text-sm font-semibold text-rose-700" role="alert">{extractionError}</p> : null}
+        {extractedSummary ? <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" role="status">Details loaded: {extractedSummary}</p> : null}
       </label>
 
       <label className="block">
@@ -978,7 +1052,7 @@ function AddCardForm({
         />
       </label>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
           <label className="block">
             <span className="text-sm font-medium text-zinc-700">
               Manual market price
@@ -999,6 +1073,14 @@ function AddCardForm({
           value={form.rarity}
           onChange={(rarity) => setForm((current) => ({ ...current, rarity }))}
         />
+        <label className="block">
+          <span className="text-sm font-medium text-zinc-700">Edition <span className="text-rose-700">*</span></span>
+          <select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => setForm((current) => ({ ...current, edition: event.target.value as CardForm["edition"] }))} value={form.edition}>
+            <option value="1st Edition">1st Edition</option>
+            <option value="Unlimited Edition">Unlimited Edition</option>
+            <option value="Limited Edition">Limited Edition</option>
+          </select>
+        </label>
       </div>
 
       <div className="grid gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-[1fr_1fr]">
@@ -1069,7 +1151,7 @@ function AddCardForm({
 
       <button
         className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:bg-zinc-300"
-        disabled={isPending || (!form.name && !form.url)}
+        disabled={isPending || !form.url || !form.rarity}
         type="submit"
       >
         {isPending ? (
@@ -1277,6 +1359,8 @@ export function WishlistApp() {
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [imagePreviewCard, setImagePreviewCard] = useState<Card | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const [pricingRun, setPricingRun] = useState<PricingRun | null>(null);
   const utils = trpc.useUtils();
 
   function updateTrackerUrl(
@@ -1356,9 +1440,7 @@ export function WishlistApp() {
       invalidateCardsAndSpend();
     },
   });
-  const refreshAllPricing = trpc.cards.refreshAllPricing.useMutation({
-    onSuccess: invalidateCardsAndSpend,
-  });
+  const refreshPricing = trpc.cards.refreshPricing.useMutation();
   const deleteCard = trpc.cards.delete.useMutation({
     onSuccess: invalidateCardsAndSpend,
   });
@@ -1406,27 +1488,23 @@ export function WishlistApp() {
     if (!canEdit) {
       return;
     }
-    const isOwned = form.status === "owned";
-
     create.mutate({
       name: form.name || undefined,
-      url: form.url || undefined,
+      url: form.url,
       imageUrl: form.imageUrl || undefined,
-      marketPriceText: !isOwned
-        ? normalizeMarketPrice(form.priceText) || undefined
-        : undefined,
-      paidPriceText: isOwned
-        ? normalizePaidPrice(form.priceText) || undefined
-        : undefined,
-      purchaseMonth: isOwned ? form.purchaseMonth || currentMonthKey() : undefined,
-      rarity: form.rarity || undefined,
-      chaseLevel: !isOwned && form.chaseLevel ? Number(form.chaseLevel) : null,
-      status: form.status,
+      marketPriceText: normalizeMarketPrice(form.priceText) || undefined,
+      rarity: form.rarity,
+      edition: form.edition,
+      chaseLevel: form.chaseLevel ? Number(form.chaseLevel) : null,
+      status: "wishlist",
       notes: form.notes || undefined,
     });
   }
 
-  function deleteCardById(card: Card) {
+  function deleteCardById(cardId: string) {
+    const card = cards.find((item) => item.id === cardId);
+    if (!card) return;
+    setEditForm(null);
     setDeleteTarget(card);
   }
 
@@ -1442,22 +1520,77 @@ export function WishlistApp() {
     });
   }
 
-  function openCardEditor(event: MouseEvent<HTMLElement>, card: Card) {
+  async function refreshAllPrices() {
+    if (pricingRun?.running) return;
+    setPricingError(null);
+    try {
+      const candidates = await utils.cards.pricingCandidates.fetch();
+      const initial: PricingRun = {
+        completed: 0,
+        estimated: 0,
+        failed: 0,
+        minimized: false,
+        noMatch: 0,
+        running: true,
+        total: candidates.length,
+      };
+      setPricingRun(initial);
+      let completed = 0;
+      let estimated = 0;
+      let failed = 0;
+      let noMatch = 0;
+      let consecutiveFailures = 0;
+
+      for (let index = 0; index < candidates.length; index += 2) {
+        const batch = await Promise.allSettled(
+          candidates.slice(index, index + 2).map((candidate) => (
+            refreshPricing.mutateAsync({ id: candidate.id })
+          )),
+        );
+        for (const result of batch) {
+          completed += 1;
+          if (result.status === "fulfilled") {
+            consecutiveFailures = 0;
+            if (result.value.estimatedPricePence === null) noMatch += 1;
+            else estimated += 1;
+          } else {
+            failed += 1;
+            consecutiveFailures += 1;
+          }
+        }
+        setPricingRun((current) => ({
+          completed,
+          estimated,
+          failed,
+          minimized: current?.minimized ?? false,
+          noMatch,
+          running: true,
+          total: candidates.length,
+        }));
+        if (consecutiveFailures >= 6) {
+          throw new Error("eBay stopped responding repeatedly, so the refresh was paused to avoid losing progress visibility. Try again later.");
+        }
+        if (index + 2 < candidates.length) {
+          await new Promise((resolve) => window.setTimeout(resolve, 150));
+        }
+      }
+      setPricingRun((current) => ({ completed, estimated, failed, minimized: current?.minimized ?? false, noMatch, running: false, total: candidates.length }));
+      invalidateCardsAndSpend();
+    } catch (error) {
+      setPricingRun((current) => current ? { ...current, running: false } : null);
+      setPricingError(error instanceof Error ? error.message : "Price refresh stopped unexpectedly. Try again shortly.");
+    }
+  }
+
+  function openCardEditor(card: Card) {
     if (!canEdit) {
       return;
     }
-
-    const target = event.target as HTMLElement;
-
-    if (target.closest("a,button,input,select,textarea")) {
-      return;
-    }
-
     setEditForm(editFormFromCard(card));
   }
 
   function saveEdit() {
-    if (!editForm) {
+    if (!editForm || editForm.edition === "Unknown edition") {
       return;
     }
 
@@ -1468,11 +1601,9 @@ export function WishlistApp() {
       imageUrl: editForm.imageUrl || undefined,
       priceText: editForm.priceText || undefined,
       marketPriceText: normalizeMarketPrice(editForm.marketPriceText) || undefined,
-      paidPriceText: normalizePaidPrice(editForm.paidPriceText) || undefined,
-      purchaseMonth:
-        editForm.status === "owned" ? editForm.purchaseMonth || undefined : undefined,
       ebayListingUrl: editForm.status === "wishlist" ? editForm.ebayListingUrl : "",
       rarity: editForm.rarity || undefined,
+      edition: editForm.edition,
       chaseLevel:
         editForm.status === "wishlist" && editForm.chaseLevel
           ? Number(editForm.chaseLevel)
@@ -1538,17 +1669,17 @@ export function WishlistApp() {
               {canEdit ? (
                 <>
                   <button
-                    aria-label="Refresh prices for all cards"
+                    aria-label="Refresh current UK eBay estimates for all cards"
                     className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
-                    disabled={refreshAllPricing.isPending}
-                    onClick={() => refreshAllPricing.mutate()}
-                    title="Refresh prices for all cards"
+                    disabled={pricingRun?.running}
+                    onClick={() => void refreshAllPrices()}
+                    title="Refresh current UK eBay estimates"
                     type="button"
                   >
                     <RefreshCw
                       aria-hidden="true"
                       className={`size-4 ${
-                        refreshAllPricing.isPending ? "animate-spin" : ""
+                        pricingRun?.running ? "animate-spin" : ""
                       }`}
                     />
                   </button>
@@ -1682,10 +1813,7 @@ export function WishlistApp() {
                   {paginatedCards.map((card: Card) => (
                     <article
                       key={card.id}
-                      className={`group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md ${
-                        canEdit ? "cursor-pointer" : ""
-                      }`}
-                      onClick={canEdit ? (event) => openCardEditor(event, card) : undefined}
+                      className="group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md"
                     >
                       <div className="grid aspect-[4/5] w-full place-items-center border-b border-zinc-200 bg-[#f7f6f2] p-3">
                         {card.imageUrl ? (
@@ -1720,12 +1848,23 @@ export function WishlistApp() {
                       <div className="flex min-w-0 flex-1 flex-col gap-3 p-3">
                         <div className="flex min-w-0 items-start gap-2">
                           <div className="min-w-0 flex-1">
-                            <h3
-                              className="line-clamp-2 text-[17px] font-bold leading-[1.2] text-zinc-950 sm:text-lg"
-                              title={card.name}
-                            >
-                              {card.name}
-                            </h3>
+                            {canEdit ? (
+                              <button
+                                className="line-clamp-2 text-left text-[17px] font-bold leading-[1.2] text-zinc-950 underline-offset-4 transition hover:text-[#8a1f2d] hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d] sm:text-lg"
+                                onClick={() => openCardEditor(card)}
+                                title={`Edit ${card.name}`}
+                                type="button"
+                              >
+                                {card.name}
+                              </button>
+                            ) : (
+                              <h3
+                                className="line-clamp-2 text-[17px] font-bold leading-[1.2] text-zinc-950 sm:text-lg"
+                                title={card.name}
+                              >
+                                {card.name}
+                              </h3>
+                            )}
                           </div>
                           <span
                             className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
@@ -1815,30 +1954,6 @@ export function WishlistApp() {
                             >
                               eBay
                             </a>
-                            {card.status === "wishlist" ? (
-                              card.ebayListingUrl ? (
-                                <a
-                                  aria-label={`Open saved eBay listing for ${card.name}`}
-                                  className="inline-flex size-8 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
-                                  href={card.ebayListingUrl}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                  title="Saved eBay listing"
-                                >
-                                  <ShoppingBag className="size-4" />
-                                </a>
-                              ) : canEdit ? (
-                                <button
-                                  aria-label={`Add saved eBay listing for ${card.name}`}
-                                  className="inline-flex size-8 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-white text-zinc-400 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
-                                  onClick={() => setEditForm(editFormFromCard(card))}
-                                  title="Add saved eBay listing"
-                                  type="button"
-                                >
-                                  <ShoppingBag className="size-4" />
-                                </button>
-                              ) : null
-                            ) : null}
                             {card.url && !isTcgplayerUrl(card.url) ? (
                               <a
                                 aria-label={`Open saved link for ${card.name}`}
@@ -1853,43 +1968,6 @@ export function WishlistApp() {
                             ) : null}
                           </div>
 
-                          {canEdit ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                              aria-label={`Edit ${card.name}`}
-                              className="grid size-8 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-500 transition hover:border-zinc-950 hover:bg-zinc-50 hover:text-zinc-950"
-                              onClick={() => setEditForm(editFormFromCard(card))}
-                              title="Edit card"
-                              type="button"
-                            >
-                              <Pencil className="size-4" />
-                            </button>
-                            <button
-                              aria-label={`Delete ${card.name}`}
-                              className="grid size-8 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-500 transition hover:border-rose-700 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-wait disabled:opacity-50"
-                              disabled={deleteCard.isPending}
-                              onClick={() => deleteCardById(card)}
-                              title="Delete card"
-                              type="button"
-                            >
-                              <Trash2 className="size-4" />
-                            </button>
-                            <Link
-                              className={`inline-flex min-h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-center text-xs font-bold transition ${
-                                card.status === "owned"
-                                  ? "border border-zinc-300 bg-white text-zinc-800 hover:border-zinc-950"
-                                  : "bg-zinc-950 text-white hover:bg-zinc-800"
-                              }`}
-                              href={
-                                card.status === "owned"
-                                  ? `/records/inventory?kind=cards&card=${encodeURIComponent(card.name)}`
-                                  : `/records/new/purchase?cardName=${encodeURIComponent(card.name)}&legacyCardId=${card.id}`
-                              }
-                            >
-                              {card.status === "owned" ? "View copies" : "Record acquisition"}
-                            </Link>
-                            </div>
-                          ) : null}
                         </div>
                       </div>
                     </article>
@@ -1941,6 +2019,63 @@ export function WishlistApp() {
           </section>
         </section>
       </div>
+      {pricingRun ? (
+        <aside
+          aria-label="Price refresh progress"
+          className="fixed bottom-4 right-4 z-40 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-zinc-300 bg-white p-4 shadow-xl"
+        >
+          {pricingRun.minimized ? (
+            <button
+              className="flex w-full items-center justify-between gap-3 text-left"
+              onClick={() => setPricingRun((current) => current ? { ...current, minimized: false } : current)}
+              type="button"
+            >
+              <span className="font-bold text-zinc-900">{pricingRun.running ? "Refreshing estimates" : "Estimate refresh complete"}</span>
+              <span className="text-sm font-bold tabular-nums text-zinc-600">{pricingRun.completed}/{pricingRun.total}</span>
+            </button>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-zinc-950">{pricingRun.running ? "Refreshing UK eBay estimates" : "Estimate refresh complete"}</p>
+                  <p className="mt-1 text-sm font-medium text-zinc-600">{pricingRun.completed} of {pricingRun.total} checked</p>
+                </div>
+                <button
+                  aria-label="Minimise price refresh progress"
+                  className="grid size-10 place-items-center rounded-md border border-zinc-300 text-sm font-black text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
+                  onClick={() => setPricingRun((current) => current ? { ...current, minimized: true } : current)}
+                  type="button"
+                >
+                  −
+                </button>
+              </div>
+              <div
+                aria-label={`${pricingRun.completed} of ${pricingRun.total} prices checked`}
+                aria-valuemax={pricingRun.total}
+                aria-valuemin={0}
+                aria-valuenow={pricingRun.completed}
+                className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200"
+                role="progressbar"
+              >
+                <div className="h-full bg-[#8a1f2d] transition-[width] duration-200 ease-out" style={{ width: `${pricingRun.total ? (pricingRun.completed / pricingRun.total) * 100 : 0}%` }} />
+              </div>
+              <p className="mt-3 text-xs font-semibold leading-5 text-zinc-600">
+                {pricingRun.estimated} estimated · {pricingRun.noMatch} no usable listing · {pricingRun.failed} failed
+              </p>
+              {!pricingRun.running ? (
+                <button
+                  className="mt-3 min-h-11 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+                  onClick={() => setPricingRun(null)}
+                  type="button"
+                >
+                  Dismiss
+                </button>
+              ) : null}
+            </>
+          )}
+        </aside>
+      ) : null}
+      <DestructiveToast message={pricingError} onDismiss={() => setPricingError(null)} title="Pricing refresh stopped" />
       {imagePreviewCard ? (
         <CardImagePreviewDialog
           card={imagePreviewCard}
@@ -2007,6 +2142,7 @@ export function WishlistApp() {
         <EditCardModal
           form={editForm}
           onClose={() => setEditForm(null)}
+          onDelete={deleteCardById}
           onSave={saveEdit}
           saving={updateCard.isPending}
           setForm={(updater) =>

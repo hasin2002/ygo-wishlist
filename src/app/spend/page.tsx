@@ -1,4 +1,3 @@
-import { SpendApp } from "@/components/spend-app";
 import { getCurrentSession } from "@/server/session";
 import { redirect } from "next/navigation";
 
@@ -11,5 +10,5 @@ export default async function SpendPage() {
     redirect("/login?next=/spend");
   }
 
-  return <SpendApp />;
+  redirect("/records");
 }

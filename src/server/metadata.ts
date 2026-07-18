@@ -15,7 +15,7 @@ export type LinkMetadata = {
   title?: string;
   imageUrl?: string;
   priceText?: string;
-  edition?: "1st Edition" | "Unlimited Edition";
+  edition?: "1st Edition" | "Unlimited Edition" | "Limited Edition";
   rarity?: string;
   setName?: string;
   setCode?: string;
@@ -358,6 +358,10 @@ function editionFromTcgplayerSlug(productSlug: string | undefined) {
 
   if (/(?:^|-)unlimited-edition(?:-|$)/i.test(productSlug)) {
     return "Unlimited Edition" as const;
+  }
+
+  if (/(?:^|-)limited-edition(?:-|$)/i.test(productSlug)) {
+    return "Limited Edition" as const;
   }
 
   return undefined;

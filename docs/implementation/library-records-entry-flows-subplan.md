@@ -1,16 +1,16 @@
 # Purchase, Pack Opening, and Sale scaffold redesign
 
-Status: G1 refinements implemented; edition and Sale clarity desktop/static
-verification pass.
-Backend and database work remain blocked by G1.
+Status: G1 approved; Phase 2 contract reconciliation and persistence are in
+progress. Production migration remains blocked by G3.
 
 ## Authority and scope
 
 This subplan is the detailed specification for `P1.3 Entry workflows` in
 [`library-records-plan.md`](./library-records-plan.md). It covers Purchase, Pack
 Opening, and Sale. Adjustment and standalone Bulk Itemization are removed from
-the scaffold. Future inline editing of the original Record Entry replaces those
-workflows and requires its own reviewed subplan.
+the scaffold. Inline editing of the original Record Entry replaces those
+workflows and is specified in
+[`library-records-inline-editing-subplan.md`](./library-records-inline-editing-subplan.md).
 
 If this file conflicts with the main plan on either covered flow, this file is
 more specific. The main plan's decision log must still record every replacement.
@@ -26,8 +26,9 @@ more specific. The main plan's decision log must still record every replacement.
   physical Copies from a scalable visual inventory browser.
 - Let metadata remove typing without hiding resolution failures or creating
   inventory before an explicit confirmation.
-- Keep the scaffold UI-only: drafts and submitted preview records remain in
-  `sessionStorage`; no database mutation or migration is introduced.
+- Preserve the preview adapter for safe UI review while the authenticated live
+  adapter persists confirmed Records. Drafts remain session-local; production
+  migration is still a separate G3 decision.
 
 ## Shared interaction and metadata contract
 
@@ -169,8 +170,10 @@ Purchase is four stages in this order:
 
 ### P1.3-P2 Purchase details
 
-- Keep purchase date, seller/source selector, conditional `Other` source name,
-  optional purchase listing URL, and all-in amount paid.
+- Keep a required short Record name, purchase date, seller/source selector,
+  conditional `Other` source name, optional purchase listing URL, and all-in
+  amount paid. Record name is limited to 80 characters and becomes the History
+  title shown on Review.
 - Selecting Gift automatically sets the amount to £0 and prevents contradictory
   editing while Gift remains selected.
 - Keep purchase-level facts independent of the chosen inventory kind so Back
@@ -190,8 +193,11 @@ The page branches by the type selected in stage 1:
   `1st Edition` and `Unlimited Edition`, and quantity. Product line, Set, and
   Product code are not shown.
 - `Bulk Lot`: the shared Card Contents Editor. The generic lot-description and
-  estimated-card-count experience is removed. At least one identified card is
-  required. The user explicitly marks whether more cards remain unitemized.
+  free-text description experience is removed. Require the exact total number
+  of physical cards in the lot as the stable allocation denominator, plus at
+  least one identified card. Identified Copies may be fewer than the total;
+  adding or correcting further contents happens through inline editing of the
+  original Purchase, never a second Record or cashflow event.
 - `Supply or Extra`: one required category selector containing Sleeves, Binder,
   Storage, Playmat, and Other; choosing Other reveals a required free-text name.
   Do not show a second duplicate supply-name field. Keep quantity.
@@ -200,7 +206,7 @@ The page branches by the type selected in stage 1:
 
 ### P1.3-P4 Review and confirmation
 
-- Review summarizes the chosen type, purchase facts, amount, listing link,
+- Review summarizes the Record name, chosen type, purchase facts, amount, listing link,
   resolved product/card previews, quantities, rarity, supply Other text, and any
   metadata attention state relevant to the final decision.
 - Remove `Add another item`. Each section has a labeled Edit route back to its
@@ -230,8 +236,10 @@ Pack Opening remains three stages:
   populate the product fields.
 - Show only Product name and required Product edition (`1st Edition` or
   `Unlimited Edition`) for the sealed product identity.
-- Keep the opening date and use the shared seller/source selector. Do not expose
-  inventory provenance or sealed-unit matching controls.
+- Keep a required short Record name, the opening date, and the shared
+  seller/source selector. Record name is limited to 80 characters and becomes
+  the History title shown on Review. Do not expose inventory provenance or
+  sealed-unit matching controls.
 
 ### P1.3-O2 Pulled cards
 
@@ -245,7 +253,7 @@ Pack Opening remains three stages:
 
 ### P1.3-O3 Review and confirmation
 
-- Show the resolved sealed product, opening date, number of distinct pulled
+- Show the Record name, resolved sealed product, opening date, number of distinct pulled
   cards, total Copies, and compact card summaries.
 - Reaching Review never submits. A separate `Confirm preview opening` action is
   required, with pending, success, and recoverable error feedback.
@@ -270,7 +278,11 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
 
 ### P1.3-S2 Sale details
 
-- Keep Sale date, Marketplace or buyer, Net proceeds, and optional Notes.
+- Keep an optional short Record name, Sale date, Marketplace or buyer, Net
+  proceeds, and optional Notes. Record name is limited to 80 characters. If it
+  is blank, Review and confirmation use a compact generated name based on the
+  selected cards: one card is `Sold <card>`; several card names are
+  `Sold <first card> + <n> more`.
 - Net proceeds are the all-in amount retained after postage and fees. No per-card
   allocation creates or changes cashflow.
 
@@ -295,13 +307,14 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
   scroll. Show result and selected counts, clear empty states, and Previous/Next
   controls with correct disabled semantics.
 - When selected Copies reduce owned quantity below a target, show a neutral
-  `Library after this sale` explanation with owned-before, owned-after, and
-  wanted quantity. Do not style this consequence as a form error or use the
-  implementation phrase `reopens Wishlist`.
+  `Library after this sale` explanation with owned-before, owned-after, wanted
+  quantity, and the resulting `Wishlist` state. Do not style this consequence
+  as a form error or use Satisfied/Open/Reopened terminology.
 
 ### P1.3-S4 Review and confirmation
 
-- Review is read-only and summarizes type, sale details, net proceeds, selected
+- Review is read-only and summarizes the explicit or generated Record name, type,
+  sale details, net proceeds, selected
   card thumbnails, and every plain-language Library-impact consequence. Edit
   actions return to the owning stage.
 - Reaching Review never submits. `Confirm preview sale` is a distinct action
@@ -361,6 +374,11 @@ does not mean selling an unitemized Bulk Lot, sealed product, or supply.
   are required. A temporary/partial fetch failure does not block confirmation if
   the user supplies the required editable identity fields. The row is saved as
   `needs attention` with Retry; it never pretends unresolved metadata succeeded.
+- `D9 Record names`: Purchase and Pack Opening require a user-entered short
+  Record name. Sale accepts an optional name and uses a compact selected-card
+  fallback only when blank. All Record names are limited to 80 characters,
+  displayed as the identifying title in Records, and shown on Review before
+  confirmation.
 
 ## Execution checklist
 
