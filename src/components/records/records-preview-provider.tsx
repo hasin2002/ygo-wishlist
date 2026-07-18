@@ -18,6 +18,7 @@ import {
   deleteWishlistTarget,
   replaceRecordCards,
   replaceSaleCopies,
+  resolveCardAttention,
   updateRecordLine,
   updateRecordDetails,
   type LegacyCard,
@@ -26,6 +27,7 @@ import {
   recordsDraftStorageKey,
   recordsPreviewStorageKey,
   type DataSourceResult,
+  type CardAttentionUpdate,
   type LibraryCardSuggestion,
   type RecordsDataSource,
   type RecordsDrafts,
@@ -211,6 +213,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     createOpening: (input) => withSnapshot((current) => applyOpening(current, input)),
     createSale: (input) => withSnapshot((current) => applySale(current, input)),
     updateRecordDetails: (recordId, update) => withSnapshot((current) => updateRecordDetails(current, recordId, update)),
+    resolveCardAttention: (update: CardAttentionUpdate) => withSnapshot((current) => resolveCardAttention(current, update)),
     replaceRecordCards: (recordId, cards) => withSnapshot((current) => replaceRecordCards(current, recordId, cards)),
     replaceSaleCopies: (recordId, copyIds) => withSnapshot((current) => replaceSaleCopies(current, recordId, copyIds)),
     updateRecordLine: (recordId, lineId, update) => withSnapshot((current) => updateRecordLine(current, recordId, lineId, update)),
@@ -248,6 +251,7 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
   const createOpening = trpc.records.createOpening.useMutation();
   const createSale = trpc.records.createSale.useMutation();
   const updateDetails = trpc.records.updateRecordDetails.useMutation();
+  const resolveAttention = trpc.records.resolveCardAttention.useMutation();
   const replaceCards = trpc.records.replaceRecordCards.useMutation();
   const replaceCopies = trpc.records.replaceSaleCopies.useMutation();
   const updateLine = trpc.records.updateRecordLine.useMutation();
@@ -308,6 +312,15 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
       recordId,
       (expectedRevision) => updateDetails.mutateAsync({ recordId, expectedRevision, update }),
     ),
+    resolveCardAttention: async (update) => {
+      try {
+        const result = await resolveAttention.mutateAsync(update);
+        await utils.records.snapshot.invalidate();
+        return { ok: true, id: result.id };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
     replaceRecordCards: (recordId, cards) => withRevision(
       recordId,
       (expectedRevision) => replaceCards.mutateAsync({ recordId, expectedRevision, cards }),
@@ -366,6 +379,7 @@ const loadingValue: RecordsDataSource = {
   createOpening: async () => ({ ok: false, message: "Records are still loading." }),
   createSale: async () => ({ ok: false, message: "Records are still loading." }),
   updateRecordDetails: async () => ({ ok: false, message: "Records are still loading." }),
+  resolveCardAttention: async () => ({ ok: false, message: "Records are still loading." }),
   replaceRecordCards: async () => ({ ok: false, message: "Records are still loading." }),
   replaceSaleCopies: async () => ({ ok: false, message: "Records are still loading." }),
   updateRecordLine: async () => ({ ok: false, message: "Records are still loading." }),

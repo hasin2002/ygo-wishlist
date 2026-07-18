@@ -106,6 +106,17 @@ const updateRecordDetailsSchema = recordMutationIdentitySchema.extend({
     notes: z.string().trim().max(4_000),
   }),
 });
+const resolveCardAttentionSchema = z.object({
+  targetId: z.string().min(1),
+  printingId: z.string().min(1).nullable().optional(),
+  name: z.string().trim().min(1).max(160),
+  rarity: z.string().trim().min(1).max(80),
+  edition: productEditionSchema,
+  tcgplayerUrl: z.string().url().regex(/tcgplayer\.com\/product\/\d+/i),
+  setName: z.string().trim().min(1).max(160),
+  setCode: z.string().trim().min(1).max(80),
+  imageUrl: z.string().url().nullable(),
+});
 const replaceRecordCardsSchema = recordMutationIdentitySchema.extend({
   cards: z.array(cardInputSchema),
 });
@@ -391,6 +402,7 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
     attention.push({
       id: `attention-printing-${printing.id}`,
       targetId: printing.targetId,
+      printingId: printing.id,
       label: target?.name ?? "Card metadata",
       detail: "Printing metadata needs confirmation.",
       field: "tcgplayer",
@@ -488,6 +500,68 @@ async function loadSnapshot(ownerId: string): Promise<RecordsSnapshot> {
 
 export const recordsRouter = router({
   snapshot: authenticatedProcedure.query(({ ctx }) => loadSnapshot(ctx.collectionOwnerId)),
+
+  resolveCardAttention: authenticatedProcedure.input(resolveCardAttentionSchema).mutation(async ({ ctx, input }) => {
+    const now = new Date();
+    const [target] = await db.select().from(cardTargets).where(and(
+      eq(cardTargets.id, input.targetId),
+      eq(cardTargets.ownerId, ctx.collectionOwnerId),
+    )).limit(1);
+    if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Card Target not found." });
+
+    const printing = input.printingId
+      ? (await db.select().from(cardPrintings).where(and(
+          eq(cardPrintings.id, input.printingId),
+          eq(cardPrintings.targetId, target.id),
+          eq(cardPrintings.ownerId, ctx.collectionOwnerId),
+        )).limit(1))[0]
+      : (await db.select().from(cardPrintings).where(and(
+          eq(cardPrintings.targetId, target.id),
+          eq(cardPrintings.ownerId, ctx.collectionOwnerId),
+        )).limit(1))[0];
+    if (!printing) throw new TRPCError({ code: "NOT_FOUND", message: "Card printing not found." });
+    const relatedCopies = await db.select({ acquiredLineId: cardCopies.acquiredLineId }).from(cardCopies).where(and(
+      eq(cardCopies.ownerId, ctx.collectionOwnerId),
+      eq(cardCopies.printingId, printing.id),
+    ));
+    const relatedLineIds = Array.from(new Set(relatedCopies.map((copy) => copy.acquiredLineId).filter((id): id is string => Boolean(id))));
+
+    await db.transaction(async (tx) => {
+      await tx.update(cardTargets).set({
+        name: input.name,
+        normalizedName: normalize(input.name),
+        rarity: input.rarity,
+        normalizedRarity: normalize(input.rarity),
+        edition: input.edition,
+        normalizedEdition: normalizeEdition(input.edition),
+        tcgplayerUrl: input.tcgplayerUrl,
+        imageUrl: input.imageUrl,
+        updatedAt: now,
+      }).where(and(eq(cardTargets.id, target.id), eq(cardTargets.ownerId, ctx.collectionOwnerId)));
+      await tx.update(cardPrintings).set({
+        setName: input.setName,
+        normalizedSetName: normalize(input.setName),
+        setCode: input.setCode,
+        normalizedSetCode: normalize(input.setCode),
+        tcgplayerUrl: input.tcgplayerUrl,
+        canonicalTcgplayerUrl: canonicalProductUrl(input.tcgplayerUrl),
+        imageUrl: input.imageUrl,
+        metadataNeedsAttention: false,
+        updatedAt: now,
+      }).where(and(eq(cardPrintings.id, printing.id), eq(cardPrintings.ownerId, ctx.collectionOwnerId)));
+      if (relatedLineIds.length) {
+        await tx.update(recordLines).set({
+          name: input.name,
+          detail: `${input.setCode} · ${input.edition} · ${input.rarity}`,
+          updatedAt: now,
+        }).where(and(
+          eq(recordLines.ownerId, ctx.collectionOwnerId),
+          inArray(recordLines.id, relatedLineIds),
+        ));
+      }
+    });
+    return { id: target.id };
+  }),
 
   createPurchase: authenticatedProcedure.input(purchaseSchema).mutation(async ({ ctx, input }) => {
     const ownerId = ctx.collectionOwnerId;

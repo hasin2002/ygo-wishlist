@@ -39,6 +39,7 @@ import { poundsToPence } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus } from "@/lib/records/library-status";
 import type {
+  CardAttentionUpdate,
   CardCopy,
   CardPrinting,
   RecordEntry,
@@ -631,12 +632,103 @@ function overviewDateRange(period: OverviewPeriod, from: string, to: string) {
   return { from: localDateValue(thirtyDaysAgo), to: todayValue };
 }
 
+function CardAttentionDialog({
+  item,
+  onClose,
+  onSaved,
+  source,
+}: {
+  item: NonNullable<RecordsSnapshot["attention"]>[number];
+  onClose: () => void;
+  onSaved: (message: string) => void;
+  source: RecordsDataSource;
+}) {
+  const target = item.targetId ? source.snapshot.targets.find((value) => value.id === item.targetId) : null;
+  const printing = target
+    ? source.snapshot.printings.find((value) => value.id === item.printingId)
+      ?? source.snapshot.printings.find((value) => value.targetId === target.id)
+    : null;
+  const [name, setName] = useState(target?.name ?? item.label);
+  const [rarity, setRarity] = useState(target?.rarity ?? "");
+  const [edition, setEdition] = useState<ProductEdition>(target?.edition === "Unlimited Edition" || target?.edition === "Limited Edition" ? target.edition : "1st Edition");
+  const [tcgplayerUrl, setTcgplayerUrl] = useState(target?.tcgplayerUrl ?? printing?.tcgplayerUrl ?? "");
+  const [printingSetName, setPrintingSetName] = useState(printing?.setName === "Unknown set" ? "" : printing?.setName ?? "");
+  const [setCode, setSetCode] = useState(printing?.setCode === "Unknown code" ? "" : printing?.setCode ?? "");
+  const [imageUrl, setImageUrl] = useState(target?.imageUrl ?? printing?.imageUrl ?? null);
+  const [fetching, setFetching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  async function fetchDetails() {
+    setFetching(true);
+    setError(null);
+    const result = await source.resolveTcgplayerProduct(tcgplayerUrl);
+    setFetching(false);
+    if (!result.ok) { setError(result.message); return; }
+    setName(result.metadata.title || name);
+    setRarity(result.metadata.rarity || rarity);
+    if (result.metadata.edition) setEdition(result.metadata.edition);
+    setPrintingSetName(result.metadata.setName || printingSetName);
+    setSetCode(result.metadata.setCode || setCode);
+    setImageUrl(result.metadata.imageUrl || imageUrl);
+  }
+
+  async function save() {
+    if (!target || !printing) return;
+    const update: CardAttentionUpdate = { targetId: target.id, printingId: printing.id, name, rarity, edition, tcgplayerUrl, setName: printingSetName, setCode, imageUrl };
+    if (!name.trim() || !rarity.trim() || !tcgplayerUrl.trim() || !printingSetName.trim() || !setCode.trim()) {
+      setError("Complete the card name, rarity, TCGplayer link, set name, and set code before saving.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const result = await source.resolveCardAttention(update);
+    setSaving(false);
+    if (!result.ok) { setError(result.message); return; }
+    onSaved(`Resolved attention for “${name.trim()}”.`);
+    onClose();
+  }
+
+  return (
+    <div aria-labelledby="card-attention-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
+        <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve attention</span><h2 className="mt-1 text-xl font-black" id="card-attention-title">Confirm card details</h2><p className="mt-1 text-sm font-medium text-zinc-500">Save the missing metadata once, and this item will leave the attention list.</p></div>
+          <button aria-label="Close card resolution" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
+        </header>
+        <div className="grid gap-4 p-4 sm:p-6">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">Why this needs attention</strong><p className="mt-1">{item.detail}</p></div>
+          {error ? <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</p> : null}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">TCGplayer product link <span className="text-rose-700">*</span></span><div className="mt-1 flex flex-col gap-2 sm:flex-row"><input className="h-11 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setTcgplayerUrl(event.target.value)} placeholder="https://www.tcgplayer.com/product/…" type="url" value={tcgplayerUrl} /><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60" disabled={fetching || !tcgplayerUrl.trim()} onClick={() => void fetchDetails()} type="button"><Sparkles className="size-4" />{fetching ? "Fetching…" : "Fetch details"}</button></div><span className="mt-1 block text-xs font-medium text-zinc-500">Fetching can fill the name, rarity, image, set, and edition for you.</span></label>
+            <label><span className="text-sm font-bold text-zinc-700">Card name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setName(event.target.value)} value={name} /></label>
+            <label><span className="text-sm font-bold text-zinc-700">Rarity <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setRarity(event.target.value)} value={rarity} /></label>
+            <label><span className="text-sm font-bold text-zinc-700">Edition <span className="text-rose-700">*</span></span><select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setEdition(event.target.value as ProductEdition)} value={edition}><option value="1st Edition">1st Edition</option><option value="Unlimited Edition">Unlimited Edition</option><option value="Limited Edition">Limited Edition</option></select></label>
+            <label><span className="text-sm font-bold text-zinc-700">Set code <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setSetCode(event.target.value)} placeholder="LOB-001" value={setCode} /></label>
+            <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Set name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setPrintingSetName(event.target.value)} value={printingSetName} /></label>
+          </div>
+        </div>
+        <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving || fetching} onClick={() => void save()} type="button">{saving ? "Saving…" : "Save resolved details"}</button></footer>
+      </div>
+    </div>
+  );
+}
+
 function Overview() {
   const source = useRecordsDataSource();
   const { snapshot } = source;
   const [period, setPeriod] = useState<OverviewPeriod>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [attentionItemId, setAttentionItemId] = useState<string | null>(null);
+  const [attentionRecordId, setAttentionRecordId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const range = overviewDateRange(period, customFrom, customTo);
   const activeRecords = snapshot.records.filter((record) => (
     record.status === "active"
@@ -683,6 +775,7 @@ function Overview() {
         <MetricCard detail={`${wishlistTargetCount} Wishlist target${wishlistTargetCount === 1 ? "" : "s"}`} icon={<WalletCards className="size-5" />} label="Physical copies" value={String(availableCopies)} />
       </section>
 
+      {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.7fr)]">
         <section className="overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm">
           <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
@@ -709,10 +802,14 @@ function Overview() {
           </div>
           <div className="mt-4 grid gap-2">
             {snapshot.attention.length ? snapshot.attention.slice(0, 5).map((item) => (
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2" key={item.id}>
+              <button className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-[#8a1f2d] hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" key={item.id} onClick={() => {
+                const record = item.field === "cost" ? snapshot.records.find((value) => value.title === item.label) : null;
+                if (record) setAttentionRecordId(record.id);
+                else setAttentionItemId(item.id);
+              }} type="button">
                 <p className="text-sm font-bold text-zinc-800">{item.label}</p>
-                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p>
-              </div>
+                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p><span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">Resolve details <ChevronRight className="size-3.5" /></span>
+              </button>
             )) : (
               <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm font-bold text-emerald-800">
                 <CheckCircle2 className="mr-2 inline size-4" /> {source.mode === "preview" ? "Sample data is complete." : "No details need attention."}
@@ -721,6 +818,8 @@ function Overview() {
           </div>
         </section>
       </div>
+      {attentionItemId ? <CardAttentionDialog item={snapshot.attention.find((item) => item.id === attentionItemId)!} onClose={() => setAttentionItemId(null)} onSaved={setMessage} source={source} /> : null}
+      {attentionRecordId ? <RecordEditorDialog key={attentionRecordId} initialPanel="details" onClose={() => setAttentionRecordId(null)} onSaved={setMessage} record={snapshot.records.find((record) => record.id === attentionRecordId)!} source={source} /> : null}
     </div>
   );
 }

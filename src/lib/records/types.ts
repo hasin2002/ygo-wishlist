@@ -111,6 +111,7 @@ export type SupplyItem = {
 export type PreviewAttentionItem = {
   id: string;
   targetId: string | null;
+  printingId?: string | null;
   label: string;
   detail: string;
   field: "cost" | "edition" | "printing" | "tcgplayer";
@@ -202,6 +203,17 @@ export type RecordDetailsUpdate = {
   amountPence: number;
   notes: string;
 };
+export type CardAttentionUpdate = {
+  targetId: string;
+  printingId?: string | null;
+  name: string;
+  rarity: string;
+  edition: ProductEdition;
+  tcgplayerUrl: string;
+  setName: string;
+  setCode: string;
+  imageUrl: string | null;
+};
 export type RecordLineUpdate = {
   name: string;
   quantity: number;
@@ -238,6 +250,7 @@ export type RecordsDataSource = {
   createOpening: (input: OpeningInput) => Promise<DataSourceResult>;
   createSale: (input: SaleInput) => Promise<DataSourceResult>;
   updateRecordDetails: (recordId: string, update: RecordDetailsUpdate) => Promise<DataSourceResult>;
+  resolveCardAttention: (update: CardAttentionUpdate) => Promise<DataSourceResult>;
   replaceRecordCards: (recordId: string, cards: CardContentsInput[]) => Promise<DataSourceResult>;
   replaceSaleCopies: (recordId: string, copyIds: string[]) => Promise<DataSourceResult>;
   updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate) => Promise<DataSourceResult>;
