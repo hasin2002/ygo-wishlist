@@ -1,5 +1,6 @@
 import { binderRouter } from "@/server/routers/binder";
 import { legacyCardsReadRouter } from "@/server/routers/cards";
+import { featureIdeasRouter } from "@/server/routers/feature-ideas";
 import { libraryRouter } from "@/server/routers/library";
 import { recordsRouter } from "@/server/routers/records";
 import { spendRouter } from "@/server/routers/spend";
@@ -12,6 +13,7 @@ export const appRouter = router({
   // screens; Records uses the explicit `library` namespace for Target-only
   // operations such as deleting an unowned Wishlist Target.
   cards: libraryRouter,
+  featureIdeas: featureIdeasRouter,
   library: libraryRouter,
   legacyCards: legacyCardsReadRouter,
   records: recordsRouter,

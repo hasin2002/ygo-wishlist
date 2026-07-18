@@ -4,6 +4,7 @@ import {
   BookOpen,
   CircleDot,
   FileClock,
+  Lightbulb,
   ListChecks,
   LockKeyhole,
   LogIn,
@@ -33,6 +34,14 @@ const navItems = [
   { href: "/assign-chase", icon: Sparkles, label: "Assign chase" },
   { href: "/wheel", icon: CircleDot, label: "Wheel" },
   { href: "/binder-v2", icon: BookOpen, label: "Binder" },
+] satisfies {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+}[];
+
+const adminNavItems = [
+  { href: "/feature-ideas", icon: Lightbulb, label: "Feature ideas" },
 ] satisfies {
   href: string;
   icon: LucideIcon;
@@ -254,7 +263,7 @@ export function AppHeader({
   const isAuthenticated = hasSession || localPreviewReview;
   const isAdmin = session?.user.role === "admin";
   const visibleNavItems = isAuthenticated
-    ? navItems
+    ? [...navItems, ...(isAdmin ? adminNavItems : [])]
     : navItems.filter((item) => item.href === "/" || item.href === "/binder-v2");
   const utils = trpc.useUtils();
   const currentMonth = trpc.spend.currentMonth.useQuery(undefined, {

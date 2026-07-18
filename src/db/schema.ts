@@ -5,6 +5,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgTable,
   serial,
   text,
@@ -34,6 +35,29 @@ export const users = pgTable(
     uniqueIndex("users_email_unique").on(table.email),
     uniqueIndex("users_username_unique").on(table.username),
   ],
+);
+
+export type FeatureIdeasCanvas = {
+  canvasHeight: number;
+  canvasWidth: number;
+  connections: Array<{ from: string; id: string; to: string; type: "arrow" | "line" }>;
+  freeTexts: Array<{ id: string; text: string; x: number; y: number }>;
+  ideas: Array<{ id: string; text: string; x: number; y: number }>;
+};
+
+export const featureIdeaPages = pgTable(
+  "feature_idea_pages",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    canvas: jsonb("canvas").$type<FeatureIdeasCanvas>().notNull(),
+    createdById: text("created_by_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [index("feature_idea_pages_updated_idx").on(table.updatedAt)],
 );
 
 export const sessions = pgTable(
