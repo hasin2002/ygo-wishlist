@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   PackageOpen,
+  Plus,
   ReceiptText,
   ShoppingBag,
 } from "lucide-react";
@@ -39,7 +40,7 @@ const flowContent: Record<EntryFlow, { eyebrow: string; title: string; descripti
   },
 };
 
-function SavedState({ flow, mode, recordId }: { flow: EntryFlow; mode: "preview" | "live"; recordId: string }) {
+function SavedState({ flow, mode, recordId, onAddAnother }: { flow: EntryFlow; mode: "preview" | "live"; recordId: string; onAddAnother: () => void }) {
   const content = flowContent[flow];
   return (
     <section className="grid min-h-[440px] place-items-center rounded-lg border border-zinc-300 bg-white px-5 py-10 text-center shadow-sm">
@@ -49,9 +50,10 @@ function SavedState({ flow, mode, recordId }: { flow: EntryFlow; mode: "preview"
         <h2 className="mt-2 text-2xl font-black capitalize">{content.title.replace(/^Record /, "")} saved</h2>
         <p className="mt-2 text-sm font-medium leading-6 text-zinc-500">{mode === "preview" ? "You can inspect the inventory and target effects in this tab. No database data changed." : "Library, Inventory, and History now reflect this same saved Record."}</p>
         <p className="mt-3 font-mono text-xs text-zinc-400">{recordId}</p>
-        <div className="mt-6 grid gap-2 sm:grid-cols-2">
-          <Link className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white" href="/records/history">View history <ChevronRight className="size-4" /></Link>
-          <Link className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-bold text-zinc-700" href="/records/inventory">View inventory</Link>
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#741a26] focus:outline-none focus:ring-2 focus:ring-[#8a1f2d] focus:ring-offset-2 sm:col-span-2" onClick={onAddAnother} type="button"><Plus className="size-4" /> Add another record</button>
+          <Link className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-950 focus:ring-offset-2" href="/records/history">View history <ChevronRight className="size-4" /></Link>
+          <Link className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-500 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2" href="/records/inventory">View inventory</Link>
         </div>
       </div>
     </section>
@@ -75,7 +77,7 @@ export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
         <Link className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950" href="/records"><ArrowLeft className="size-4" /> Back to Records</Link>
         <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#8a1f2d]">{content.icon}</span><p className="max-w-2xl pt-1 text-sm font-medium leading-6 text-zinc-600">{content.description}</p></div>
         {source.mode === "preview" ? <PreviewNotice>Submitting updates only the resettable preview in this browser tab.</PreviewNotice> : null}
-        {savedRecordId ? <SavedState flow={flow} mode={source.mode} recordId={savedRecordId} /> : form}
+        {savedRecordId ? <SavedState flow={flow} mode={source.mode} recordId={savedRecordId} onAddAnother={() => setSavedRecordId(null)} /> : form}
       </div>
     </main>
   );
