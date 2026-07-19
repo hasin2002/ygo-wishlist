@@ -1066,25 +1066,10 @@ export const recordsRouter = router({
             status: "available" as const, condition: "Near Mint", createdAt: now, updatedAt: now,
           };
         });
-        if (addedCopies.length) await tx.insert(cardCopies).values(addedCopies);
-        if (plan.retainedCopies.length) {
-          await tx.update(cardCopies).set({ printingId: plan.printingId, updatedAt: now }).where(and(
-            eq(cardCopies.ownerId, ownerId),
-            inArray(cardCopies.id, plan.retainedCopies.map((copy) => copy.id)),
-          ));
-        }
         const resultingCopies = [
           ...plan.retainedCopies.map((copy) => ({ ...copy, printingId: plan.printingId })),
           ...addedCopies,
         ];
-        if (record.type === "purchase" && !bulkLot) {
-          for (const [allocationIndex, copy] of resultingCopies.entries()) {
-            await tx.update(cardCopies).set({
-              allocationPence: allocatePenceAt(record.amountPence, resultingCopies.length, allocationIndex),
-              updatedAt: now,
-            }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
-          }
-        }
         const allocationPence = bulkLot
           ? resultingCopies.reduce((sum, copy) => sum + (
               copy.allocationIndex === null
@@ -1100,14 +1085,32 @@ export const recordsRouter = router({
           detail: `${plan.input.setCode || "Unknown code"} · ${plan.input.edition} · ${plan.input.rarity}${record.type === "pack-opening" ? " · pulled" : ""}`,
           updatedAt: now,
         };
+        // New physical Copies reference their source line, so create that parent
+        // row before inserting the child card_copies rows.
+        if (!plan.existingLine) {
+          await insertLine(tx, {
+            id: lineId, ownerId, recordId: record.id, kind: "card", ...lineValues, createdAt: now,
+          });
+        }
+        if (addedCopies.length) await tx.insert(cardCopies).values(addedCopies);
+        if (plan.retainedCopies.length) {
+          await tx.update(cardCopies).set({ printingId: plan.printingId, updatedAt: now }).where(and(
+            eq(cardCopies.ownerId, ownerId),
+            inArray(cardCopies.id, plan.retainedCopies.map((copy) => copy.id)),
+          ));
+        }
+        if (record.type === "purchase" && !bulkLot) {
+          for (const [allocationIndex, copy] of resultingCopies.entries()) {
+            await tx.update(cardCopies).set({
+              allocationPence: allocatePenceAt(record.amountPence, resultingCopies.length, allocationIndex),
+              updatedAt: now,
+            }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
+          }
+        }
         if (plan.existingLine) {
           await tx.update(recordLines).set(lineValues).where(and(
             eq(recordLines.id, lineId), eq(recordLines.ownerId, ownerId),
           ));
-        } else {
-          await insertLine(tx, {
-            id: lineId, ownerId, recordId: record.id, kind: "card", ...lineValues, createdAt: now,
-          });
         }
       }
 
