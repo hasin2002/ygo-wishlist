@@ -324,6 +324,14 @@ export const cardTargets = pgTable(
   ],
 );
 
+export const pricingRefreshStates = pgTable("pricing_refresh_states", {
+  ownerId: text("owner_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  lastRefreshedAt: timestamp("last_refreshed_at", { mode: "date" }).notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+});
+
 export const cardPrintings = pgTable(
   "card_printings",
   {

@@ -4,6 +4,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   ExternalLink,
   Loader2,
   Plus,
@@ -12,6 +13,7 @@ import {
   Search,
   SlidersHorizontal,
   Star,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import type { inferRouterOutputs } from "@trpc/server";
@@ -95,6 +97,19 @@ type PricingRun = {
 };
 
 const pageSize = 8;
+
+function formatPriceRefreshTime(value: Date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(value);
+}
+
+function priceRefreshEstimate(cardCount: number) {
+  const quickestMinutes = Math.max(1, Math.ceil(cardCount / 90));
+  const slowestMinutes = Math.max(quickestMinutes + 1, Math.ceil(cardCount / 45));
+  return `${quickestMinutes}–${slowestMinutes} minutes`;
+}
 
 const filters: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -1340,6 +1355,102 @@ function CardImagePreviewDialog({
   );
 }
 
+function PricingRefreshDialog({
+  candidateCount,
+  lastRefreshedAt,
+  onClose,
+  onConfirm,
+}: {
+  candidateCount: number | null;
+  lastRefreshedAt: Date | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    cancelButtonRef.current?.focus();
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  const canConfirm = candidateCount !== null;
+  const hasCount = candidateCount !== null && candidateCount >= 0;
+
+  return (
+    <div
+      aria-describedby="pricing-refresh-description"
+      aria-labelledby="pricing-refresh-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm"
+      role="alertdialog"
+    >
+      <section className="w-full max-w-md rounded-lg border border-zinc-300 bg-[#fdfcf8] p-5 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-rose-100 text-[#8a1f2d]">
+            <RefreshCw aria-hidden="true" className="size-5" />
+          </span>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">UK eBay estimates</p>
+            <h2 className="mt-1 text-xl font-black text-zinc-950" id="pricing-refresh-title">Refresh all prices?</h2>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 text-sm">
+          <div className="rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-zinc-700">
+            <span className="font-bold text-zinc-950">Last refreshed: </span>
+            {lastRefreshedAt ? formatPriceRefreshTime(lastRefreshedAt) : "Not recorded yet"}
+          </div>
+          <div className="flex gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-blue-950">
+            <Clock3 aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <p>
+              {hasCount
+                ? <><strong>{candidateCount.toLocaleString("en-GB")} cards</strong> will be checked. This usually takes <strong>about {priceRefreshEstimate(candidateCount)}</strong>.</>
+                : candidateCount === null
+                  ? "Calculating the number of cards and the expected time…"
+                  : "We could not calculate the number of cards. You can still start the refresh."}
+            </p>
+          </div>
+          <div className="flex gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-950" id="pricing-refresh-description">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <p><strong>Keep this page open.</strong> Refreshing the page, navigating away, or closing the tab stops this manual run. Your completed cards are saved; you can run it again later.</p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+            onClick={onClose}
+            ref={cancelButtonRef}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-wait disabled:opacity-50"
+            disabled={!canConfirm}
+            onClick={onConfirm}
+            type="button"
+          >
+            <RefreshCw aria-hidden="true" className="size-4" />
+            Refresh prices
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function WishlistApp() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1365,6 +1476,8 @@ export function WishlistApp() {
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
   const [pricingRun, setPricingRun] = useState<PricingRun | null>(null);
+  const [pricingRefreshDialogOpen, setPricingRefreshDialogOpen] = useState(false);
+  const [pricingCandidateCount, setPricingCandidateCount] = useState<number | null>(null);
   const utils = trpc.useUtils();
 
   const updateTrackerUrl = useCallback(function updateTrackerUrl(
@@ -1413,6 +1526,18 @@ export function WishlistApp() {
     return () => window.clearTimeout(timeoutId);
   }, [query, searchInput, updateTrackerUrl]);
 
+  useEffect(() => {
+    if (!pricingRun?.running) return;
+
+    function warnBeforeLeaving(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [pricingRun?.running]);
+
   function invalidateCardsAndSpend() {
     void utils.cards.binderList.invalidate();
     void utils.cards.chaseQueue.invalidate();
@@ -1457,6 +1582,10 @@ export function WishlistApp() {
     placeholderData: (previousData) => previousData,
     staleTime: 30_000,
   });
+  const lastPricingRefresh = trpc.cards.lastPricingRefresh.useQuery(undefined, {
+    enabled: clientReady,
+    staleTime: 30_000,
+  });
   const create = trpc.cards.create.useMutation({
     onSuccess: () => {
       setForm(emptyForm());
@@ -1465,6 +1594,11 @@ export function WishlistApp() {
     },
   });
   const refreshPricing = trpc.cards.refreshPricing.useMutation();
+  const recordPricingRefresh = trpc.cards.recordPricingRefresh.useMutation({
+    onSuccess: () => {
+      void utils.cards.lastPricingRefresh.invalidate();
+    },
+  });
   const deleteCard = trpc.cards.delete.useMutation({
     onSuccess: invalidateCardsAndSpend,
   });
@@ -1599,11 +1733,21 @@ export function WishlistApp() {
         }
       }
       setPricingRun((current) => ({ completed, estimated, failed, minimized: current?.minimized ?? false, noMatch, running: false, total: candidates.length }));
+      void recordPricingRefresh.mutateAsync().catch(() => undefined);
       invalidateCardsAndSpend();
     } catch (error) {
       setPricingRun((current) => current ? { ...current, running: false } : null);
       setPricingError(error instanceof Error ? error.message : "Price refresh stopped unexpectedly. Try again shortly.");
     }
+  }
+
+  function openPricingRefreshDialog() {
+    if (pricingRun?.running) return;
+    setPricingCandidateCount(null);
+    setPricingRefreshDialogOpen(true);
+    void utils.cards.pricingCandidates.fetch()
+      .then((candidates) => setPricingCandidateCount(candidates.length))
+      .catch(() => setPricingCandidateCount(-1));
   }
 
   function openCardEditor(card: Card) {
@@ -1696,7 +1840,7 @@ export function WishlistApp() {
                     aria-label="Refresh current UK eBay estimates for all cards"
                     className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
                     disabled={pricingRun?.running}
-                    onClick={() => void refreshAllPrices()}
+                    onClick={openPricingRefreshDialog}
                     title="Refresh current UK eBay estimates"
                     type="button"
                   >
@@ -2095,6 +2239,17 @@ export function WishlistApp() {
         </aside>
       ) : null}
       <DestructiveToast message={pricingError} onDismiss={() => setPricingError(null)} title="Pricing refresh stopped" />
+      {pricingRefreshDialogOpen ? (
+        <PricingRefreshDialog
+          candidateCount={pricingCandidateCount}
+          lastRefreshedAt={lastPricingRefresh.data ?? null}
+          onClose={() => setPricingRefreshDialogOpen(false)}
+          onConfirm={() => {
+            setPricingRefreshDialogOpen(false);
+            void refreshAllPrices();
+          }}
+        />
+      ) : null}
       {imagePreviewCard ? (
         <CardImagePreviewDialog
           card={imagePreviewCard}
