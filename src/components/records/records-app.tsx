@@ -37,6 +37,10 @@ import {
 import { poundsToPence } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus } from "@/lib/records/library-status";
+import {
+  recordImagePreviewsFor,
+  type RecordImagePreview,
+} from "@/lib/records/record-images";
 import type {
   CardAttentionUpdate,
   CardCopy,
@@ -210,51 +214,16 @@ function RecordTypeBadge({ type }: { type: RecordEntryType }) {
   );
 }
 
-type RecordCardPreview = {
-  id: string;
-  imageUrl: string | null;
-  name: string;
-};
-
-function cardPreviewsForRecord(record: RecordEntry, snapshot: RecordsSnapshot): RecordCardPreview[] {
-  const copiesById = new Map(snapshot.copies.map((copy) => [copy.id, copy]));
-  const printingsById = new Map(snapshot.printings.map((printing) => [printing.id, printing]));
-  const targetsById = new Map(snapshot.targets.map((target) => [target.id, target]));
-  const seen = new Set<string>();
-  const previews: RecordCardPreview[] = [];
-
-  for (const line of record.lines) {
-    if (line.kind !== "card") continue;
-
-    const copy = line.entityIds.map((id) => copiesById.get(id)).find(Boolean);
-    const printing = copy ? printingsById.get(copy.printingId) : undefined;
-    const target = printing ? targetsById.get(printing.targetId) : undefined;
-    const id = target?.id ?? line.id;
-
-    if (seen.has(id)) continue;
-    seen.add(id);
-    previews.push({
-      id,
-      imageUrl: printing?.imageUrl ?? target?.imageUrl ?? null,
-      name: target?.name ?? line.name,
-    });
-
-    if (previews.length === 3) break;
-  }
-
-  return previews;
-}
-
-function RecordImageStack({ previews }: { previews: RecordCardPreview[] }) {
+function RecordImageStack({ previews, type }: { previews: RecordImagePreview[]; type: RecordEntryType }) {
   const imageFor = (imageUrl: string) => `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
   const isStack = previews.length > 1;
-  const ariaLabel = `${isStack ? "Cards" : "Card"}: ${previews.map((preview) => preview.name).join(", ")}`;
+  const ariaLabel = `${previews[0]?.kind === "sealed" ? "Opened product" : isStack ? "Cards" : "Card"}: ${previews.map((preview) => preview.name).join(", ")}`;
 
   if (!previews.length) {
     return (
       <div aria-hidden="true" className="flex h-20 w-24 shrink-0 items-center">
         <span className="grid size-14 place-items-center rounded-md border border-dashed border-zinc-300 bg-zinc-50 text-zinc-400">
-          <Boxes className="size-5" />
+          {type === "pack-opening" ? <PackageOpen className="size-5" /> : <Boxes className="size-5" />}
         </span>
       </div>
     );
@@ -273,18 +242,18 @@ function RecordImageStack({ previews }: { previews: RecordCardPreview[] }) {
 
         return (
           <div
-            className={`absolute overflow-hidden rounded-md border border-zinc-300 bg-zinc-100 shadow-sm ${position} ${isStack ? "h-[68px] w-12" : "h-20 w-14"}`}
+            className={`absolute overflow-hidden rounded-md border border-zinc-300 bg-zinc-100 shadow-sm ${position} ${isStack ? "h-[68px] w-12" : preview.kind === "sealed" ? "size-20" : "h-20 w-14"}`}
             key={preview.id}
           >
             {preview.imageUrl ? (
               <Image
                 alt=""
-                className="h-full w-full object-cover"
+                className={`h-full w-full ${preview.kind === "sealed" ? "object-contain p-1" : "object-cover"}`}
                 height={isStack ? 68 : 80}
                 loading="lazy"
                 src={imageFor(preview.imageUrl)}
                 unoptimized
-                width={isStack ? 48 : 56}
+                width={preview.kind === "sealed" ? 80 : isStack ? 48 : 56}
               />
             ) : (
               <WalletCards aria-hidden="true" className="m-auto size-5 text-zinc-400" />
@@ -305,13 +274,13 @@ function RecordRow({
   record: RecordEntry;
   snapshot: RecordsSnapshot;
 }) {
-  const cardPreviews = cardPreviewsForRecord(record, snapshot);
+  const imagePreviews = recordImagePreviewsFor(record, snapshot);
 
   return (
     <article className={`p-4 ${record.status === "void" ? "bg-zinc-50 opacity-70" : "bg-white"}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 gap-3">
-          <RecordImageStack previews={cardPreviews} />
+          <RecordImageStack previews={imagePreviews} type={record.type} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <RecordTypeBadge type={record.type} />
@@ -1315,8 +1284,15 @@ function InventoryView() {
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {snapshot.sealedUnits.map((item) => (
             <article className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm" key={item.id}>
-              <div className="flex items-start justify-between gap-3"><PackageCheck className="size-6 text-[#8a1f2d]" /><span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-bold capitalize text-zinc-600">{item.status}</span></div>
-              <h3 className="mt-4 font-bold">{item.name}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{item.edition ? `${item.edition} · ` : ""}Quantity {item.quantity}</p>
+              <div className="flex items-start gap-3">
+                <span className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100">
+                  {item.imageUrl ? <Image alt={`${item.name} sealed product`} className="h-full w-full object-contain p-1" height={80} loading="lazy" src={`/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}`} unoptimized width={80} /> : <PackageCheck aria-hidden="true" className="size-6 text-[#8a1f2d]" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex justify-end"><span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-bold capitalize text-zinc-600">{item.status}</span></div>
+                  <h3 className="mt-2 font-bold">{item.name}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{item.edition ? `${item.edition} · ` : ""}Quantity {item.quantity}</p>
+                </div>
+              </div>
               {item.status === "sealed" ? <Link className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white" href={`/records/new/opening?sealedId=${encodeURIComponent(item.id)}`}><PackageOpen className="size-4" /> Open product</Link> : null}
             </article>
           ))}
