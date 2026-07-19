@@ -243,19 +243,12 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
   return <RecordsDataSourceContext.Provider value={value}>{children}</RecordsDataSourceContext.Provider>;
 }
 
-function RecordsLiveStateProvider({
-  children,
-  initialSnapshot,
-}: {
-  children: ReactNode;
-  initialSnapshot?: RecordsSnapshot;
-}) {
+function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
   const clientReady = useClientReady();
   const [drafts, setDrafts] = useState<RecordsDrafts>({});
   const [draftsHydrated, setDraftsHydrated] = useState(false);
   const snapshotQuery = trpc.records.snapshot.useQuery(undefined, {
     enabled: clientReady,
-    initialData: initialSnapshot,
     staleTime: 30_000,
   });
   const utils = trpc.useUtils();
@@ -405,11 +398,9 @@ const loadingValue: RecordsDataSource = {
 export function RecordsDataProvider({
   children,
   initiallyAuthenticated = false,
-  initialSnapshot,
 }: {
   children: ReactNode;
   initiallyAuthenticated?: boolean;
-  initialSnapshot?: RecordsSnapshot;
 }) {
   const { data: session, isPending } = useSession();
   const previewReview = process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
@@ -417,13 +408,7 @@ export function RecordsDataProvider({
   if ((!initiallyAuthenticated && isPending) || (!initiallyAuthenticated && !session)) {
     return <RecordsDataSourceContext.Provider value={loadingValue}>{children}</RecordsDataSourceContext.Provider>;
   }
-  return (
-    <RecordsLiveStateProvider
-      initialSnapshot={initialSnapshot}
-    >
-      {children}
-    </RecordsLiveStateProvider>
-  );
+  return <RecordsLiveStateProvider>{children}</RecordsLiveStateProvider>;
 }
 
 // Kept as a compatibility export while call sites move to the source-neutral name.
