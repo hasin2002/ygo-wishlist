@@ -54,7 +54,7 @@ npm run db:push
 
 ## Scheduled price refresh
 
-Production refreshes the public Library collection every day at 06:00 UTC through
+Production refreshes the public Library collection every day at 23:45 UTC through
 Vercel Cron. Before the first production deployment, add a `CRON_SECRET`
 environment variable in the Vercel project settings. Use a long random value;
 Vercel sends it to the scheduled route automatically, and the route rejects
