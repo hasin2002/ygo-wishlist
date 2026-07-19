@@ -370,6 +370,9 @@ function RecordCardItemsEditor({
   const cardLines = record.lines.filter((line) => line.kind === "card");
   const hasBulkContainer = record.lines.some((line) => line.kind === "bulk");
   const isMultiCardRecord = record.type === "pack-opening" || hasBulkContainer;
+  const openedProduct = record.type === "pack-opening"
+    ? source.snapshot.sealedUnits.find((unit) => unit.openedRecordId === record.id) ?? null
+    : null;
 
   if (!cardLines.length && !hasBulkContainer) return null;
 
@@ -399,6 +402,28 @@ function RecordCardItemsEditor({
 
   return (
     <section className="grid gap-3">
+      {openedProduct ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-3 sm:flex-row sm:items-center">
+          <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100">
+            {openedProduct.imageUrl ? (
+              <Image
+                alt={`${openedProduct.name} opened product`}
+                className="h-full w-full object-contain p-1"
+                height={80}
+                loading="lazy"
+                src={`/api/image-proxy?url=${encodeURIComponent(openedProduct.imageUrl)}`}
+                unoptimized
+                width={80}
+              />
+            ) : <PackageOpen aria-hidden="true" className="size-6 text-[#8a1f2d]" />}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Opened product</p>
+            <h3 className="mt-1 font-black">{openedProduct.name}</h3>
+            <p className="mt-1 text-sm font-medium text-zinc-500">{openedProduct.edition ? `${openedProduct.edition} · ` : ""}This product is read-only here; edit the pulled cards below.</p>
+          </div>
+        </div>
+      ) : null}
       <div><h3 className="font-bold">{record.type === "pack-opening" ? "Pulled cards" : "Card items"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Edit a card, change its quantity, remove it, or add another where this Record supports multiple cards.</p></div>
       {message ? <p className={`rounded-md border px-3 py-2 text-sm font-bold ${message === "Card items saved." ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-300 bg-rose-50 text-rose-900"}`} role={message === "Card items saved." ? "status" : "alert"}>{message}</p> : null}
       <CardContentsEditor allowAdd={isMultiCardRecord} allowExistingIncomplete allowRemoveLast={hasBulkContainer} initialActiveId={initialCardLineId} noun={record.type === "pack-opening" ? "pulled card" : "card"} onChange={setRows} rows={rows} />
