@@ -52,6 +52,21 @@ Before deploying a fresh database, create/update the tables:
 npm run db:push
 ```
 
+## Scheduled price refresh
+
+Production refreshes the public Library collection every three hours through
+Vercel Cron. Before the first production deployment, add a `CRON_SECRET`
+environment variable in the Vercel project settings. Use a long random value;
+Vercel sends it to the scheduled route automatically, and the route rejects
+requests without it.
+
+The schedule is configured in `vercel.json`. Vercel Cron runs only on production
+deployments and uses UTC.
+
+The refresh timestamp also needs the `pricing_refresh_states` table. Apply the
+schema change once to the production database with `npm run db:push` using its
+production `DATABASE_URL`.
+
 If migrating existing local SQLite data, run:
 
 ```bash

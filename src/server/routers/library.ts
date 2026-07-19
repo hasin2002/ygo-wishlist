@@ -6,11 +6,13 @@ import {
   cardCopies,
   cardPrintings,
   cardTargets,
+  pricingRefreshStates,
   recordEntries,
 } from "@/db/schema";
 import { getLibraryCardStatus } from "@/lib/records/library-status";
 import { fetchEbayPricing } from "@/server/ebay-pricing";
 import { fetchLinkMetadata, normalizeUrl, ygoCardDetailsByName } from "@/server/metadata";
+import { recordPricingRefresh } from "@/server/pricing-refresh-state";
 import { authenticatedProcedure, publicProcedure, router } from "@/server/trpc";
 
 const statusSchema = z.enum(["wishlist", "owned"]);
@@ -470,6 +472,20 @@ export const libraryRouter = router({
       .orderBy(asc(cardTargets.name))
   )),
 
+  lastPricingRefresh: authenticatedProcedure.query(async ({ ctx }) => {
+    const [state] = await db
+      .select({ lastRefreshedAt: pricingRefreshStates.lastRefreshedAt })
+      .from(pricingRefreshStates)
+      .where(eq(pricingRefreshStates.ownerId, ctx.collectionOwnerId))
+      .limit(1);
+
+    return state?.lastRefreshedAt ?? null;
+  }),
+
+  recordPricingRefresh: authenticatedProcedure.mutation(async ({ ctx }) => (
+    recordPricingRefresh(ctx.collectionOwnerId)
+  )),
+
   refreshAllPricing: authenticatedProcedure.mutation(async ({ ctx }) => {
     const targets = await db.select().from(cardTargets).where(eq(cardTargets.ownerId, ctx.collectionOwnerId));
     let failed = 0;
@@ -491,7 +507,8 @@ export const libraryRouter = router({
         await new Promise((resolve) => setTimeout(resolve, 150));
       }
     }
-    return { failed, refreshed };
+    const completedAt = await recordPricingRefresh(ctx.collectionOwnerId);
+    return { completedAt, failed, refreshed };
   }),
 
   delete: authenticatedProcedure.input(z.object({ id: z.string().min(1) })).mutation(async ({ ctx, input }) => {
