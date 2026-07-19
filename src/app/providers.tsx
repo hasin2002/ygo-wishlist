@@ -1,6 +1,7 @@
 "use client";
 
 import { TrpcProvider } from "@/trpc/client";
+import { AppShell } from "@/components/app-shell";
 import {
   createContext,
   useContext,
@@ -31,7 +32,7 @@ export function Providers({
   return (
     <TrpcProvider>
       <InitialAuthContext.Provider value={initialAuth}>
-        {children}
+        <AppShell>{children}</AppShell>
       </InitialAuthContext.Provider>
     </TrpcProvider>
   );

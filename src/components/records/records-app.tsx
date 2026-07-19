@@ -29,7 +29,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import {
   CardContentsEditor,
   type CardContentsDraft,
@@ -148,6 +148,11 @@ export function RecordsNavigation({ view }: { view: RecordsView }) {
           }`}
           href={item.href}
           key={item.href}
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            window.history.pushState(null, "", item.href);
+          }}
         >
           {item.label}
         </Link>
@@ -1228,6 +1233,12 @@ function InventoryView() {
   const cardPageCount = Math.max(1, Math.ceil(filteredTargets.length / cardPageSize));
   const visibleTargets = filteredTargets.slice((cardPage - 1) * cardPageSize, cardPage * cardPageSize);
 
+  function switchInventoryTab(event: MouseEvent<HTMLAnchorElement>, href: string) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    window.history.pushState(null, "", href);
+  }
+
   return (
     <div className="grid gap-4">
       <nav aria-label="Inventory type" className="flex gap-2 overflow-x-auto pb-1">
@@ -1237,6 +1248,7 @@ function InventoryView() {
             className={`inline-flex min-h-11 shrink-0 items-center rounded-md border px-4 text-sm font-bold transition ${activeTab === tab.value ? "border-[#8a1f2d] bg-[#8a1f2d] text-white" : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-950"}`}
             href={`/records/inventory?kind=${tab.value}`}
             key={tab.value}
+            onClick={(event) => switchInventoryTab(event, `/records/inventory?kind=${tab.value}`)}
           >
             {tab.label}
           </Link>
