@@ -176,8 +176,10 @@ export type OpeningInput = {
   date: string;
   notes: string;
   product: ProductIdentityInput;
+  useTrackedStock: boolean;
   sealedUnitId: string | null;
   source: string;
+  totalPence: number;
   pulls: CardContentsInput[];
 };
 

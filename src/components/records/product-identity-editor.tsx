@@ -71,10 +71,12 @@ function FieldOrigin({ edited, fetched }: { edited: boolean; fetched: boolean })
 }
 
 export function ProductIdentityEditor({
+  hideSealedEdition = false,
   kind,
   onChange,
   value,
 }: {
+  hideSealedEdition?: boolean;
   kind: "card" | "sealed";
   onChange: (value: ProductIdentityDraft) => void;
   value: ProductIdentityDraft;
@@ -225,8 +227,8 @@ export function ProductIdentityEditor({
     const missingRequired =
       !metadata.title ||
       (kind === "card" && (!metadata.rarity || !pendingValue.edition)) ||
-      (kind === "sealed" && !metadata.edition);
-    const incomplete = missingRequired || !metadata.imageUrl || (kind === "card" && (!metadata.setName || !metadata.setCode));
+      false;
+    const incomplete = missingRequired || !metadata.imageUrl || (kind === "card" && !metadata.setName);
     onChange({
       ...pendingValue,
       name: metadata.title || pendingValue.name,
@@ -433,16 +435,15 @@ export function ProductIdentityEditor({
               <input className={fieldClass} onChange={(event) => updateField("setCode", event.target.value)} placeholder="Auto-filled when available" value={value.setCode} />
             </label>
           </>
-        ) : (
+        ) : hideSealedEdition ? null : (
           <label className="sm:col-span-2 sm:max-w-sm">
-            <span className="text-sm font-bold text-zinc-700">Product edition <span className="text-rose-700">*</span><FieldOrigin edited={value.editedFields.includes("edition")} fetched={fetched && Boolean(value.edition)} /></span>
+            <span className="text-sm font-bold text-zinc-700">Product edition <span className="font-medium text-zinc-400">(optional)</span><FieldOrigin edited={value.editedFields.includes("edition")} fetched={fetched && Boolean(value.edition)} /></span>
             <select
               className={fieldClass}
               onChange={(event) => updateField("edition", event.target.value)}
-              required
               value={value.edition}
             >
-              <option value="">Choose edition</option>
+              <option value="">Not specified</option>
               <option value="1st Edition">1st Edition</option>
               <option value="Unlimited Edition">Unlimited Edition</option>
               <option value="Limited Edition">Limited Edition</option>

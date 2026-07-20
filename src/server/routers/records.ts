@@ -43,6 +43,9 @@ const cardInputSchema = z.object({
 const productInputSchema = cardInputSchema.omit({ id: true, quantity: true }).extend({
   rarity: z.string().trim().max(80),
 });
+const sealedProductInputSchema = productInputSchema.extend({
+  edition: productEditionSchema.or(z.literal("")),
+});
 const commonRecordSchema = z.object({
   recordName: z.string().trim().min(1).max(80),
   date: dateSchema,
@@ -60,7 +63,7 @@ const purchaseSchema = z.discriminatedUnion("kind", [
     kind: z.literal("sealed"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
-    product: productInputSchema.extend({ quantity: z.number().int().positive().max(10_000) }),
+    product: sealedProductInputSchema.extend({ quantity: z.number().int().positive().max(10_000) }),
   }),
   commonRecordSchema.extend({
     kind: z.literal("bulk"),
@@ -80,7 +83,9 @@ const purchaseSchema = z.discriminatedUnion("kind", [
 ]);
 const openingSchema = commonRecordSchema.omit({ source: true }).extend({
   source: z.string().trim().min(1).max(120),
-  product: productInputSchema,
+  totalPence: z.number().int().nonnegative(),
+  useTrackedStock: z.boolean(),
+  product: sealedProductInputSchema,
   sealedUnitId: z.string().nullable(),
   pulls: z.array(cardInputSchema).min(1),
 });
@@ -114,7 +119,7 @@ const resolveCardAttentionSchema = z.object({
   edition: productEditionSchema,
   tcgplayerUrl: z.string().url().regex(/tcgplayer\.com\/product\/\d+/i),
   setName: z.string().trim().min(1).max(160),
-  setCode: z.string().trim().min(1).max(80),
+  setCode: z.string().trim().max(80),
   imageUrl: z.string().url().nullable(),
 });
 const replaceRecordCardsSchema = recordMutationIdentitySchema.extend({
@@ -422,11 +427,12 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
   }
   for (const record of records) {
     if (record.type !== "imported-acquisition" || record.amountKnown) continue;
+    const sealedOrCard = linesByRecord.get(record.id)?.[0];
     attention.push({
       id: `attention-cost-${record.id}`,
       targetId: null,
-      label: record.title,
-      detail: "Imported acquisition cost is unknown and can be updated from History.",
+      label: sealedOrCard?.name ?? record.title,
+      detail: "Acquisition cost is unknown and can be updated from History.",
       field: "cost",
     });
   }
@@ -552,8 +558,8 @@ export const recordsRouter = router({
       await tx.update(cardPrintings).set({
         setName: input.setName,
         normalizedSetName: normalize(input.setName),
-        setCode: input.setCode,
-        normalizedSetCode: normalize(input.setCode),
+        setCode: input.setCode || "Unknown code",
+        normalizedSetCode: normalize(input.setCode || "Unknown code"),
         tcgplayerUrl: input.tcgplayerUrl,
         canonicalTcgplayerUrl: canonicalProductUrl(input.tcgplayerUrl),
         imageUrl: input.imageUrl,
@@ -563,7 +569,7 @@ export const recordsRouter = router({
       if (relatedLineIds.length) {
         await tx.update(recordLines).set({
           name: input.name,
-          detail: `${input.setCode} · ${input.edition} · ${input.rarity}`,
+          detail: `${input.setCode || "Unknown code"} · ${input.edition} · ${input.rarity}`,
           updatedAt: now,
         }).where(and(
           eq(recordLines.ownerId, ctx.collectionOwnerId),
@@ -693,16 +699,13 @@ export const recordsRouter = router({
     const now = new Date();
     await db.transaction(async (tx) => {
       const canonicalUrl = canonicalProductUrl(input.product.tcgplayerUrl);
-      let sealed = input.sealedUnitId
+      let sealed = input.useTrackedStock && input.sealedUnitId
         ? (await tx.select().from(sealedUnits).where(and(
             eq(sealedUnits.id, input.sealedUnitId), eq(sealedUnits.ownerId, ownerId),
             eq(sealedUnits.status, "sealed"), isNull(sealedUnits.openedRecordId),
           )).limit(1))[0]
         : undefined;
-      sealed ??= (await tx.select().from(sealedUnits).where(and(
-        eq(sealedUnits.ownerId, ownerId), eq(sealedUnits.status, "sealed"),
-        eq(sealedUnits.canonicalTcgplayerUrl, canonicalUrl), isNull(sealedUnits.openedRecordId),
-      )).limit(1))[0];
+      if (input.useTrackedStock && !sealed) conflict("That sealed product is no longer available. Refresh and choose another unit.");
 
       if (!sealed) {
         const importedId = id("record");
@@ -711,15 +714,15 @@ export const recordsRouter = router({
         const isGift = normalize(input.source) === "gift";
         await insertRecord(tx, {
           id: importedId, ownerId, type: "imported-acquisition", status: "active", occurredOn: input.date,
-          title: compactRecordName(`Imported ${input.product.name}`, "Imported sealed product"), titleGenerated: true,
-          source: input.source, amountPence: 0, amountKnown: isGift,
-          notes: isGift ? "Gifted sealed product." : "Historical cost is unknown and excluded from known spend.",
+          title: compactRecordName(`Untracked ${input.product.name}`, "Untracked sealed product"), titleGenerated: true,
+          source: input.source, amountPence: isGift ? 0 : input.totalPence, amountKnown: true,
+          notes: isGift ? "Gifted sealed product." : "Recorded alongside a pack opening.",
           revision: 1, createdAt: now, updatedAt: now,
         });
         await insertLine(tx, {
           id: importedLineId, ownerId, recordId: importedId, position: 0, kind: "sealed",
-          name: input.product.name, quantity: 1, allocationPence: isGift ? 0 : null,
-          detail: `${isGift ? "Gift · £0" : "Unknown historical cost"} · ${input.product.edition}`,
+          name: input.product.name, quantity: 1, allocationPence: isGift ? 0 : input.totalPence,
+          detail: `${isGift ? "Gift · £0" : `£${(input.totalPence / 100).toFixed(2)}`} · ${input.product.edition}`,
           createdAt: now, updatedAt: now,
         });
         [sealed] = await tx.insert(sealedUnits).values({
@@ -839,6 +842,7 @@ export const recordsRouter = router({
         source: input.update.source,
         listingUrl: input.update.listingUrl || null,
         amountPence: input.update.amountPence,
+        amountKnown: true,
         notes: input.update.notes,
         updatedAt: now,
       }).where(and(eq(recordEntries.id, record.id), eq(recordEntries.ownerId, ownerId)));

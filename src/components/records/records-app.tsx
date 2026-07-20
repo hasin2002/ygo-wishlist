@@ -513,6 +513,7 @@ function NonCardLineEditor({ line, record, source }: { line: RecordLine; record:
 
 function RecordEditorDialog({
   backLabel,
+  costOnly = false,
   initialCardLineId = null,
   initialPanel = "details",
   onClose,
@@ -521,6 +522,7 @@ function RecordEditorDialog({
   source,
 }: {
   backLabel?: string;
+  costOnly?: boolean;
   initialCardLineId?: string | null;
   initialPanel?: "details" | "items";
   onClose: () => void;
@@ -583,28 +585,30 @@ function RecordEditorDialog({
     <div aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" role="dialog">
       <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100vh-3rem)]">
         <div className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">Edit record</h2></div>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{costOnly ? "Add acquisition cost" : "Edit record"}</h2></div>
           <button aria-label={backLabel || "Close record editor"} autoFocus className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
         </div>
-        <div className="border-b border-zinc-300 bg-white px-4 sm:px-6"><div className="grid grid-cols-2 rounded-t-lg border-x border-t border-zinc-300 bg-zinc-100 p-1"><button aria-pressed={activePanel === "details"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "details" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("details")} type="button">Record details</button><button aria-pressed={activePanel === "items"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "items" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("items")} type="button">Items ({record.lines.filter((line) => line.kind !== "bulk").reduce((sum, line) => sum + line.quantity, 0)})</button></div></div>
+        {!costOnly ? <div className="border-b border-zinc-300 bg-white px-4 sm:px-6"><div className="grid grid-cols-2 rounded-t-lg border-x border-t border-zinc-300 bg-zinc-100 p-1"><button aria-pressed={activePanel === "details"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "details" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("details")} type="button">Record details</button><button aria-pressed={activePanel === "items"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "items" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("items")} type="button">Items ({record.lines.filter((line) => line.kind !== "bulk").reduce((sum, line) => sum + line.quantity, 0)})</button></div></div> : null}
         {activePanel === "details" ? <div className="grid gap-5 p-4 sm:p-6">
-          <div><h3 className="font-bold">Record details</h3><p className="mt-1 text-sm font-medium text-zinc-500">Edit the shared information that identifies this {recordTypeLabels[record.type].toLowerCase()}.</p></div>
+          <div><h3 className="font-bold">{costOnly ? record.title : "Record details"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{costOnly ? "Enter the full amount paid. Saving removes this item from Needs attention and includes it in your totals." : `Edit the shared information that identifies this ${recordTypeLabels[record.type].toLowerCase()}.`}</p></div>
           {error ? <div className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</div> : null}
           <div className="grid gap-4 sm:grid-cols-2">
+            {costOnly ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input autoFocus className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></div></label> : <>
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label>
             <label><span className="text-sm font-bold text-zinc-700">Date <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDate(event.target.value)} type="date" value={date} /></label>
             <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Buyer or marketplace" : "Seller or source"} <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setRecordSource(event.target.value)} value={recordSource} /></label>
             {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></label> : null}
             {editsListing ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Original listing <span className="font-medium text-zinc-400">(optional)</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="url" onChange={(event) => setListingUrl(event.target.value)} placeholder="https://…" type="url" value={listingUrl} /></label> : null}
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setNotes(event.target.value)} value={notes} /></label>
+            </>}
           </div>
         </div> : <div className="grid gap-6 p-4 sm:p-6">
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="block font-bold">Dependency-safe item editing</strong><p className="mt-1">Items and quantities can be corrected here. If a Copy was later sold, removed, or a sealed unit was opened, changes that would contradict that history are blocked with a specific explanation.</p></div>
           {record.status === "void" ? <div className="rounded-lg border border-zinc-300 bg-white px-4 py-8 text-center"><p className="font-bold">Restore this Record to edit its items</p><p className="mt-1 text-sm font-medium text-zinc-500">Voided inventory stays frozen so it cannot leak back into the active collection.</p></div> : <>{record.type === "sale" ? <SaleCopyItemsEditor record={record} source={source} /> : <RecordCardItemsEditor initialCardLineId={initialCardLineId} record={record} source={source} />}{record.lines.filter((line) => line.kind !== "card").map((line) => <NonCardLineEditor key={line.id} line={line} record={record} source={source} />)}</>}
         </div>}
         <div className="flex flex-col-reverse gap-3 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <button className={`inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${record.status === "void" ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:border-emerald-700" : "border-rose-300 bg-rose-50 text-rose-800 hover:border-rose-700"}`} disabled={saving} onClick={changeStatus} type="button">{record.status === "void" ? "Restore record" : "Void record"}</button>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row"><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950" disabled={saving} onClick={onClose} type="button">{activePanel === "details" ? "Cancel" : "Close"}</button>{activePanel === "details" ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={save} type="button">{saving ? "Saving…" : "Save details"}</button> : null}</div>
+          {!costOnly ? <button className={`inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${record.status === "void" ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:border-emerald-700" : "border-rose-300 bg-rose-50 text-rose-800 hover:border-rose-700"}`} disabled={saving} onClick={changeStatus} type="button">{record.status === "void" ? "Restore record" : "Void record"}</button> : <span />}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row"><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950" disabled={saving} onClick={onClose} type="button">{activePanel === "details" ? "Cancel" : "Close"}</button>{activePanel === "details" ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={save} type="button">{saving ? "Saving…" : costOnly ? "Save acquisition cost" : "Save details"}</button> : null}</div>
         </div>
       </div>
     </div>
@@ -656,6 +660,11 @@ function CardAttentionDialog({
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const showTcgplayerUrl = !tcgplayerUrl;
+  const showName = !target?.name;
+  const showRarity = !target?.rarity;
+  const showEdition = item.field === "edition";
+  const showSetName = !printingSetName;
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -680,8 +689,8 @@ function CardAttentionDialog({
   async function save() {
     if (!target || !printing) return;
     const update: CardAttentionUpdate = { targetId: target.id, printingId: printing.id, name, rarity, edition, tcgplayerUrl, setName: printingSetName, setCode, imageUrl };
-    if (!name.trim() || !rarity.trim() || !tcgplayerUrl.trim() || !printingSetName.trim() || !setCode.trim()) {
-      setError("Complete the card name, rarity, TCGplayer link, set name, and set code before saving.");
+    if (!name.trim() || !rarity.trim() || !tcgplayerUrl.trim() || !printingSetName.trim()) {
+      setError("Complete the card name, rarity, TCGplayer link, and set name before saving.");
       return;
     }
     setSaving(true);
@@ -704,12 +713,11 @@ function CardAttentionDialog({
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">Why this needs attention</strong><p className="mt-1">{item.detail}</p></div>
           {error ? <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</p> : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">TCGplayer product link <span className="text-rose-700">*</span></span><div className="mt-1 flex flex-col gap-2 sm:flex-row"><input className="h-11 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setTcgplayerUrl(event.target.value)} placeholder="https://www.tcgplayer.com/product/…" type="url" value={tcgplayerUrl} /><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60" disabled={fetching || !tcgplayerUrl.trim()} onClick={() => void fetchDetails()} type="button"><Sparkles className="size-4" />{fetching ? "Fetching…" : "Fetch details"}</button></div><span className="mt-1 block text-xs font-medium text-zinc-500">Fetching can fill the name, rarity, image, set, and edition for you.</span></label>
-            <label><span className="text-sm font-bold text-zinc-700">Card name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setName(event.target.value)} value={name} /></label>
-            <label><span className="text-sm font-bold text-zinc-700">Rarity <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setRarity(event.target.value)} value={rarity} /></label>
-            <label><span className="text-sm font-bold text-zinc-700">Edition <span className="text-rose-700">*</span></span><select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setEdition(event.target.value as ProductEdition)} value={edition}><option value="1st Edition">1st Edition</option><option value="Unlimited Edition">Unlimited Edition</option><option value="Limited Edition">Limited Edition</option></select></label>
-            <label><span className="text-sm font-bold text-zinc-700">Set code <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setSetCode(event.target.value)} placeholder="LOB-001" value={setCode} /></label>
-            <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Set name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setPrintingSetName(event.target.value)} value={printingSetName} /></label>
+            {showTcgplayerUrl ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">TCGplayer product link <span className="text-rose-700">*</span></span><div className="mt-1 flex flex-col gap-2 sm:flex-row"><input className="h-11 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setTcgplayerUrl(event.target.value)} placeholder="https://www.tcgplayer.com/product/…" type="url" value={tcgplayerUrl} /><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60" disabled={fetching || !tcgplayerUrl.trim()} onClick={() => void fetchDetails()} type="button"><Sparkles className="size-4" />{fetching ? "Fetching…" : "Fetch details"}</button></div><span className="mt-1 block text-xs font-medium text-zinc-500">Fetching can fill any other missing card details for you.</span></label> : null}
+            {showName ? <label><span className="text-sm font-bold text-zinc-700">Card name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setName(event.target.value)} value={name} /></label> : null}
+            {showRarity ? <label><span className="text-sm font-bold text-zinc-700">Rarity <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setRarity(event.target.value)} value={rarity} /></label> : null}
+            {showEdition ? <label><span className="text-sm font-bold text-zinc-700">Edition <span className="text-rose-700">*</span></span><select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setEdition(event.target.value as ProductEdition)} value={edition}><option value="1st Edition">1st Edition</option><option value="Unlimited Edition">Unlimited Edition</option><option value="Limited Edition">Limited Edition</option></select></label> : null}
+            {showSetName ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Set name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d]" onChange={(event) => setPrintingSetName(event.target.value)} value={printingSetName} /></label> : null}
           </div>
         </div>
         <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving || fetching} onClick={() => void save()} type="button">{saving ? "Saving…" : "Save resolved details"}</button></footer>
@@ -801,7 +809,8 @@ function Overview() {
           <div className="mt-4 grid gap-2">
             {snapshot.attention.length ? snapshot.attention.slice(0, 5).map((item) => (
               <button className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-[#8a1f2d] hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" key={item.id} onClick={() => {
-                const record = item.field === "cost" ? snapshot.records.find((value) => value.title === item.label) : null;
+                const recordId = item.field === "cost" ? item.id.replace(/^attention-cost-/, "") : null;
+                const record = recordId ? snapshot.records.find((value) => value.id === recordId) : null;
                 if (record) setAttentionRecordId(record.id);
                 else setAttentionItemId(item.id);
               }} type="button">
@@ -817,7 +826,7 @@ function Overview() {
         </section>
       </div>
       {attentionItemId ? <CardAttentionDialog item={snapshot.attention.find((item) => item.id === attentionItemId)!} onClose={() => setAttentionItemId(null)} onSaved={setMessage} source={source} /> : null}
-      {attentionRecordId ? <RecordEditorDialog key={attentionRecordId} initialPanel="details" onClose={() => setAttentionRecordId(null)} onSaved={setMessage} record={snapshot.records.find((record) => record.id === attentionRecordId)!} source={source} /> : null}
+      {attentionRecordId ? <RecordEditorDialog costOnly key={attentionRecordId} initialPanel="details" onClose={() => setAttentionRecordId(null)} onSaved={setMessage} record={snapshot.records.find((record) => record.id === attentionRecordId)!} source={source} /> : null}
     </div>
   );
 }

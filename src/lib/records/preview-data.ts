@@ -817,13 +817,10 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
 
 export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
   const next = clone(snapshot);
-  let sealed = input.sealedUnitId
+  let sealed = input.useTrackedStock && input.sealedUnitId
     ? next.sealedUnits.find((item) => item.id === input.sealedUnitId && item.status === "sealed")
     : undefined;
-  const productKey = canonicalProductUrl(input.product.tcgplayerUrl);
-  sealed ??= productKey
-    ? next.sealedUnits.find((item) => item.status === "sealed" && canonicalProductUrl(item.tcgplayerUrl) === productKey)
-    : undefined;
+  if (input.useTrackedStock && !sealed) return { next: snapshot, result: { ok: false, message: "That sealed product is no longer available. Refresh and choose another unit." } satisfies DataSourceResult };
 
   if (!sealed) {
     const importedId = previewId("record");
@@ -846,13 +843,13 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
       type: "imported-acquisition",
       status: "active",
       date: input.date,
-      title: `Imported ${input.product.name}`,
+      title: `Untracked ${input.product.name}`,
       source: input.source,
       listingUrl: null,
-      amountPence: 0,
-      amountKnown: isGift,
-      notes: isGift ? "Gifted sealed product." : "Historical cost is unknown and excluded from known spend.",
-      lines: [recordLine("sealed", input.product.name, 1, [sealedId], null, isGift ? `Gift · £0 · ${input.product.edition}` : `Unknown historical cost · ${input.product.edition}`)],
+      amountPence: isGift ? 0 : input.totalPence,
+      amountKnown: true,
+      notes: isGift ? "Gifted sealed product." : "Recorded alongside a pack opening.",
+      lines: [recordLine("sealed", input.product.name, 1, [sealedId], isGift ? 0 : input.totalPence, isGift ? `Gift · £0 · ${input.product.edition}` : `£${(input.totalPence / 100).toFixed(2)} · ${input.product.edition}`)],
       revision: 1,
       createdAt: nowIso(),
     });
@@ -952,6 +949,8 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
   record.source = update.source.trim();
   record.listingUrl = update.listingUrl?.trim() || null;
   record.amountPence = update.amountPence;
+  record.amountKnown = true;
+  next.attention = next.attention.filter((item) => item.id !== `attention-cost-${record.id}`);
   record.notes = update.notes.trim();
   const bulkLot = next.bulkLots.find((lot) => lot.acquiredRecordId === record.id);
   if (bulkLot) {
