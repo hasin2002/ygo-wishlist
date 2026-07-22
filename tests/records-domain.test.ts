@@ -3,7 +3,7 @@ import test from "node:test";
 import { allocatePence, allocatePenceAt } from "../src/lib/records/allocation.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
-import { removeCardCopy, replaceRecordCards, updateCardCopy } from "../src/lib/records/preview-data.ts";
+import { createPreviewSnapshot, removeCardCopy, replaceRecordCards, updateCardCopy } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
 
 function twoCopyPurchase(): RecordsSnapshot {
@@ -59,6 +59,8 @@ function twoCopyPurchase(): RecordsSnapshot {
       allocationPence: index === 0 ? 51 : 50,
       status: "available" as const,
       condition: "Near Mint",
+      location: null,
+      stickerNumber: null,
       privateNote: "",
       createdAt: `2026-07-20T12:00:0${index}.000Z`,
     })),
@@ -99,12 +101,65 @@ test("removing a physical Copy removes that exact Copy and rebases its purchase 
 test("copy details are edited independently", () => {
   const result = updateCardCopy(twoCopyPurchase(), "copy-two", {
     condition: "Lightly Played",
-    privateNote: "Small mark on the back",
+    location: "Binder 2 · Page 7 · Slot 3",
+    stickerNumber: "00042",
+    privateNote: "  Small mark on the back  ",
   });
   assert.equal(result.result.ok, true);
   assert.equal(result.next.copies[0]?.condition, "Near Mint");
   assert.equal(result.next.copies[1]?.condition, "Lightly Played");
+  assert.equal(result.next.copies[1]?.location, "Binder 2 · Page 7 · Slot 3");
+  assert.equal(result.next.copies[1]?.stickerNumber, "00042");
   assert.equal(result.next.copies[1]?.privateNote, "Small mark on the back");
+
+  const cleared = updateCardCopy(result.next, "copy-two", {
+    condition: "Near Mint",
+    location: "   ",
+    stickerNumber: "",
+    privateNote: "",
+  });
+  assert.equal(cleared.next.copies[1]?.location, null);
+  assert.equal(cleared.next.copies[1]?.stickerNumber, null);
+});
+
+test("copy sticker numbers stay unique within preview inventory", () => {
+  const first = updateCardCopy(twoCopyPurchase(), "copy-one", {
+    condition: "Near Mint",
+    location: "Binder 1",
+    stickerNumber: "00042",
+    privateNote: "",
+  });
+  const duplicate = updateCardCopy(first.next, "copy-two", {
+    condition: "Near Mint",
+    location: "Binder 2",
+    stickerNumber: "00042",
+    privateNote: "",
+  });
+
+  assert.equal(duplicate.result.ok, false);
+  if (!duplicate.result.ok) assert.match(duplicate.result.message, /already assigned/i);
+  assert.equal(duplicate.next.copies[1]?.stickerNumber, null);
+});
+
+test("legacy preview Copies keep an unknown condition until the user chooses a grade", () => {
+  const snapshot = createPreviewSnapshot([{
+    id: 99,
+    name: "Legacy card",
+    url: null,
+    source: "manual",
+    imageUrl: null,
+    priceText: null,
+    marketPriceText: null,
+    paidPriceText: null,
+    purchaseMonth: null,
+    rarity: null,
+    status: "owned",
+    createdAt: "2026-07-01T00:00:00.000Z",
+    updatedAt: "2026-07-01T00:00:00.000Z",
+  }]);
+
+  const legacyCopy = snapshot.copies.find((copy) => copy.id === "copy-legacy-99");
+  assert.equal(legacyCopy?.condition, "Unknown");
 });
 
 test("source-record editing cannot implicitly remove an arbitrary physical Copy", () => {
@@ -196,6 +251,8 @@ test("pack-opening records use the opened product image instead of pulled card i
       allocationPence: null,
     status: "available",
     condition: "Near Mint",
+    location: null,
+    stickerNumber: null,
     privateNote: "",
     createdAt: "2026-07-01T00:00:00.000Z",
     }],

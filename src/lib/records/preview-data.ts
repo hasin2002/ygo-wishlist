@@ -1,6 +1,7 @@
 import type {
   CardContentsInput,
   CardCopy,
+  CardCopyUpdate,
   CardPrinting,
   DataSourceResult,
   RecordDetailsUpdate,
@@ -294,7 +295,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: null,
         allocationPence: 2100,
         status: "available",
-        condition: "Near Mint", privateNote: "", createdAt: "2026-07-12T18:20:00.000Z",
+        condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-12T18:20:00.000Z",
       },
       {
         id: "copy-preview-dark-2",
@@ -305,7 +306,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: null,
         allocationPence: 2100,
         status: "available",
-        condition: "Near Mint", privateNote: "", createdAt: "2026-07-12T18:20:01.000Z",
+        condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-12T18:20:01.000Z",
       },
       {
         id: "copy-preview-blue-eyes",
@@ -316,7 +317,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: null,
         allocationPence: null,
         status: "available",
-        condition: "Lightly Played", privateNote: "", createdAt: "2026-07-13T19:15:00.000Z",
+        condition: "Lightly Played", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-13T19:15:00.000Z",
       },
       {
         id: "copy-preview-ash",
@@ -327,7 +328,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: 0,
         allocationPence: 22,
         status: "sold",
-        condition: "Near Mint", privateNote: "", createdAt: "2026-07-15T17:40:00.000Z",
+        condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-15T17:40:00.000Z",
       },
     ],
     sealedUnits: [
@@ -465,7 +466,7 @@ export function createPreviewSnapshot(legacyCards: LegacyCard[]): RecordsSnapsho
         allocationIndex: null,
         allocationPence: paidPence,
         status: "available",
-        condition: "Unknown", privateNote: "", createdAt: card.createdAt,
+        condition: "Unknown", location: null, stickerNumber: null, privateNote: "", createdAt: card.createdAt,
       });
       snapshot.records.push({
         id: recordId,
@@ -673,7 +674,7 @@ function addCopies(
       allocationIndex: allocation?.indexes[index] ?? null,
       allocationPence: allocation?.values[index] ?? null,
       status: "available",
-      condition: "Near Mint", privateNote: "", createdAt: nowIso(),
+      condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: nowIso(),
     });
   }
 
@@ -1155,12 +1156,22 @@ export function replaceSaleCopies(snapshot: RecordsSnapshot, recordId: string, c
   return { next, result: { ok: true, id: record.id } satisfies DataSourceResult };
 }
 
-export function updateCardCopy(snapshot: RecordsSnapshot, copyId: string, update: { condition: string; privateNote: string }) {
+export function updateCardCopy(snapshot: RecordsSnapshot, copyId: string, update: CardCopyUpdate) {
   const next = clone(snapshot);
   const copy = next.copies.find((item) => item.id === copyId);
   if (!copy) return { next: snapshot, result: { ok: false, message: "Physical Copy not found." } satisfies DataSourceResult };
+  const stickerNumber = update.stickerNumber.trim() || null;
+  const duplicate = stickerNumber && next.copies.find((item) => item.id !== copyId && item.stickerNumber === stickerNumber);
+  if (duplicate) {
+    return {
+      next: snapshot,
+      result: { ok: false, message: `Sticker number ${stickerNumber} is already assigned to another physical Copy.` } satisfies DataSourceResult,
+    };
+  }
   copy.condition = update.condition;
-  copy.privateNote = update.privateNote;
+  copy.location = update.location.trim() || null;
+  copy.stickerNumber = stickerNumber;
+  copy.privateNote = update.privateNote.trim();
   return { next, result: { ok: true, id: copyId } satisfies DataSourceResult };
 }
 

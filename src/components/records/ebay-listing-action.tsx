@@ -24,6 +24,7 @@ import {
   type EbayListingItemSpecifics,
   type EbayListingLanguage,
 } from "@/lib/ebay-listing-options";
+import { cardConditionOptions, isCardCondition } from "@/lib/records/types";
 import type { CardCopy, CardPrinting, WishlistTarget } from "@/lib/records/types";
 import { trpc } from "@/trpc/client";
 
@@ -56,14 +57,10 @@ type ListingForm = {
 
 const ebayCardCategoryId = ebayCardCategory.id;
 const defaultDeliveryService = ebayDeliveryServices[0];
-type EbayCardConditionDescriptorValueId = "400010" | "400015" | "400016" | "400017";
+type EbayCardConditionDescriptorValueId = typeof cardConditionOptions[number]["ebayDescriptorValueId"];
 
 function ebayCardConditionFromInventory(value: string): EbayCardConditionDescriptorValueId {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.includes("light")) return "400015";
-  if (normalized.includes("moderate")) return "400016";
-  if (normalized.includes("heavy") || normalized.includes("damage") || normalized.includes("poor")) return "400017";
-  return "400010";
+  return cardConditionOptions.find((option) => option.value === value)?.ebayDescriptorValueId ?? "400010";
 }
 
 function pence(value: string) {
@@ -246,18 +243,22 @@ export function EbayListingAction({
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
   if (!enabled || session?.user.role !== "admin") return null;
+  const conditionRequired = !isCardCondition(copy.condition);
 
   return (
-    <>
+    <div className="grid gap-1">
       <button
-        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
+        aria-describedby={conditionRequired ? `ebay-condition-required-${copy.id}` : undefined}
+        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-700"
+        disabled={conditionRequired}
         onClick={() => setOpen(true)}
         type="button"
       >
-        <Send className="size-4" /> Sell on eBay
+        <Send aria-hidden="true" className="size-4" /> {conditionRequired ? "Set condition first" : "Sell on eBay"}
       </button>
+      {conditionRequired ? <span className="max-w-40 text-xs font-medium leading-4 text-zinc-600" id={`ebay-condition-required-${copy.id}`}>Choose and save a condition in Copy details.</span> : null}
       {open ? <EbayListingDialog copy={copy} onClose={() => setOpen(false)} printing={printing} target={target} /> : null}
-    </>
+    </div>
   );
 }
 
@@ -485,10 +486,7 @@ function EbayListingDialog({
               <label className="grid content-start gap-1.5 text-sm font-bold">
                 Card condition
                 <select className="h-11 rounded-md border border-zinc-300 bg-white px-3 font-medium outline-none focus:border-[#8a1f2d]" onChange={(event) => update("cardConditionDescriptorValueId", event.target.value as EbayCardConditionDescriptorValueId)} value={form.cardConditionDescriptorValueId}>
-                  <option value="400010">Near mint or better</option>
-                  <option value="400015">Lightly played (Excellent)</option>
-                  <option value="400016">Moderately played (Very good)</option>
-                  <option value="400017">Heavily played (Poor)</option>
+                  {cardConditionOptions.map((option) => <option key={option.ebayDescriptorValueId} value={option.ebayDescriptorValueId}>{option.label}</option>)}
                 </select>
                 <span className="text-xs font-medium text-zinc-500">Prefilled from your inventory quality.</span>
               </label>

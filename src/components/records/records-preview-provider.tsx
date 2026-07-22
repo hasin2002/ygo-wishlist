@@ -73,6 +73,17 @@ function readJson<T>(key: string): T | null {
   }
 }
 
+function normalizePreviewSnapshot(snapshot: RecordsSnapshot): RecordsSnapshot {
+  return {
+    ...snapshot,
+    copies: snapshot.copies.map((copy) => ({
+      ...copy,
+      location: copy.location ?? null,
+      stickerNumber: copy.stickerNumber ?? null,
+    })),
+  };
+}
+
 async function resolveTcgplayerProduct(url: string): Promise<ResolveProductResult> {
   try {
     const response = await fetch("/api/records/metadata", {
@@ -172,7 +183,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     const timeoutId = window.setTimeout(() => {
       const stored = readJson<StoredPreview>(recordsPreviewStorageKey);
       if (stored?.version === 1 && stored.snapshot?.version === 1) {
-        setSnapshot(stored.snapshot);
+        setSnapshot(normalizePreviewSnapshot(stored.snapshot));
         setDrafts(stored.drafts);
       }
       setHydrated(true);

@@ -42,6 +42,7 @@ import {
   recordImagePreviewsFor,
   type RecordImagePreview,
 } from "@/lib/records/record-images";
+import { cardConditionOptions, isCardCondition } from "@/lib/records/types";
 import type {
   CardAttentionUpdate,
   CardCopy,
@@ -1041,6 +1042,23 @@ function InventoryCardDetailContent({
     setMessage(result.message);
   }
 
+  async function saveCopyDetails(copyId: string, form: FormData) {
+    const condition = String(form.get("condition") || "");
+    if (!isCardCondition(condition)) {
+      setMessage("Choose a card condition before saving this Copy.");
+      return;
+    }
+    setSavingCopy(true);
+    const result = await source.updateCardCopy(copyId, {
+      condition,
+      location: String(form.get("location") || ""),
+      stickerNumber: String(form.get("stickerNumber") || ""),
+      privateNote: String(form.get("note") || ""),
+    });
+    setSavingCopy(false);
+    setMessage(result.ok ? "Copy details saved." : result.message);
+  }
+
   return (
     <div className="grid gap-5 sm:gap-6">
       <nav aria-label="Inventory breadcrumb">
@@ -1107,26 +1125,31 @@ function InventoryCardDetailContent({
                   <div className="md:hidden">
                     <label className="grid gap-1.5 text-sm font-bold" htmlFor="physical-copy-select">Choose a physical Copy</label>
                     <select className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-900 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" id="physical-copy-select" onChange={(event) => { router.replace(inventoryCardDetailHref(target.id, listState, event.currentTarget.value), { scroll: false }); setMessage(null); }} value={selectedDetail.copy.id}>
-                      {copyDetails.map(({ copy, printing }) => <option key={copy.id} value={copy.id}>{copyDisplayLabel(copies, copy.id)} · {printing.setCode || "Unknown set"} · {copy.condition}</option>)}
+                      {copyDetails.map(({ copy, printing }) => <option key={copy.id} value={copy.id}>{copyDisplayLabel(copies, copy.id)} · {printing.setCode || "Unknown set"} · {copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition}</option>)}
                     </select>
                   </div>
                 ) : null}
 
-                {copies.length > 1 ? <div aria-label="Choose a physical Copy" className="hidden content-start gap-2 md:grid" role="group">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; return <button aria-pressed={copy.id === selectedDetail.copy.id} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50 shadow-sm" : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"}`} key={copy.id} onClick={() => { router.replace(inventoryCardDetailHref(target.id, listState, copy.id), { scroll: false }); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.condition} · {copy.privateNote || "No note"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</div> : null}
+                {copies.length > 1 ? <div aria-label="Choose a physical Copy" className="hidden content-start gap-2 md:grid" role="group">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; return <button aria-pressed={copy.id === selectedDetail.copy.id} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50 shadow-sm" : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"}`} key={copy.id} onClick={() => { router.replace(inventoryCardDetailHref(target.id, listState, copy.id), { scroll: false }); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition} · {copy.location || copy.privateNote || "No location"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</div> : null}
 
                 <article className={`grid min-w-0 gap-4 ${copies.length > 1 ? "md:border-l md:border-zinc-200 md:pl-5" : "md:col-span-2"}`}>
                   <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2"><h4 className="text-lg font-black">{copyDisplayLabel(copies, selectedDetail.copy.id)}</h4><span className={`rounded px-2 py-0.5 text-xs font-bold ${selectedDetail.copy.status === "available" ? "bg-emerald-50 text-emerald-700" : selectedDetail.copy.status === "sold" ? "bg-zinc-100 text-zinc-700" : "bg-amber-50 text-amber-800"}`}>{selectedDetail.copy.status === "available" ? "Owned" : selectedDetail.copy.status.charAt(0).toUpperCase() + selectedDetail.copy.status.slice(1)}</span></div>
                       <p className="mt-1 break-words text-sm font-medium leading-5 text-zinc-500">Ref #{copyShortReference(selectedDetail.copy.id)} · {selectedDetail.printing.setCode || "Unknown code"} · {selectedDetail.printing.setName || "Unknown set"}</p>
+                      {selectedDetail.copy.stickerNumber || selectedDetail.copy.location ? <p className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-zinc-700">{selectedDetail.copy.stickerNumber ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">Sticker {selectedDetail.copy.stickerNumber}</span> : null}{selectedDetail.copy.location ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">{selectedDetail.copy.location}</span> : null}</p> : null}
                     </div>
                     {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end"><EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} printing={selectedDetail.printing} target={target} /><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button></div> : null}
                   </header>
 
-                  <form aria-labelledby={`copy-details-title-${selectedDetail.copy.id}`} className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setSavingCopy(true); void source.updateCardCopy(selectedDetail.copy.id, { condition: String(form.get("condition") || ""), privateNote: String(form.get("note") || "") }).then((result) => { setSavingCopy(false); setMessage(result.ok ? "Copy details saved." : result.message); }); }}>
-                    <div><h5 className="font-black" id={`copy-details-title-${selectedDetail.copy.id}`}>Copy details</h5><p className="mt-1 text-xs font-medium leading-5 text-zinc-500">Keep the condition and your private notes up to date.</p></div>
-                    <label className="grid gap-1.5 text-sm font-bold">Condition<input className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.condition} name="condition" /></label>
-                    <label className="grid gap-1.5 text-sm font-bold">Private note<textarea className="min-h-24 resize-y rounded-md border border-zinc-300 bg-white p-3 font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.privateNote} name="note" /></label>
+                  <form aria-labelledby={`copy-details-title-${selectedDetail.copy.id}`} className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }}>
+                    <div><h5 className="font-black" id={`copy-details-title-${selectedDetail.copy.id}`}>Copy details</h5><p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Record how this Copy looks and where to find it in your physical collection.</p></div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="grid content-start gap-1.5 text-sm font-bold">Condition<select className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={isCardCondition(selectedDetail.copy.condition) ? selectedDetail.copy.condition : ""} name="condition" required>{!isCardCondition(selectedDetail.copy.condition) ? <option disabled value="">Choose a condition (currently {selectedDetail.copy.condition})</option> : null}{cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><span className="text-xs font-medium leading-5 text-zinc-500">Uses the same grading choices as the eBay listing form.</span></label>
+                      <label className="grid content-start gap-1.5 text-sm font-bold">Sticker number<input aria-describedby={`sticker-number-help-${selectedDetail.copy.id}`} className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium tabular-nums focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.stickerNumber ?? ""} inputMode="numeric" maxLength={20} name="stickerNumber" pattern="[0-9]*" placeholder="e.g. 00042" /><span className="text-xs font-medium leading-5 text-zinc-500" id={`sticker-number-help-${selectedDetail.copy.id}`}>Optional, digits only, and unique to this collection. Leading zeroes are kept.</span></label>
+                      <label className="grid gap-1.5 text-sm font-bold sm:col-span-2">Card location<input aria-describedby={`card-location-help-${selectedDetail.copy.id}`} className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.location ?? ""} maxLength={160} name="location" placeholder="e.g. Binder 2 · Page 7 · Slot 3" /><span className="text-xs font-medium leading-5 text-zinc-500" id={`card-location-help-${selectedDetail.copy.id}`}>Optional. Use whatever location format matches how you store your cards.</span></label>
+                    </div>
+                    <label className="grid gap-1.5 text-sm font-bold">Private note<textarea className="min-h-24 resize-y rounded-md border border-zinc-300 bg-white p-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.privateNote} maxLength={1_000} name="note" /></label>
                     <button className="min-h-11 w-full rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#741a26] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto sm:justify-self-start" disabled={savingCopy} type="submit">{savingCopy ? "Saving…" : "Save copy details"}</button>
                   </form>
 
