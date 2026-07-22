@@ -1,0 +1,58 @@
+export type InventoryListState = {
+  card: string;
+  edition: string;
+  kind: "cards" | "sealed" | "bulk" | "supplies";
+  page: number;
+  rarity: string;
+  status: "all" | "wishlist" | "owned";
+};
+
+export const defaultInventoryListState: InventoryListState = {
+  card: "",
+  edition: "all",
+  kind: "cards",
+  page: 1,
+  rarity: "all",
+  status: "all",
+};
+
+function positiveInteger(value: string | null) {
+  if (!value || !/^[1-9]\d*$/.test(value)) return 1;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function parseInventoryListState(searchParams: URLSearchParams): InventoryListState {
+  const kind = searchParams.get("kind");
+  const status = searchParams.get("status");
+
+  return {
+    card: searchParams.get("card") ?? "",
+    edition: searchParams.get("edition") || "all",
+    kind: kind === "sealed" || kind === "bulk" || kind === "supplies" ? kind : "cards",
+    page: positiveInteger(searchParams.get("page")),
+    rarity: searchParams.get("rarity") || "all",
+    status: status === "wishlist" || status === "owned" ? status : "all",
+  };
+}
+
+export function serializeInventoryListState(state: InventoryListState) {
+  const searchParams = new URLSearchParams();
+  searchParams.set("kind", state.kind);
+  if (state.card) searchParams.set("card", state.card);
+  if (state.status !== "all") searchParams.set("status", state.status);
+  if (state.rarity !== "all") searchParams.set("rarity", state.rarity);
+  if (state.edition !== "all") searchParams.set("edition", state.edition);
+  if (state.page > 1) searchParams.set("page", String(state.page));
+  return searchParams;
+}
+
+export function inventoryListHref(state: InventoryListState) {
+  return `/records/inventory?${serializeInventoryListState(state).toString()}`;
+}
+
+export function inventoryCardDetailHref(targetId: string, state: InventoryListState, copyId?: string | null) {
+  const searchParams = serializeInventoryListState({ ...state, kind: "cards" });
+  if (copyId) searchParams.set("copy", copyId);
+  return `/records/inventory/cards/${encodeURIComponent(targetId)}?${searchParams.toString()}`;
+}
