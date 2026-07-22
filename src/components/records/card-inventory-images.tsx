@@ -112,7 +112,7 @@ export function CardInventoryImages({
   const changing = uploading || reordering || Boolean(removingKey);
 
   return (
-    <section aria-labelledby={`card-images-title-${copyId}`} className="border-t border-zinc-200 bg-zinc-50 px-4 py-3">
+    <section aria-labelledby={`card-images-title-${copyId}`} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h5 className="font-black" id={`card-images-title-${copyId}`}>Card photos</h5>
