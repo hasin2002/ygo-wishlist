@@ -4,19 +4,20 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# Concurrent Chat and Git Worktree Safety
+# Concurrent Chat and Git Workspace Safety
 
 - Assume other chats or agents may be working on this repository at the same time.
 - Before changing files, run `pwd`, `git status --short --branch`, and `git worktree list` to identify the current folder, branch, and active worktrees.
-- Each independent implementation task must use its own dedicated Git worktree and its own `agent/<short-task-name>` branch.
-- A branch name such as `agent/search-filters` is not a worktree. The worktree is the separate checkout folder associated with that branch.
-- Create task worktrees as sibling folders when practical, for example: `git worktree add ../ygo-wishlist-search-filters -b agent/search-filters main`.
-- After creating a task worktree, perform all edits, tests, commits, and development-server work from that worktree only.
-- Never switch branches in an existing worktree merely to start a different task. Another chat may still be using that folder.
-- Never edit files in, repurpose, or remove another task's worktree.
+- Every implementation task must use a focused `agent/<short-task-name>` branch. Never implement directly on `main`.
+- For a single active task in a clean checkout that is clearly associated with the current chat, create or switch to the task branch in that checkout. This is the default workflow.
+- Create a separate Git worktree only when concurrent tasks need different branches checked out at the same time, the current checkout is dirty or belongs to another active task, or the user explicitly requests a worktree.
+- A branch name such as `agent/search-filters` is not a worktree. A worktree is an additional checkout folder and should not be created without one of the reasons above.
+- Before switching branches in an existing checkout, confirm it is clean and is not being used by another active chat or task. If ownership is unclear, stop and ask the user.
 - Before creating a worktree, inspect `git worktree list` and confirm that the intended branch and folder are not already in use.
-- If the current folder has uncommitted changes, is on an unexpected branch, or cannot be clearly associated with this chat's task, stop before editing and ask the user which worktree to use.
-- If creating or accessing a separate worktree is not possible, explain the limitation and ask the user for direction instead of switching branches in the shared checkout.
+- When a worktree is necessary, create it as a sibling folder when practical, for example: `git worktree add ../ygo-wishlist-search-filters -b agent/search-filters main`.
+- After creating a task worktree, perform all edits, tests, commits, and development-server work for that task from that worktree only.
+- Never edit files in, repurpose, switch branches in, or remove a worktree that belongs to another active task.
+- If the current checkout is dirty, on an unexpected branch, or cannot be clearly associated with this chat's task, preserve the existing work and ask the user which checkout or worktree to use.
 
 # Git Workflow Rules
 
@@ -42,8 +43,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - manual test steps the user can follow
   - risks, dependencies, migration concerns, and rollback notes where relevant
 - Do not begin implementation merely because the issue exists. Wait until the user approves the issue and asks for implementation.
-- Implement the approved issue in a new dedicated worktree and branch. Reference the issue in the branch work and later pull request.
-- A new implementation chat or agent may perform the work, but the Git worktree and branch provide the isolation; spawning a subagent alone does not.
+- Implement the approved issue in a dedicated task branch. Use the current clean checkout by default; create a separate worktree only when required by the concurrent-work rules above. Reference the issue in the branch work and later pull request.
+- A new implementation chat or agent may perform the work, but the task branch provides the baseline isolation. Use a worktree as additional isolation only when multiple branches must remain checked out concurrently.
 - When implementation is ready, explain what changed, what checks passed, and exactly what the user should manually test.
 - Open a pull request only after the user approves the implemented behaviour. A draft pull request may be opened earlier only when the user explicitly requests it, for example to run PR-only CI checks.
 - Creating or approving a pull request does not authorize merging it. Merge only after separate explicit user approval.
