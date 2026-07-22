@@ -48,6 +48,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Open a pull request only after the user approves the implemented behaviour. A draft pull request may be opened earlier only when the user explicitly requests it, for example to run PR-only CI checks.
 - Creating or approving a pull request does not authorize merging it. Merge only after separate explicit user approval.
 
+# GitHub Authentication Diagnostics
+
+- Do not conclude that GitHub credentials are expired or invalid from a single failed authentication check in a restricted or sandboxed environment.
+- A restricted environment may be unable to access the operating-system keyring or GitHub network endpoints even when the user's credentials are valid.
+- If `gh auth status -h github.com` fails under restrictions, retry it with normal host keyring and network access when permission is available before asking the user to re-authenticate.
+- Distinguish GitHub CLI/API authentication from Git transport authentication. Check the relevant path with safe commands such as `gh auth status -h github.com`, `gh api user`, or `git ls-remote origin HEAD`.
+- When available, the connected GitHub app may be used as an independent authentication check or as an alternative for supported GitHub operations.
+- Never display, log, or request the user's raw authentication token. Do not run commands that print token values merely to diagnose access.
+- Ask the user to run `gh auth login` only after authentication still fails with normal keyring and network access, or when the required permission cannot be requested safely.
+- When reporting an authentication problem, state which check failed and whether it ran in a restricted environment so the user is not given a misleading diagnosis.
+
 # Approval Communication
 
 - When asking for approval, explain the changes in plain English.
