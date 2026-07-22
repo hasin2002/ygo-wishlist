@@ -1241,10 +1241,25 @@ function InventoryView() {
   }, [snapshot.copies, snapshot.printings, snapshot.targets]);
   const rarityOptions = Array.from(new Set(snapshot.targets.map((target) => target.rarity))).sort();
   const editionOptions = Array.from(new Set(snapshot.targets.map((target) => target.edition))).sort();
-  const filteredTargets = inventoryCards.filter(({ libraryStatus, target }) => {
+  const activeCopyCountByName = useMemo(() => {
+    const copyCounts = new Map<string, number>();
+
+    for (const { copies, target } of inventoryCards) {
+      const name = target.name.trim().toLocaleLowerCase("en-GB");
+      const activeCopyCount = copies.filter((copy) => copy.status !== "void").length;
+      if (!name || activeCopyCount === 0) continue;
+      copyCounts.set(name, (copyCounts.get(name) ?? 0) + activeCopyCount);
+    }
+
+    return copyCounts;
+  }, [inventoryCards]);
+  const filteredTargets = inventoryCards.filter(({ copies, libraryStatus, target }) => {
     const search = listState.card.trim().toLocaleLowerCase("en-GB");
+    const normalizedName = target.name.trim().toLocaleLowerCase("en-GB");
+    const hasActiveCopy = copies.some((copy) => copy.status !== "void");
     return (
       (listState.status === "all" || libraryStatus.status === listState.status)
+      && (listState.copyQuantity !== "multiple" || (hasActiveCopy && (activeCopyCountByName.get(normalizedName) ?? 0) > 1))
       && (listState.rarity === "all" || target.rarity === listState.rarity)
       && (listState.edition === "all" || target.edition === listState.edition)
       && (!search || [target.name, target.rarity, target.edition].join(" ").toLocaleLowerCase("en-GB").includes(search))
@@ -1294,6 +1309,7 @@ function InventoryView() {
               <input className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => updateListState({ card: event.target.value, page: 1 })} placeholder="Search cards, rarity, or edition" value={listState.card} />
             </label>
             <div className="flex flex-wrap gap-2">
+              <select aria-label="Filter inventory by copy quantity" className="h-11 min-w-48 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => updateListState({ copyQuantity: event.target.value as InventoryListState["copyQuantity"], page: 1 })} value={listState.copyQuantity}><option value="all">All copy quantities</option><option value="multiple">2+ copies (same name)</option></select>
               <select aria-label="Filter inventory by rarity" className="h-11 min-w-40 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => updateListState({ page: 1, rarity: event.target.value })} value={listState.rarity}><option value="all">All rarities</option>{rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}</select>
               <select aria-label="Filter inventory by edition" className="h-11 min-w-40 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => updateListState({ edition: event.target.value, page: 1 })} value={listState.edition}><option value="all">All editions</option>{editionOptions.map((edition) => <option key={edition} value={edition}>{edition}</option>)}</select>
               <p className="flex min-h-11 items-center text-sm font-bold text-zinc-500">{filteredTargets.length} card target{filteredTargets.length === 1 ? "" : "s"}</p>
