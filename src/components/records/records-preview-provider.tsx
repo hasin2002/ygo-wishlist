@@ -18,9 +18,11 @@ import {
   deleteWishlistTarget,
   replaceRecordCards,
   replaceSaleCopies,
+  removeCardCopy,
   resolveCardAttention,
   updateRecordLine,
   updateRecordDetails,
+  updateCardCopy,
   type LegacyCard,
 } from "@/lib/records/preview-data";
 import {
@@ -28,6 +30,7 @@ import {
   recordsPreviewStorageKey,
   type DataSourceResult,
   type CardAttentionUpdate,
+  type CardCopyUpdate,
   type LibraryCardSuggestion,
   type RecordsDataSource,
   type RecordsDrafts,
@@ -217,6 +220,8 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     resolveCardAttention: (update: CardAttentionUpdate) => withSnapshot((current) => resolveCardAttention(current, update)),
     replaceRecordCards: (recordId, cards) => withSnapshot((current) => replaceRecordCards(current, recordId, cards)),
     replaceSaleCopies: (recordId, copyIds) => withSnapshot((current) => replaceSaleCopies(current, recordId, copyIds)),
+    updateCardCopy: (copyId, update: CardCopyUpdate) => withSnapshot((current) => updateCardCopy(current, copyId, update)),
+    removeCardCopy: (copyId) => withSnapshot((current) => removeCardCopy(current, copyId)),
     updateRecordLine: (recordId, lineId, update) => withSnapshot((current) => updateRecordLine(current, recordId, lineId, update)),
     deleteWishlistTarget: (targetId) => withSnapshot((current) => deleteWishlistTarget(current, targetId)),
     voidRecord: (recordId) => withSnapshot((current) => changeRecordStatus(current, recordId, "void")),
@@ -259,6 +264,8 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
   const resolveAttention = trpc.records.resolveCardAttention.useMutation();
   const replaceCards = trpc.records.replaceRecordCards.useMutation();
   const replaceCopies = trpc.records.replaceSaleCopies.useMutation();
+  const updateCopy = trpc.records.updateCardCopy.useMutation();
+  const removeCopy = trpc.records.removeCardCopy.useMutation();
   const updateLine = trpc.records.updateRecordLine.useMutation();
   const changeStatus = trpc.records.changeStatus.useMutation();
   const deleteWishlistTarget = trpc.library.delete.useMutation();
@@ -334,6 +341,8 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
       recordId,
       (expectedRevision) => replaceCopies.mutateAsync({ recordId, expectedRevision, copyIds }),
     ),
+    updateCardCopy: async (copyId, update) => { try { const result = await updateCopy.mutateAsync({ copyId, update }); await utils.records.snapshot.invalidate(); return { ok: true, id: result.id }; } catch (error) { return errorResult(error); } },
+    removeCardCopy: async (copyId) => { try { const result = await removeCopy.mutateAsync({ copyId }); await utils.records.snapshot.invalidate(); return { ok: true, id: result.id }; } catch (error) { return errorResult(error); } },
     updateRecordLine: (recordId, lineId, update) => withRevision(
       recordId,
       (expectedRevision) => updateLine.mutateAsync({ recordId, expectedRevision, lineId, update }),
@@ -387,6 +396,8 @@ const loadingValue: RecordsDataSource = {
   resolveCardAttention: async () => ({ ok: false, message: "Records are still loading." }),
   replaceRecordCards: async () => ({ ok: false, message: "Records are still loading." }),
   replaceSaleCopies: async () => ({ ok: false, message: "Records are still loading." }),
+  updateCardCopy: async () => ({ ok: false, message: "Records are still loading." }),
+  removeCardCopy: async () => ({ ok: false, message: "Records are still loading." }),
   updateRecordLine: async () => ({ ok: false, message: "Records are still loading." }),
   deleteWishlistTarget: async () => ({ ok: false, message: "Records are still loading." }),
   voidRecord: async () => ({ ok: false, message: "Records are still loading." }),

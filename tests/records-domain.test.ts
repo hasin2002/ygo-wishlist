@@ -3,7 +3,71 @@ import test from "node:test";
 import { allocatePence, allocatePenceAt } from "../src/lib/records/allocation.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
+import { removeCardCopy, replaceRecordCards, updateCardCopy } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
+
+function twoCopyPurchase(): RecordsSnapshot {
+  return {
+    version: 1,
+    records: [{
+      id: "record-purchase",
+      type: "purchase",
+      status: "active",
+      date: "2026-07-20",
+      title: "Two copies",
+      source: "eBay",
+      listingUrl: null,
+      amountPence: 101,
+      notes: "",
+      revision: 1,
+      createdAt: "2026-07-20T12:00:00.000Z",
+      lines: [{
+        id: "line-card",
+        kind: "card",
+        name: "Ash Blossom & Joyous Spring",
+        quantity: 2,
+        allocationPence: 101,
+        entityIds: ["copy-one", "copy-two"],
+        detail: "RA01-EN008 · 1st Edition · Super Rare",
+      }],
+    }],
+    targets: [{
+      id: "target-ash",
+      name: "Ash Blossom & Joyous Spring",
+      rarity: "Super Rare",
+      edition: "1st Edition",
+      desiredQuantity: 2,
+      imageUrl: null,
+      tcgplayerUrl: "https://www.tcgplayer.com/product/1/example",
+      marketPricePence: null,
+    }],
+    printings: [{
+      id: "printing-ash",
+      targetId: "target-ash",
+      setName: "25th Anniversary Rarity Collection",
+      setCode: "RA01-EN008",
+      tcgplayerUrl: "https://www.tcgplayer.com/product/1/example",
+      imageUrl: null,
+    }],
+    copies: ["one", "two"].map((suffix, index) => ({
+      id: `copy-${suffix}`,
+      printingId: "printing-ash",
+      acquiredRecordId: "record-purchase",
+      soldRecordId: null,
+      bulkLotId: null,
+      allocationIndex: null,
+      allocationPence: index === 0 ? 51 : 50,
+      status: "available" as const,
+      condition: "Near Mint",
+      privateNote: "",
+      createdAt: `2026-07-20T12:00:0${index}.000Z`,
+    })),
+    sealedUnits: [],
+    bulkLots: [],
+    supplies: [],
+    attention: [],
+  };
+}
 
 test("bulk allocation uses the full lot quantity, not only identified cards", () => {
   assert.equal(allocatePenceAt(2_000, 10, 0), 200);
@@ -21,6 +85,46 @@ test("later itemization uses stable allocation indexes", () => {
   const later = [2, 3, 4].map((index) => allocatePenceAt(1_003, 10, index));
   assert.deepEqual(initial, [101, 101]);
   assert.deepEqual(later, [101, 100, 100]);
+});
+
+test("removing a physical Copy removes that exact Copy and rebases its purchase allocation", () => {
+  const result = removeCardCopy(twoCopyPurchase(), "copy-two");
+  assert.equal(result.result.ok, true);
+  assert.deepEqual(result.next.copies.map((copy) => copy.id), ["copy-one"]);
+  assert.equal(result.next.copies[0]?.allocationPence, 101);
+  assert.deepEqual(result.next.records[0]?.lines[0]?.entityIds, ["copy-one"]);
+  assert.equal(result.next.records[0]?.lines[0]?.quantity, 1);
+});
+
+test("copy details are edited independently", () => {
+  const result = updateCardCopy(twoCopyPurchase(), "copy-two", {
+    condition: "Lightly Played",
+    privateNote: "Small mark on the back",
+  });
+  assert.equal(result.result.ok, true);
+  assert.equal(result.next.copies[0]?.condition, "Near Mint");
+  assert.equal(result.next.copies[1]?.condition, "Lightly Played");
+  assert.equal(result.next.copies[1]?.privateNote, "Small mark on the back");
+});
+
+test("source-record editing cannot implicitly remove an arbitrary physical Copy", () => {
+  const snapshot = twoCopyPurchase();
+  const result = replaceRecordCards(snapshot, "record-purchase", [{
+    id: "line-card",
+    selectedTargetId: "target-ash",
+    tcgplayerUrl: "https://www.tcgplayer.com/product/1/example",
+    name: "Ash Blossom & Joyous Spring",
+    imageUrl: null,
+    edition: "1st Edition",
+    rarity: "Super Rare",
+    setName: "25th Anniversary Rarity Collection",
+    setCode: "RA01-EN008",
+    metadataNeedsAttention: false,
+    quantity: 1,
+  }]);
+  assert.equal(result.result.ok, false);
+  if (!result.result.ok) assert.match(result.result.message, /exact physical Copy/i);
+  assert.equal(result.next.copies.length, 2);
 });
 
 test("Library status is computed from wanted and available Copy quantities", () => {
@@ -90,8 +194,10 @@ test("pack-opening records use the opened product image instead of pulled card i
       bulkLotId: null,
       allocationIndex: null,
       allocationPence: null,
-      status: "available",
-      condition: "Near Mint",
+    status: "available",
+    condition: "Near Mint",
+    privateNote: "",
+    createdAt: "2026-07-01T00:00:00.000Z",
     }],
     sealedUnits: [{
       id: "sealed-set",

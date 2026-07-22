@@ -20,10 +20,13 @@
     "db:studio:sqlite": "drizzle-kit studio --config drizzle.sqlite.config.ts",
     "records:migrate:dry-run": "node scripts/migrate-library-records.mjs",
     "records:migrate:apply": "node scripts/migrate-library-records.mjs --apply",
+    "inventory-images:backfill:dry-run": "node scripts/backfill-card-copy-images.mjs",
+    "inventory-images:backfill:apply": "node scripts/backfill-card-copy-images.mjs --apply",
     "wishlist:seed-json": "node scripts/seed-wishlist-from-combined-json.mjs",
     "wishlist:backfill-types": "node scripts/backfill-unified-card-types.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1092.0",
     "@better-auth/drizzle-adapter": "^1.6.23",
     "@tanstack/query-sync-storage-persister": "^5.101.2",
     "@tanstack/react-query": "^5.100.14",
@@ -54,6 +57,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "react-grab": "^0.1.48",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

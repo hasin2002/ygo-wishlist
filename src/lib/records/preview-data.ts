@@ -14,9 +14,9 @@ import type {
   RecordsSnapshot,
   SaleInput,
   WishlistTarget,
-} from "@/lib/records/types";
-import { allocatePenceAt } from "@/lib/records/allocation";
-import { compactRecordName, generatedSaleRecordName } from "@/lib/records/record-name";
+} from "./types.ts";
+import { allocatePenceAt } from "./allocation.ts";
+import { compactRecordName, generatedSaleRecordName } from "./record-name.ts";
 
 export type LegacyCard = {
   id: number;
@@ -294,7 +294,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: null,
         allocationPence: 2100,
         status: "available",
-        condition: "Near Mint",
+        condition: "Near Mint", privateNote: "", createdAt: "2026-07-12T18:20:00.000Z",
       },
       {
         id: "copy-preview-dark-2",
@@ -305,7 +305,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: null,
         allocationPence: 2100,
         status: "available",
-        condition: "Near Mint",
+        condition: "Near Mint", privateNote: "", createdAt: "2026-07-12T18:20:01.000Z",
       },
       {
         id: "copy-preview-blue-eyes",
@@ -316,7 +316,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: null,
         allocationPence: null,
         status: "available",
-        condition: "Lightly Played",
+        condition: "Lightly Played", privateNote: "", createdAt: "2026-07-13T19:15:00.000Z",
       },
       {
         id: "copy-preview-ash",
@@ -327,7 +327,7 @@ function seededSnapshot(): RecordsSnapshot {
         allocationIndex: 0,
         allocationPence: 22,
         status: "sold",
-        condition: "Near Mint",
+        condition: "Near Mint", privateNote: "", createdAt: "2026-07-15T17:40:00.000Z",
       },
     ],
     sealedUnits: [
@@ -465,7 +465,7 @@ export function createPreviewSnapshot(legacyCards: LegacyCard[]): RecordsSnapsho
         allocationIndex: null,
         allocationPence: paidPence,
         status: "available",
-        condition: "Unknown",
+        condition: "Unknown", privateNote: "", createdAt: card.createdAt,
       });
       snapshot.records.push({
         id: recordId,
@@ -673,7 +673,7 @@ function addCopies(
       allocationIndex: allocation?.indexes[index] ?? null,
       allocationPence: allocation?.values[index] ?? null,
       status: "available",
-      condition: "Near Mint",
+      condition: "Near Mint", privateNote: "", createdAt: nowIso(),
     });
   }
 
@@ -1010,6 +1010,12 @@ export function replaceRecordCards(snapshot: RecordsSnapshot, recordId: string, 
   }
 
   const retainedIds = new Set(cards.map((card) => card.id));
+  for (const line of existingLines) {
+    const requested = cards.find((card) => card.id === line.id);
+    if (!requested || requested.quantity < line.entityIds.length) {
+      return { next: snapshot, result: { ok: false, message: "Choose the exact physical Copy from Manage copies instead of reducing this source quantity." } satisfies DataSourceResult };
+    }
+  }
   for (const line of existingLines.filter((item) => !retainedIds.has(item.id))) {
     const copies = next.copies.filter((copy) => line.entityIds.includes(copy.id));
     if (copies.some((copy) => copy.soldRecordId)) {
@@ -1147,6 +1153,55 @@ export function replaceSaleCopies(snapshot: RecordsSnapshot, recordId: string, c
   }
   record.revision += 1;
   return { next, result: { ok: true, id: record.id } satisfies DataSourceResult };
+}
+
+export function updateCardCopy(snapshot: RecordsSnapshot, copyId: string, update: { condition: string; privateNote: string }) {
+  const next = clone(snapshot);
+  const copy = next.copies.find((item) => item.id === copyId);
+  if (!copy) return { next: snapshot, result: { ok: false, message: "Physical Copy not found." } satisfies DataSourceResult };
+  copy.condition = update.condition;
+  copy.privateNote = update.privateNote;
+  return { next, result: { ok: true, id: copyId } satisfies DataSourceResult };
+}
+
+export function removeCardCopy(snapshot: RecordsSnapshot, copyId: string) {
+  const next = clone(snapshot);
+  const copy = next.copies.find((item) => item.id === copyId);
+  if (!copy) return { next: snapshot, result: { ok: false, message: "Physical Copy not found." } satisfies DataSourceResult };
+  if (copy.status !== "available") return { next: snapshot, result: { ok: false, message: copy.status === "sold" ? "Edit the Sale before removing this Copy." : "Restore the source Record before removing this Copy." } satisfies DataSourceResult };
+  const record = next.records.find((item) => item.id === copy.acquiredRecordId);
+  const line = record?.lines.find((item) => item.entityIds.includes(copyId));
+  if (!record || !line) return { next: snapshot, result: { ok: false, message: "The source Record is unavailable." } satisfies DataSourceResult };
+  next.copies = next.copies.filter((item) => item.id !== copyId);
+  if (copy.bulkLotId) {
+    const lot = next.bulkLots.find((item) => item.id === copy.bulkLotId);
+    if (!lot) return { next: snapshot, result: { ok: false, message: "The source Bulk Lot is unavailable." } satisfies DataSourceResult };
+    lot.itemizedQuantity = next.copies.filter((item) => item.bulkLotId === lot.id).length;
+    lot.status = lot.itemizedQuantity >= lot.totalQuantity ? "itemized" : "open";
+    const bulkLine = record.lines.find((item) => item.kind === "bulk" && item.entityIds.includes(lot.id));
+    if (bulkLine) bulkLine.detail = `${lot.itemizedQuantity} identified of ${lot.totalQuantity} total cards`;
+  }
+  if (line.quantity <= 1) {
+    record.lines = record.lines.filter((item) => item.id !== line.id);
+    if (!record.lines.length) record.status = "void";
+  } else {
+    line.quantity -= 1;
+    line.entityIds = line.entityIds.filter((id) => id !== copyId);
+    const remainingCopies = line.entityIds.flatMap((id) => {
+      const item = next.copies.find((candidate) => candidate.id === id);
+      return item ? [item] : [];
+    });
+    if (copy.bulkLotId) {
+      line.allocationPence = remainingCopies.reduce((sum, item) => sum + (item.allocationPence ?? 0), 0);
+    } else if (record.type === "purchase") {
+      line.allocationPence = record.amountPence;
+      for (const [index, item] of remainingCopies.entries()) {
+        item.allocationPence = allocatePenceAt(record.amountPence, remainingCopies.length, index);
+      }
+    }
+  }
+  record.revision += 1;
+  return { next, result: { ok: true, id: copyId } satisfies DataSourceResult };
 }
 
 export function updateRecordLine(snapshot: RecordsSnapshot, recordId: string, lineId: string, update: RecordLineUpdate) {

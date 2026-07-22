@@ -6,7 +6,6 @@ import { AppHeader } from "@/components/app-header";
 import {
   PreviewBanner,
   RecordsApp,
-  RecordsNavigation,
   type RecordsView,
 } from "@/components/records/records-app";
 import { RecordsContentLoading } from "@/components/records/records-loading-screen";
@@ -25,7 +24,6 @@ export function RecordsWorkspace({ children }: { children: React.ReactNode }) {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <AppHeader eyebrow="Private collection records" title="Records" />
         <PreviewBanner />
-        <RecordsNavigation view={viewForPathname(pathname)} />
         <Suspense fallback={<RecordsContentLoading />}>
           <RecordsApp view={viewForPathname(pathname)} />
         </Suspense>

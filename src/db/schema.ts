@@ -128,6 +128,26 @@ export const authRateLimits = pgTable(
   (table) => [uniqueIndex("auth_rate_limits_key_unique").on(table.key)],
 );
 
+/**
+ * A seller connection is deliberately separate from Better Auth's `accounts`
+ * table. The latter belongs to the site's sign-in system; this table holds the
+ * eBay consent needed to act on a seller account.
+ */
+export const ebayConnections = pgTable("ebay_connections", {
+  ownerId: text("owner_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  refreshTokenCiphertext: text("refresh_token_ciphertext").notNull(),
+  refreshTokenIv: text("refresh_token_iv").notNull(),
+  refreshTokenTag: text("refresh_token_tag").notNull(),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+    mode: "date",
+  }).notNull(),
+  scopes: text("scopes").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+});
+
 export const cards = pgTable("cards", {
   id: serial("id").primaryKey(),
   ownerId: text("owner_id").references(() => users.id, { onDelete: "cascade" }),
@@ -425,6 +445,7 @@ export const cardCopies = pgTable(
       .notNull()
       .default("available"),
     condition: text("condition").notNull().default("Near Mint"),
+    privateNote: text("private_note").notNull().default(""),
     createdAt: timestamp("created_at", { mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
@@ -446,6 +467,56 @@ export const cardCopies = pgTable(
       "card_copies_allocation_nonnegative",
       sql`${table.allocationPence} is null or ${table.allocationPence} >= 0`,
     ),
+  ],
+);
+
+/** Private image index for a physical Copy. Image bytes remain in S3. */
+export const cardCopyImages = pgTable(
+  "card_copy_images",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    copyId: text("copy_id").notNull().references(() => cardCopies.id, { onDelete: "cascade" }),
+    objectKey: text("object_key").notNull(),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("card_copy_images_object_key_unique").on(table.objectKey),
+    uniqueIndex("card_copy_images_copy_position_unique").on(table.copyId, table.position),
+    index("card_copy_images_owner_copy_idx").on(table.ownerId, table.copyId),
+    check("card_copy_images_position_nonnegative", sql`${table.position} >= 0`),
+  ],
+);
+
+/**
+ * A published eBay item is linked to the physical Copy it represents. A Copy
+ * stays available until a Sale record is created; listing it must not imply it
+ * has been sold.
+ */
+export const ebayListings = pgTable(
+  "ebay_listings",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    copyId: text("copy_id")
+      .notNull()
+      .references(() => cardCopies.id, { onDelete: "restrict" }),
+    itemId: text("item_id").notNull(),
+    listingUrl: text("listing_url").notNull(),
+    title: text("title").notNull(),
+    status: text("status", { enum: ["active", "ended"] })
+      .notNull()
+      .default("active"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_listings_item_id_unique").on(table.itemId),
+    index("ebay_listings_owner_copy_idx").on(table.ownerId, table.copyId),
+    index("ebay_listings_owner_status_idx").on(table.ownerId, table.status),
   ],
 );
 
@@ -640,4 +711,5 @@ export type SupplyItemRow = typeof supplyItems.$inferSelect;
 export type TargetBinderSlotRow = typeof targetBinderSlots.$inferSelect;
 export type TargetWheelEntryRow = typeof targetWheelEntries.$inferSelect;
 export type TargetMonthlyFavoriteRow = typeof targetMonthlyFavorites.$inferSelect;
+export type EbayListingRow = typeof ebayListings.$inferSelect;
 export type User = typeof users.$inferSelect;

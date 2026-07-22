@@ -26,6 +26,7 @@ export type WishlistTarget = {
   desiredQuantity: number;
   imageUrl: string | null;
   tcgplayerUrl: string | null;
+  estimatedPricePence?: number | null;
   marketPricePence: number | null;
   legacyCardId?: number;
 };
@@ -49,6 +50,8 @@ export type CardCopy = {
   allocationPence: number | null;
   status: "available" | "sold" | "void";
   condition: string;
+  privateNote: string;
+  createdAt: string;
 };
 
 export type RecordLine = {
@@ -216,6 +219,7 @@ export type CardAttentionUpdate = {
   setCode: string;
   imageUrl: string | null;
 };
+export type CardCopyUpdate = { condition: string; privateNote: string };
 export type RecordLineUpdate = {
   name: string;
   quantity: number;
@@ -255,6 +259,8 @@ export type RecordsDataSource = {
   resolveCardAttention: (update: CardAttentionUpdate) => Promise<DataSourceResult>;
   replaceRecordCards: (recordId: string, cards: CardContentsInput[]) => Promise<DataSourceResult>;
   replaceSaleCopies: (recordId: string, copyIds: string[]) => Promise<DataSourceResult>;
+  updateCardCopy: (copyId: string, update: CardCopyUpdate) => Promise<DataSourceResult>;
+  removeCardCopy: (copyId: string) => Promise<DataSourceResult>;
   updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate) => Promise<DataSourceResult>;
   deleteWishlistTarget: (targetId: string) => Promise<DataSourceResult>;
   voidRecord: (recordId: string) => Promise<DataSourceResult>;

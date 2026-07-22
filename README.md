@@ -42,9 +42,40 @@ DATABASE_URL=postgres://...
 EBAY_CLIENT_ID=...
 EBAY_CLIENT_SECRET=...
 EBAY_MARKETPLACE_ID=EBAY_GB
+# Required only for the eBay seller connection/listing workflow.
+# This is the Production OAuth-enabled RuName (not the callback URL itself).
+EBAY_OAUTH_RU_NAME=...
+# Optional development RuName whose accepted URL is eBay's standard success page.
+EBAY_OAUTH_LOCAL_RU_NAME=...
 BETTER_AUTH_SECRET=<a new random secret>
 BETTER_AUTH_URL=https://your-site.example
 ```
+
+## eBay seller connection
+
+The existing Collection Hub username/password sign-in remains independent from
+eBay. Only an administrator can open `/ebay`, connect a seller account, or
+create a listing from a physical Copy in Records → Inventory.
+
+To enable the connection:
+
+1. In the eBay developer portal, create a **Production OAuth-enabled RuName**.
+   Its Accept URL must be `https://<your-production-domain>/api/ebay/callback`.
+   For local HTTP testing, create a second RuName that uses eBay's standard
+   success page and set it as `EBAY_OAUTH_LOCAL_RU_NAME`. After consent, paste
+   that page's full URL into the development-only completion form.
+2. Add its RuName value to `EBAY_OAUTH_RU_NAME`, alongside the existing
+   `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET`, in the production environment.
+3. Apply the new schema using `npm run db:push` only when you are ready to make
+   the database change, then deploy.
+4. Sign into the site as an administrator, open `/ebay`, and select **Connect
+   eBay**. eBay will request the `sell.inventory` permission. Then open a
+   physical Copy in Records → Inventory and select **Sell on eBay**.
+
+The app never stores the short-lived access token. It encrypts the eBay refresh
+token in the database using the existing server-only `BETTER_AUTH_SECRET` and
+obtains access tokens on demand. Do not paste a manually generated eBay token
+into environment files or source code.
 
 Before deploying a fresh database, create/update the tables:
 

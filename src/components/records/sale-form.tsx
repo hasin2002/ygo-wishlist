@@ -29,6 +29,7 @@ import {
 } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { generatedSaleRecordName } from "@/lib/records/record-name";
+import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
 import type {
   CardCopy,
   CardPrinting,
@@ -57,6 +58,11 @@ type AvailableCopy = {
   imageUrl: string | null;
 };
 
+type CopyPhotoSummary = {
+  count: number;
+  primary: { key: string; previewUrl: string } | null;
+};
+
 type LibraryImpact = {
   after: number;
   before: number;
@@ -76,18 +82,19 @@ function newSaleDraft(): SaleDraft {
   };
 }
 
-function CopyThumbnail({ eager = false, item }: { eager?: boolean; item: AvailableCopy }) {
+function CopyThumbnail({ eager = false, item, primaryPhotoUrl }: { eager?: boolean; item: AvailableCopy; primaryPhotoUrl?: string | null }) {
+  const imageUrl = primaryPhotoUrl || (item.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}` : null);
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="relative aspect-[3/4] bg-zinc-100">
-        {item.imageUrl ? (
+        {imageUrl ? (
           <Image
             alt=""
             className="object-contain p-2"
             fill
             loading={eager ? "eager" : "lazy"}
             sizes="(max-width: 640px) 50vw, (max-width: 1280px) 33vw, 25vw"
-            src={`/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}`}
+            src={imageUrl}
             unoptimized
           />
         ) : (
@@ -135,6 +142,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   const [rarity, setRarity] = useState("all");
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [page, setPage] = useState(1);
+  const [photoSummaries, setPhotoSummaries] = useState<Record<string, CopyPhotoSummary>>({});
 
   const availableCopies = useMemo<AvailableCopy[]>(() => {
     const printings = new Map(source.snapshot.printings.map((printing) => [printing.id, printing]));
@@ -158,6 +166,10 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
     () => availableCopies.filter((item) => draft.copyIds.includes(item.copy.id)),
     [availableCopies, draft.copyIds],
   );
+  const copiesForTarget = (item: AvailableCopy) => source.snapshot.copies.filter((copy) => {
+    const printing = source.snapshot.printings.find((candidate) => candidate.id === copy.printingId);
+    return printing?.targetId === item.target.id;
+  });
 
   const filteredCopies = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -178,6 +190,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
 
   const pageCount = Math.max(1, Math.ceil(filteredCopies.length / salePageSize));
   const visibleCopies = filteredCopies.slice((page - 1) * salePageSize, page * salePageSize);
+  const photoCopyIds = Array.from(new Set([...visibleCopies, ...selectedCopies].map((item) => item.copy.id))).join(",");
 
   const libraryImpacts = useMemo<LibraryImpact[]>(() => source.snapshot.targets.flatMap((target) => {
     const printingIds = source.snapshot.printings
@@ -194,6 +207,19 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   }), [selectedCopies, source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
 
   useEffect(() => source.setDraft("sale", draft), [draft, source]);
+
+  useEffect(() => {
+    if (source.mode !== "live" || !photoCopyIds) return;
+    let active = true;
+    void fetch(`/api/inventory/card-images?copyIds=${encodeURIComponent(photoCopyIds)}`)
+      .then(async (response) => {
+        const payload = await response.json() as { summaries?: Record<string, CopyPhotoSummary> };
+        if (!response.ok) throw new Error();
+        if (active) setPhotoSummaries(payload.summaries ?? {});
+      })
+      .catch(() => { if (active) setPhotoSummaries({}); });
+    return () => { active = false; };
+  }, [photoCopyIds, source.mode]);
 
   function typeError() {
     return draft.kind ? null : "Choose Single card or Bulk cards before continuing.";
@@ -463,14 +489,14 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                       key={item.copy.id}
                     >
                       <div className="relative aspect-[3/4] bg-zinc-100">
-                        {item.imageUrl ? (
+                        {photoSummaries[item.copy.id]?.primary?.previewUrl || item.imageUrl ? (
                           <Image
                             alt=""
                             className="object-contain p-2"
                             fill
                             loading={index < 4 ? "eager" : "lazy"}
                             sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                            src={`/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}`}
+                            src={photoSummaries[item.copy.id]?.primary?.previewUrl || `/api/image-proxy?url=${encodeURIComponent(item.imageUrl!)}`}
                             unoptimized
                           />
                         ) : (
@@ -492,13 +518,15 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                             Selected
                           </span>
                         ) : null}
+                        {photoSummaries[item.copy.id]?.primary ? <span className="absolute bottom-2 left-2 z-10 rounded-full bg-zinc-950/80 px-2 py-1 text-[10px] font-black text-white">Copy photo</span> : null}
                       </div>
                       <span className="block p-3">
                         <span className="line-clamp-2 block min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</span>
                         <span className="mt-1 block text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</span>
                         <span className="mt-1 block text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.target.edition || "Unknown edition"}</span>
-                        <span className="mt-1 block text-xs font-medium text-zinc-500">{item.copy.condition}</span>
-                        <span className="mt-1 block text-[11px] font-medium text-zinc-400">Copy {item.copy.id.slice(-6)}</span>
+                        <span className="mt-1 block text-xs font-medium text-zinc-500">{copyDisplayLabel(copiesForTarget(item), item.copy.id)} · #{copyShortReference(item.copy.id)} · {item.copy.condition}</span>
+                        {item.copy.privateNote ? <span className="mt-1 block text-[11px] font-medium text-zinc-500">{item.copy.privateNote}</span> : null}
+                        {photoSummaries[item.copy.id]?.count ? <span className="mt-1 block text-[11px] font-bold text-zinc-500">{photoSummaries[item.copy.id].count} saved {photoSummaries[item.copy.id].count === 1 ? "photo" : "photos"}</span> : null}
                       </span>
                     </label>
                   );
@@ -551,7 +579,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                 <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-                {selectedCopies.map((item, index) => <CopyThumbnail eager={index < 4} item={item} key={item.copy.id} />)}
+                {selectedCopies.map((item, index) => <CopyThumbnail eager={index < 4} item={item} key={item.copy.id} primaryPhotoUrl={photoSummaries[item.copy.id]?.primary?.previewUrl} />)}
               </div>
 
               <LibraryImpactNotice impacts={libraryImpacts} />

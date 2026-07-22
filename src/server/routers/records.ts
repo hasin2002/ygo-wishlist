@@ -5,14 +5,17 @@ import { db } from "@/db";
 import {
   bulkLots,
   cardCopies,
+  cardCopyImages,
   cardPrintings,
   cardTargets,
+  ebayListings,
   recordEntries,
   recordLineCopies,
   recordLines,
   sealedUnits,
   supplyItems,
 } from "@/db/schema";
+import { deleteCardInventoryImage } from "@/server/card-inventory-images";
 import { allocatePenceAt } from "@/lib/records/allocation";
 import { compactRecordName, generatedSaleRecordName } from "@/lib/records/record-name";
 import type {
@@ -128,6 +131,11 @@ const replaceRecordCardsSchema = recordMutationIdentitySchema.extend({
 const replaceSaleCopiesSchema = recordMutationIdentitySchema.extend({
   copyIds: z.array(z.string().min(1)).min(1),
 });
+const updateCardCopySchema = z.object({
+  copyId: z.string().min(1),
+  update: z.object({ condition: z.string().trim().min(1).max(80), privateNote: z.string().trim().max(1_000) }),
+});
+const removeCardCopySchema = z.object({ copyId: z.string().min(1) });
 const updateRecordLineSchema = recordMutationIdentitySchema.extend({
   lineId: z.string().min(1),
   update: z.object({
@@ -463,6 +471,7 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       desiredQuantity: target.desiredQuantity,
       imageUrl: target.imageUrl,
       tcgplayerUrl: target.tcgplayerUrl,
+      estimatedPricePence: target.estimatedPricePence,
       marketPricePence: target.marketPricePence,
     })),
     printings: printings.map((printing) => ({
@@ -483,6 +492,8 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       allocationPence: copy.allocationPence,
       status: copy.status,
       condition: copy.condition,
+      privateNote: copy.privateNote,
+      createdAt: copy.createdAt.toISOString(),
     })),
     sealedUnits: sealed.map((unit) => ({
       id: unit.id,
@@ -517,6 +528,93 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
 
 export const recordsRouter = router({
   snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
+
+  updateCardCopy: authenticatedProcedure.input(updateCardCopySchema).mutation(async ({ ctx, input }) => {
+    const now = new Date();
+    const [updated] = await db.update(cardCopies).set({
+      condition: input.update.condition,
+      privateNote: input.update.privateNote,
+      updatedAt: now,
+    }).where(and(eq(cardCopies.id, input.copyId), eq(cardCopies.ownerId, ctx.collectionOwnerId))).returning({ id: cardCopies.id });
+    if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "Physical Copy not found." });
+    return { id: updated.id };
+  }),
+
+  removeCardCopy: authenticatedProcedure.input(removeCardCopySchema).mutation(async ({ ctx, input }) => {
+    const ownerId = ctx.collectionOwnerId;
+    const keys: string[] = [];
+    let removedCopy: { id: string; acquiredRecordId: string } | undefined;
+    await db.transaction(async (tx) => {
+      const now = new Date();
+      const [copy] = await tx.select().from(cardCopies).where(and(
+        eq(cardCopies.id, input.copyId), eq(cardCopies.ownerId, ownerId),
+      )).for("update");
+      if (!copy) conflict("That physical Copy was not found.");
+      if (copy.status !== "available") conflict(copy.status === "sold" ? "Edit the Sale before removing this Copy." : "Restore the source Record before removing this Copy.");
+      const [record] = await tx.select().from(recordEntries).where(and(eq(recordEntries.id, copy.acquiredRecordId), eq(recordEntries.ownerId, ownerId))).for("update");
+      if (!record || record.status !== "active") conflict("Restore the source Record before removing this Copy.");
+      const saleLinks = await tx.select({ id: recordLineCopies.id }).from(recordLineCopies).where(and(eq(recordLineCopies.ownerId, ownerId), eq(recordLineCopies.copyId, copy.id), eq(recordLineCopies.role, "sale"))).limit(1);
+      if (saleLinks.length) conflict("This Copy has Sale history and cannot be removed.");
+      const listing = await tx.select({ id: ebayListings.id }).from(ebayListings).where(and(eq(ebayListings.ownerId, ownerId), eq(ebayListings.copyId, copy.id))).limit(1);
+      if (listing.length) conflict("This Copy has an eBay listing history and cannot be removed.");
+      const images = await tx.select({ objectKey: cardCopyImages.objectKey }).from(cardCopyImages).where(and(eq(cardCopyImages.ownerId, ownerId), eq(cardCopyImages.copyId, copy.id)));
+      keys.push(...images.map((image) => image.objectKey));
+      const [line] = await tx.select().from(recordLines).where(and(eq(recordLines.id, copy.acquiredLineId), eq(recordLines.ownerId, ownerId))).for("update");
+      if (!line) conflict("The source Record line is unavailable.");
+      await tx.delete(recordLineCopies).where(and(eq(recordLineCopies.ownerId, ownerId), eq(recordLineCopies.copyId, copy.id)));
+      await tx.delete(cardCopies).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
+      if (copy.bulkLotId) {
+        const [lot] = await tx.select().from(bulkLots).where(and(
+          eq(bulkLots.id, copy.bulkLotId), eq(bulkLots.ownerId, ownerId),
+        )).for("update").limit(1);
+        if (!lot) conflict("The source Bulk Lot is unavailable.");
+        const remainingLotCopies = await tx.select({ id: cardCopies.id }).from(cardCopies).where(and(
+          eq(cardCopies.ownerId, ownerId), eq(cardCopies.bulkLotId, lot.id),
+        ));
+        const itemizedQuantity = remainingLotCopies.length;
+        await tx.update(bulkLots).set({
+          itemizedQuantity,
+          status: itemizedQuantity >= lot.totalQuantity ? "itemized" : "open",
+          updatedAt: now,
+        }).where(and(eq(bulkLots.id, lot.id), eq(bulkLots.ownerId, ownerId)));
+        await tx.update(recordLines).set({
+          detail: `${itemizedQuantity} identified of ${lot.totalQuantity} total cards`,
+          updatedAt: now,
+        }).where(and(eq(recordLines.id, lot.acquiredLineId), eq(recordLines.ownerId, ownerId)));
+      }
+      if (line.quantity <= 1) {
+        await tx.delete(recordLines).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
+        const remaining = await tx.select({ id: recordLines.id }).from(recordLines).where(and(eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id))).limit(1);
+        if (!remaining.length) await tx.update(recordEntries).set({ status: "void", revision: record.revision + 1, updatedAt: now }).where(eq(recordEntries.id, record.id));
+        else await bumpRecord(tx, ownerId, record.id, record.revision, now);
+      } else {
+        const remainingCopies = await tx.select().from(cardCopies).where(and(
+          eq(cardCopies.ownerId, ownerId), eq(cardCopies.acquiredLineId, line.id),
+        )).orderBy(asc(cardCopies.createdAt), asc(cardCopies.id));
+        let allocationPence = line.allocationPence;
+        if (copy.bulkLotId) {
+          allocationPence = remainingCopies.reduce((sum, item) => sum + (item.allocationPence ?? 0), 0);
+        } else if (record.type === "purchase") {
+          allocationPence = record.amountPence;
+          for (const [index, item] of remainingCopies.entries()) {
+            await tx.update(cardCopies).set({
+              allocationPence: allocatePenceAt(record.amountPence, remainingCopies.length, index),
+              updatedAt: now,
+            }).where(and(eq(cardCopies.id, item.id), eq(cardCopies.ownerId, ownerId)));
+          }
+        }
+        await tx.update(recordLines).set({
+          allocationPence,
+          quantity: line.quantity - 1,
+          updatedAt: now,
+        }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
+        await bumpRecord(tx, ownerId, record.id, record.revision, now);
+      }
+      removedCopy = { id: copy.id, acquiredRecordId: copy.acquiredRecordId };
+    });
+    if (removedCopy) await Promise.all(keys.map((key) => deleteCardInventoryImage(ownerId, removedCopy!.id, key).catch(() => undefined)));
+    return { id: input.copyId };
+  }),
 
   resolveCardAttention: authenticatedProcedure.input(resolveCardAttentionSchema).mutation(async ({ ctx, input }) => {
     const now = new Date();
@@ -937,6 +1035,15 @@ export const recordsRouter = router({
         if (lineCopies.some((copy) => copyIdsWithSaleHistory.has(copy.id))) {
           conflict(`“${line.name}” has later Sale history and cannot be deleted.`);
         }
+      }
+      for (const card of input.cards) {
+        const existingLine = existingLineById.get(card.id);
+        if (existingLine && card.quantity < (copiesByLine.get(existingLine.id) ?? []).length) {
+          conflict("Choose the exact physical Copy from Manage copies instead of reducing this source quantity.");
+        }
+      }
+      if (existingLines.some((line) => !retainedExistingIds.has(line.id) && (copiesByLine.get(line.id) ?? []).length)) {
+        conflict("Choose the exact physical Copy from Manage copies instead of removing a source line.");
       }
 
       const existingPrintingIds = Array.from(new Set(acquiredCopies.map((copy) => copy.printingId)));
