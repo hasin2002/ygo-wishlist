@@ -48,8 +48,9 @@ EBAY_OAUTH_RU_NAME=...
 # Optional development RuName whose accepted URL is eBay's standard success page.
 EBAY_OAUTH_LOCAL_RU_NAME=...
 BETTER_AUTH_SECRET=<a new random secret>
-BETTER_AUTH_URL=https://your-site.example
 ```
+
+Authentication hosts are defined in `src/lib/auth-hosts.ts`. The application accepts the approved local, tunnel, and deployed hosts through Better Auth's dynamic base-URL configuration; `BETTER_AUTH_URL` is not required.
 
 ## eBay seller connection
 
