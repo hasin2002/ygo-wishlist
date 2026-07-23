@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAllowedRequestOrigin } from "@/lib/auth-hosts";
 import { deleteEbayConnection } from "@/server/ebay-seller";
 import { getSessionFromHeaders } from "@/server/session";
 
@@ -10,9 +11,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  const configuredOrigin = process.env.BETTER_AUTH_URL ? new URL(process.env.BETTER_AUTH_URL).origin : null;
   const origin = request.headers.get("origin");
-  if (!configuredOrigin || origin !== configuredOrigin) {
+  if (origin !== getAllowedRequestOrigin(request)) {
     return NextResponse.redirect(new URL("/ebay?error=security", request.url));
   }
 

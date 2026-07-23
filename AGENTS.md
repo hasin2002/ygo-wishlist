@@ -4,6 +4,14 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Multi-Agent Collaboration
+
+- Use sub-agents proactively for independent, bounded work that can run in parallel, especially repository reconnaissance, test investigation, and focused implementation slices. This preserves the primary agent's context for integration and decisions.
+- Choose the model and reasoning effort appropriate to the task. Default to `gpt-5.6-terra` with high reasoning effort; use a stronger model only when the task's complexity or risk justifies it.
+- Give every sub-agent a concrete deliverable, relevant constraints, and clear file or ownership boundaries. Do not delegate broad, overlapping implementation work into the same checkout.
+- Check in on sub-agents at meaningful milestones. Review their findings or changes, redirect them when the scope drifts, and integrate only work that is relevant to the user's request.
+- Keep the primary agent accountable for final decisions, validation, user communication, and safe Git operations. Do not use sub-agents merely to offload coordination or to make irreversible decisions without review.
+
 # Concurrent Chat and Git Workspace Safety
 
 - Assume other chats or agents may be working on this repository at the same time.
@@ -87,6 +95,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - If you start a dev server for testing or any other reason, stop it completely when you are done using it.
 - Before finishing, make sure any server process you started has been killed and is no longer running.
+- New worktrees do not automatically include ignored `.env*` files. Before starting the app in a task worktree, confirm that its required local environment configuration is present. If it is missing, copy the existing `.env*` files from a trusted worktree for this same repository without opening, printing, inspecting, or altering their contents. Do not stage, commit, or otherwise expose those files. If no trusted source is available, ask the user before starting the app.
+- Better Auth supports the approved localhost, ngrok, and deployed hosts defined in `src/lib/auth-hosts.ts`. Use the hostname relevant to the flow being verified; `http://localhost:3000` is valid for local checks and does not require a tunnel.
+- Run `ngrok http 3000` only when a test needs the public-tunnel flow. Before testing authentication through the tunnel, verify that it serves `https://armless-backslid-surrogate.ngrok-free.dev`, which must remain in the approved host allowlist.
+- When an authentication, cookie, redirect, or callback change could behave differently by hostname, test each affected approved host rather than assuming localhost and ngrok share a session. Do not modify `.env*` files unless the user explicitly asks.
+- Stop the ngrok tunnel as well as the development server when testing is complete. Do not expose a local server through a tunnel longer than needed.
 
 # Database, Environment, and Deployment Safety
 
