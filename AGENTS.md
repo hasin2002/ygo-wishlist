@@ -95,7 +95,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - If you start a dev server for testing or any other reason, stop it completely when you are done using it.
 - Before finishing, make sure any server process you started has been killed and is no longer running.
 - When testing a local flow that relies on Better Auth callbacks, run the development server and `ngrok http 3000` in separate processes for the duration of the test. Verify that the active public tunnel matches the configured Better Auth base URL before exercising authentication.
-- Treat the Better Auth base URL and tunnel hostname as environment-specific configuration: do not hard-code them into source files or documentation, and do not modify `.env*` files unless the user explicitly asks.
+- Whenever a local development server is running for testing or manual verification, visit the site through `https://armless-backslid-surrogate.ngrok-free.dev`, not `http://localhost:3000`. Use the public tunnel URL for browser-driven checks so cookies, redirects, callback URLs, and origin-sensitive behaviour match the configured application environment.
+- Treat the Better Auth base URL and tunnel hostname as environment-specific operational configuration. Do not hard-code them into application source files or user-facing documentation, and do not modify `.env*` files unless the user explicitly asks. Keep the prescribed browser-testing URL in this file aligned with the configured Better Auth base URL.
 - Stop the ngrok tunnel as well as the development server when testing is complete. Do not expose a local server through a tunnel longer than needed.
 
 # Database, Environment, and Deployment Safety
