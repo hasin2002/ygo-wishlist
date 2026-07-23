@@ -4,6 +4,7 @@ import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { betterAuth } from "better-auth";
 import { username } from "better-auth/plugins";
 import { db } from "@/db";
+import { dynamicAuthBaseURL } from "@/lib/auth-hosts";
 import {
   accounts,
   authRateLimits,
@@ -14,7 +15,7 @@ import {
 
 export const auth = betterAuth({
   appName: "Yu-Gi-Oh! Wishlist",
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL: dynamicAuthBaseURL,
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
