@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   Boxes,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -19,6 +20,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Undo2,
@@ -1193,9 +1195,86 @@ export function InventoryCardDetail({ targetId }: { targetId: string }) {
   return <InventoryCardDetailContent source={source} targetId={targetId} />;
 }
 
+function InventoryFilterModal({
+  activeFilterCount,
+  editionOptions,
+  listState,
+  onClear,
+  onClose,
+  onUpdate,
+  rarityOptions,
+}: {
+  activeFilterCount: number;
+  editionOptions: string[];
+  listState: InventoryListState;
+  onClear: () => void;
+  onClose: () => void;
+  onUpdate: (update: Partial<InventoryListState>) => void;
+  rarityOptions: string[];
+}) {
+  const [raritySearch, setRaritySearch] = useState("");
+  const visibleRarities = useMemo(() => {
+    const search = raritySearch.trim().toLocaleLowerCase("en-GB");
+    return search ? rarityOptions.filter((rarity) => rarity.toLocaleLowerCase("en-GB").includes(search)) : rarityOptions;
+  }, [rarityOptions, raritySearch]);
+  const allRaritiesSelected = rarityOptions.length > 0 && listState.rarity.length === rarityOptions.length;
+
+  function toggleRarity(rarity: string) {
+    onUpdate({
+      page: 1,
+      rarity: listState.rarity.includes(rarity)
+        ? listState.rarity.filter((selectedRarity) => selectedRarity !== rarity)
+        : [...listState.rarity, rarity],
+    });
+  }
+
+  return (
+    <div aria-labelledby="inventory-filter-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6" role="dialog">
+      <section className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">Filters</p>
+            <h2 className="mt-1 text-xl font-bold" id="inventory-filter-title">Refine inventory</h2>
+            <p className="mt-1 text-sm font-medium text-zinc-500">{activeFilterCount ? `${activeFilterCount} active` : "No filters active"} <span className="text-zinc-400">· narrow down your collection</span></p>
+          </div>
+          <button aria-label="Close filters" className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={onClose} type="button"><X className="size-4" /></button>
+        </div>
+
+        <div className="grid gap-4 overflow-auto p-4">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-zinc-700">Copies</span>{listState.copyQuantity !== "all" ? <button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]" onClick={() => onUpdate({ copyQuantity: "all", page: 1 })} type="button">Any quantity</button> : null}</div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {[{ label: "All copies", value: "all" }, { label: "2+ copies (same name)", value: "multiple" }].map((option) => {
+                const selected = listState.copyQuantity === option.value;
+                return <button aria-pressed={selected} className={`min-h-11 rounded-md border px-3 text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={option.value} onClick={() => onUpdate({ copyQuantity: option.value as InventoryListState["copyQuantity"], page: 1 })} type="button">{option.label}</button>;
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><div><span className="text-sm font-medium text-zinc-700">Rarity</span><span className="ml-2 text-xs font-semibold text-zinc-500">{listState.rarity.length ? `${listState.rarity.length} selected` : "Any rarity"}</span></div><div className="flex items-center gap-3"><button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826] disabled:text-zinc-400" disabled={allRaritiesSelected || !rarityOptions.length} onClick={() => onUpdate({ page: 1, rarity: rarityOptions })} type="button">Select all</button><button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826] disabled:text-zinc-400" disabled={!listState.rarity.length} onClick={() => onUpdate({ page: 1, rarity: [] })} type="button">Deselect all</button></div></div>
+            <label className="relative mt-2 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input aria-label="Search rarity filters" className="h-10 w-full rounded-md border border-zinc-300 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-[#8a1f2d]" onChange={(event) => setRaritySearch(event.target.value)} placeholder="Search and select multiple rarities" value={raritySearch} /></label>
+            <div className="mt-2 max-h-44 overflow-auto rounded-md border border-zinc-200 bg-white p-2">
+              {visibleRarities.length ? <div className="flex flex-wrap gap-2">{visibleRarities.map((rarity) => { const selected = listState.rarity.includes(rarity); return <button aria-pressed={selected} className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={rarity} onClick={() => toggleRarity(rarity)} type="button"><span>{rarity}</span>{selected ? <Check className="size-4 shrink-0" /> : null}</button>; })}</div> : <p className="px-2 py-3 text-sm font-semibold text-zinc-500">No rarities match that search.</p>}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-zinc-700">Edition</span>{listState.edition !== "all" ? <button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]" onClick={() => onUpdate({ edition: "all", page: 1 })} type="button">Any edition</button> : null}</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">{["all", ...editionOptions].map((edition) => { const selected = listState.edition === edition; return <button aria-pressed={selected} className={`min-h-11 rounded-md border px-3 text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={edition} onClick={() => onUpdate({ edition, page: 1 })} type="button">{edition === "all" ? "All editions" : edition}</button>; })}</div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-white p-4"><button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40" disabled={!activeFilterCount} onClick={onClear} type="button">Clear filters</button><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800" onClick={onClose} type="button">Done</button></div>
+      </section>
+    </div>
+  );
+}
+
 function InventoryView() {
   const source = useRecordsDataSource();
   const router = useRouter();
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
   const searchParams = useSearchParams();
   const searchParamsString = searchParams.toString();
   const listState = useMemo(
@@ -1260,7 +1339,7 @@ function InventoryView() {
     return (
       (listState.status === "all" || libraryStatus.status === listState.status)
       && (listState.copyQuantity !== "multiple" || (hasActiveCopy && (activeCopyCountByName.get(normalizedName) ?? 0) > 1))
-      && (listState.rarity === "all" || target.rarity === listState.rarity)
+      && (!listState.rarity.length || listState.rarity.includes(target.rarity))
       && (listState.edition === "all" || target.edition === listState.edition)
       && (!search || [target.name, target.rarity, target.edition].join(" ").toLocaleLowerCase("en-GB").includes(search))
     );
@@ -1276,7 +1355,16 @@ function InventoryView() {
   }, [cardPage, listState, router]);
 
   function updateListState(update: Partial<InventoryListState>) {
-    router.replace(inventoryListHref({ ...listState, ...update }), { scroll: false });
+    window.history.replaceState(null, "", inventoryListHref({ ...listState, ...update }));
+  }
+
+  const activeFilterCount =
+    (listState.copyQuantity === "all" ? 0 : 1)
+    + listState.rarity.length
+    + (listState.edition === "all" ? 0 : 1);
+
+  function clearFilters() {
+    updateListState({ copyQuantity: "all", edition: "all", page: 1, rarity: [] });
   }
 
   return (
@@ -1296,24 +1384,13 @@ function InventoryView() {
 
       {activeTab === "cards" ? (
         <div className="grid gap-3">
-          <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
-            <div className="flex rounded-md border border-zinc-300 bg-zinc-100 p-1 sm:self-start">
-              {(["all", "wishlist", "owned"] as const).map((status) => (
-                <button className={`min-h-11 rounded px-3 text-sm font-semibold transition ${listState.status === status ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} key={status} onClick={() => updateListState({ page: 1, status })} type="button">{status === "all" ? "All" : status === "wishlist" ? "Wishlist" : "Owned"}</button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <label className="relative w-full sm:max-w-md">
-              <span className="sr-only">Search card inventory</span>
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-              <input className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => updateListState({ card: event.target.value, page: 1 })} placeholder="Search cards, rarity, or edition" value={listState.card} />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <select aria-label="Filter inventory by copy quantity" className="h-11 min-w-48 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => updateListState({ copyQuantity: event.target.value as InventoryListState["copyQuantity"], page: 1 })} value={listState.copyQuantity}><option value="all">All copy quantities</option><option value="multiple">2+ copies (same name)</option></select>
-              <select aria-label="Filter inventory by rarity" className="h-11 min-w-40 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => updateListState({ page: 1, rarity: event.target.value })} value={listState.rarity}><option value="all">All rarities</option>{rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}</select>
-              <select aria-label="Filter inventory by edition" className="h-11 min-w-40 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => updateListState({ edition: event.target.value, page: 1 })} value={listState.edition}><option value="all">All editions</option>{editionOptions.map((edition) => <option key={edition} value={edition}>{edition}</option>)}</select>
-              <p className="flex min-h-11 items-center text-sm font-bold text-zinc-500">{filteredTargets.length} card target{filteredTargets.length === 1 ? "" : "s"}</p>
-            </div>
+          <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex rounded-md border border-zinc-300 bg-zinc-100 p-1">
+                {(["all", "wishlist", "owned"] as const).map((status) => <button aria-pressed={listState.status === status} className={`min-h-10 rounded px-3 text-sm font-semibold transition ${listState.status === status ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} key={status} onClick={() => updateListState({ page: 1, status })} type="button">{status === "all" ? "All" : status === "wishlist" ? "Wishlist" : "Owned"}</button>)}
+              </div>
+              <label className="relative min-w-0 flex-1 basis-64"><span className="sr-only">Search card inventory</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => updateListState({ card: event.target.value, page: 1 })} placeholder="Search cards, rarity, or edition" value={listState.card} /></label>
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto"><p className="mr-auto text-sm font-bold text-zinc-500 sm:mr-1">{filteredTargets.length} card target{filteredTargets.length === 1 ? "" : "s"}</p><button className={`inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition ${activeFilterCount ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-950 hover:text-zinc-950"}`} onClick={() => setFilterModalOpen(true)} type="button"><SlidersHorizontal className="size-4" />Filters{activeFilterCount ? <span className="rounded bg-[#8a1f2d] px-1.5 py-0.5 text-xs font-bold text-white">{activeFilterCount}</span> : null}</button><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button></div>
             </div>
           </div>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1350,6 +1427,8 @@ function InventoryView() {
           {cardPageCount > 1 ? <nav aria-label="Card inventory pages" className="flex items-center justify-between rounded-lg border border-zinc-300 bg-white p-3 text-sm font-bold text-zinc-600"><button aria-label="Previous card inventory page" className="grid size-11 place-items-center rounded-md border border-zinc-300 disabled:opacity-40" disabled={cardPage === 1} onClick={() => updateListState({ page: Math.max(1, cardPage - 1) })} type="button"><ChevronLeft className="size-4" /></button><span>Page {cardPage} of {cardPageCount}</span><button aria-label="Next card inventory page" className="grid size-11 place-items-center rounded-md border border-zinc-300 disabled:opacity-40" disabled={cardPage === cardPageCount} onClick={() => updateListState({ page: Math.min(cardPageCount, cardPage + 1) })} type="button"><ChevronRight className="size-4" /></button></nav> : null}
         </div>
       ) : null}
+
+      {filterModalOpen ? <InventoryFilterModal activeFilterCount={activeFilterCount} editionOptions={editionOptions} listState={listState} onClear={clearFilters} onClose={() => setFilterModalOpen(false)} onUpdate={updateListState} rarityOptions={rarityOptions} /> : null}
 
       {activeTab === "sealed" ? (
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

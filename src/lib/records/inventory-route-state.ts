@@ -4,7 +4,7 @@ export type InventoryListState = {
   edition: string;
   kind: "cards" | "sealed" | "bulk" | "supplies";
   page: number;
-  rarity: string;
+  rarity: string[];
   status: "all" | "wishlist" | "owned";
 };
 
@@ -14,7 +14,7 @@ export const defaultInventoryListState: InventoryListState = {
   edition: "all",
   kind: "cards",
   page: 1,
-  rarity: "all",
+  rarity: [],
   status: "all",
 };
 
@@ -35,7 +35,7 @@ export function parseInventoryListState(searchParams: URLSearchParams): Inventor
     edition: searchParams.get("edition") || "all",
     kind: kind === "sealed" || kind === "bulk" || kind === "supplies" ? kind : "cards",
     page: positiveInteger(searchParams.get("page")),
-    rarity: searchParams.get("rarity") || "all",
+    rarity: Array.from(new Set(searchParams.getAll("rarity").filter(Boolean))),
     status: status === "wishlist" || status === "owned" ? status : "all",
   };
 }
@@ -46,7 +46,7 @@ export function serializeInventoryListState(state: InventoryListState) {
   if (state.card) searchParams.set("card", state.card);
   if (state.copyQuantity !== "all") searchParams.set("copies", state.copyQuantity);
   if (state.status !== "all") searchParams.set("status", state.status);
-  if (state.rarity !== "all") searchParams.set("rarity", state.rarity);
+  state.rarity.forEach((rarity) => searchParams.append("rarity", rarity));
   if (state.edition !== "all") searchParams.set("edition", state.edition);
   if (state.page > 1) searchParams.set("page", String(state.page));
   return searchParams;
