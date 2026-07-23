@@ -11,6 +11,26 @@ export type RecordStatus = "active" | "void";
 export type LibraryCardStatus = "wishlist" | "owned";
 export type InventoryKind = "card" | "sealed" | "bulk" | "supply";
 export type ProductEdition = "1st Edition" | "Unlimited Edition" | "Limited Edition";
+export const cardConditions = [
+  "Near Mint",
+  "Lightly Played",
+  "Moderately Played",
+  "Heavily Played",
+] as const;
+export type CardCondition = (typeof cardConditions)[number];
+export function isCardCondition(value: string): value is CardCondition {
+  return cardConditions.some((condition) => condition === value);
+}
+export const cardConditionOptions: ReadonlyArray<{
+  ebayDescriptorValueId: "400010" | "400015" | "400016" | "400017";
+  label: string;
+  value: CardCondition;
+}> = [
+  { value: "Near Mint", label: "Near mint or better", ebayDescriptorValueId: "400010" },
+  { value: "Lightly Played", label: "Lightly played (Excellent)", ebayDescriptorValueId: "400015" },
+  { value: "Moderately Played", label: "Moderately played (Very good)", ebayDescriptorValueId: "400016" },
+  { value: "Heavily Played", label: "Heavily played (Poor)", ebayDescriptorValueId: "400017" },
+];
 export type SupplyCategory =
   | "sleeves"
   | "binder"
@@ -50,6 +70,8 @@ export type CardCopy = {
   allocationPence: number | null;
   status: "available" | "sold" | "void";
   condition: string;
+  location: string | null;
+  stickerNumber: string | null;
   privateNote: string;
   createdAt: string;
 };
@@ -219,7 +241,12 @@ export type CardAttentionUpdate = {
   setCode: string;
   imageUrl: string | null;
 };
-export type CardCopyUpdate = { condition: string; privateNote: string };
+export type CardCopyUpdate = {
+  condition: CardCondition;
+  location: string;
+  stickerNumber: string;
+  privateNote: string;
+};
 export type RecordLineUpdate = {
   name: string;
   quantity: number;

@@ -18,6 +18,7 @@ import {
 import { deleteCardInventoryImage } from "@/server/card-inventory-images";
 import { allocatePenceAt } from "@/lib/records/allocation";
 import { compactRecordName, generatedSaleRecordName } from "@/lib/records/record-name";
+import { cardConditions } from "@/lib/records/types";
 import type {
   PreviewAttentionItem,
   RecordLine,
@@ -133,9 +134,29 @@ const replaceSaleCopiesSchema = recordMutationIdentitySchema.extend({
 });
 const updateCardCopySchema = z.object({
   copyId: z.string().min(1),
-  update: z.object({ condition: z.string().trim().min(1).max(80), privateNote: z.string().trim().max(1_000) }),
+  update: z.object({
+    condition: z.enum(cardConditions),
+    location: z.string().trim().max(160).transform((value) => value || null),
+    stickerNumber: z.string().trim().max(20).regex(/^\d*$/, "Sticker number must contain digits only.").transform((value) => value || null),
+    privateNote: z.string().trim().max(1_000),
+  }),
 });
 const removeCardCopySchema = z.object({ copyId: z.string().min(1) });
+
+function isStickerNumberUniqueViolation(error: unknown) {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!current || typeof current !== "object") return false;
+    const databaseError = current as { cause?: unknown; code?: unknown; constraint?: unknown };
+    if (
+      databaseError.code === "23505"
+      && (databaseError.constraint === undefined || databaseError.constraint === "card_copies_owner_sticker_number_unique")
+    ) return true;
+    current = databaseError.cause;
+  }
+  return false;
+}
+
 const updateRecordLineSchema = recordMutationIdentitySchema.extend({
   lineId: z.string().min(1),
   update: z.object({
@@ -492,6 +513,8 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       allocationPence: copy.allocationPence,
       status: copy.status,
       condition: copy.condition,
+      location: copy.location,
+      stickerNumber: copy.stickerNumber,
       privateNote: copy.privateNote,
       createdAt: copy.createdAt.toISOString(),
     })),
@@ -531,11 +554,36 @@ export const recordsRouter = router({
 
   updateCardCopy: authenticatedProcedure.input(updateCardCopySchema).mutation(async ({ ctx, input }) => {
     const now = new Date();
-    const [updated] = await db.update(cardCopies).set({
-      condition: input.update.condition,
-      privateNote: input.update.privateNote,
-      updatedAt: now,
-    }).where(and(eq(cardCopies.id, input.copyId), eq(cardCopies.ownerId, ctx.collectionOwnerId))).returning({ id: cardCopies.id });
+    if (input.update.stickerNumber) {
+      const [duplicate] = await db.select({ id: cardCopies.id }).from(cardCopies).where(and(
+        eq(cardCopies.ownerId, ctx.collectionOwnerId),
+        eq(cardCopies.stickerNumber, input.update.stickerNumber),
+      ));
+      if (duplicate && duplicate.id !== input.copyId) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Sticker number ${input.update.stickerNumber} is already assigned to another physical Copy.`,
+        });
+      }
+    }
+    let updated: { id: string } | undefined;
+    try {
+      [updated] = await db.update(cardCopies).set({
+        condition: input.update.condition,
+        location: input.update.location,
+        stickerNumber: input.update.stickerNumber,
+        privateNote: input.update.privateNote,
+        updatedAt: now,
+      }).where(and(eq(cardCopies.id, input.copyId), eq(cardCopies.ownerId, ctx.collectionOwnerId))).returning({ id: cardCopies.id });
+    } catch (error) {
+      if (isStickerNumberUniqueViolation(error)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Sticker number ${input.update.stickerNumber} is already assigned to another physical Copy.`,
+        });
+      }
+      throw error;
+    }
     if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "Physical Copy not found." });
     return { id: updated.id };
   }),
@@ -720,7 +768,7 @@ export const recordsRouter = router({
         await tx.insert(cardCopies).values(Array.from({ length: input.card.quantity }, (_, index) => ({
           id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: recordId,
           acquiredLineId: lineId, allocationPence: allocatePenceAt(input.totalPence, input.card.quantity, index),
-          status: "available" as const, condition: "Near Mint", createdAt: now, updatedAt: now,
+          status: "available" as const, condition: "Near Mint" as const, createdAt: now, updatedAt: now,
         })));
       } else if (input.kind === "sealed") {
         const lineId = id("line");
@@ -766,7 +814,7 @@ export const recordsRouter = router({
           await tx.insert(cardCopies).values(allocations.map((allocationPence, offset) => ({
             id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: recordId,
             acquiredLineId: lineId, bulkLotId: lotId, allocationIndex: allocationIndex + offset,
-            allocationPence, status: "available" as const, condition: "Near Mint", createdAt: now, updatedAt: now,
+            allocationPence, status: "available" as const, condition: "Near Mint" as const, createdAt: now, updatedAt: now,
           })));
           allocationIndex += card.quantity;
         }
@@ -846,7 +894,7 @@ export const recordsRouter = router({
         });
         await tx.insert(cardCopies).values(Array.from({ length: pull.quantity }, () => ({
           id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: openingId,
-          acquiredLineId: lineId, status: "available" as const, condition: "Near Mint",
+          acquiredLineId: lineId, status: "available" as const, condition: "Near Mint" as const,
           createdAt: now, updatedAt: now,
         })));
       }
@@ -1174,7 +1222,7 @@ export const recordsRouter = router({
             allocationPence: bulkLot && allocationIndex !== null
               ? allocatePenceAt(record.amountPence, bulkLot.totalQuantity, allocationIndex)
               : null,
-            status: "available" as const, condition: "Near Mint", createdAt: now, updatedAt: now,
+            status: "available" as const, condition: "Near Mint" as const, createdAt: now, updatedAt: now,
           };
         });
         const resultingCopies = [

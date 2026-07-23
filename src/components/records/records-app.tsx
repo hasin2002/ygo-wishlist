@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   Boxes,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -19,6 +20,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Undo2,
@@ -27,8 +29,8 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   CardContentsEditor,
   type CardContentsDraft,
@@ -42,6 +44,7 @@ import {
   recordImagePreviewsFor,
   type RecordImagePreview,
 } from "@/lib/records/record-images";
+import { cardConditionOptions, isCardCondition } from "@/lib/records/types";
 import type {
   CardAttentionUpdate,
   CardCopy,
@@ -56,6 +59,12 @@ import type {
   WishlistTarget,
 } from "@/lib/records/types";
 import { copyDisplayLabel, copyShortReference, orderCopies } from "@/lib/records/copy-display";
+import {
+  inventoryCardDetailHref,
+  inventoryListHref,
+  parseInventoryListState,
+  type InventoryListState,
+} from "@/lib/records/inventory-route-state";
 
 export type RecordsView = "overview" | "history" | "inventory";
 
@@ -932,19 +941,19 @@ function inventoryCopySourceGroups(
   ));
 }
 
-function InventoryCardDialog({
-  onClose,
+function InventoryCardDetailContent({
   source,
   targetId,
 }: {
-  onClose: () => void;
   source: RecordsDataSource;
   targetId: string;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const listState = parseInventoryListState(new URLSearchParams(searchParams.toString()));
   const [editingSource, setEditingSource] = useState<{ lineId: string | null; recordId: string } | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<{ copyId: string } | null>(null);
   const [removingCopyId, setRemovingCopyId] = useState<string | null>(null);
-  const [selectedCopyId, setSelectedCopyId] = useState<string | null>(null);
   const [savingCopy, setSavingCopy] = useState(false);
   const [confirmTargetRemoval, setConfirmTargetRemoval] = useState(false);
   const [deletingTarget, setDeletingTarget] = useState(false);
@@ -954,8 +963,9 @@ function InventoryCardDialog({
   const sourceGroups = target ? inventoryCopySourceGroups(source.snapshot, target) : [];
   const copies = orderCopies(sourceGroups.flatMap((group) => group.copies.map(({ copy }) => copy)));
   const copyDetails = copies.flatMap((copy) => sourceGroups.flatMap((group) => group.copies.filter((item) => item.copy.id === copy.id).map((item) => ({ ...item, group }))));
-  const effectiveCopyId = selectedCopyId && copies.some((copy) => copy.id === selectedCopyId)
-    ? selectedCopyId
+  const requestedCopyId = searchParams.get("copy");
+  const effectiveCopyId = requestedCopyId && copies.some((copy) => copy.id === requestedCopyId)
+    ? requestedCopyId
     : copies[0]?.id ?? null;
   const selectedDetail = copyDetails.find((item) => item.copy.id === effectiveCopyId) ?? null;
   const copyIdsKey = copies.map((copy) => copy.id).join(",");
@@ -972,15 +982,6 @@ function InventoryCardDialog({
     : null;
 
   useEffect(() => {
-    if (editingSource) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [editingSource, onClose]);
-
-  useEffect(() => {
     if (source.mode !== "live" || !copyIdsKey) return;
     let active = true;
     void fetch(`/api/inventory/card-images?copyIds=${encodeURIComponent(copyIdsKey)}`)
@@ -993,7 +994,16 @@ function InventoryCardDialog({
     return () => { active = false; };
   }, [copyIdsKey, source.mode]);
 
-  if (!target || !libraryStatus) return null;
+  if (!target || !libraryStatus) {
+    return (
+      <section className="rounded-lg border border-zinc-300 bg-white px-5 py-10 text-center shadow-sm" role="status">
+        <WalletCards aria-hidden="true" className="mx-auto size-8 text-zinc-400" />
+        <h2 className="mt-4 text-xl font-black">Card not found</h2>
+        <p className="mx-auto mt-2 max-w-lg text-sm font-medium leading-6 text-zinc-600">This card may have been removed or is no longer available in the current Records snapshot.</p>
+        <Link className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft className="size-4" /> Back to inventory</Link>
+      </section>
+    );
+  }
 
   if (editingSource && editingRecord) {
     return (
@@ -1027,26 +1037,60 @@ function InventoryCardDialog({
     const result = await source.deleteWishlistTarget(targetId);
     setDeletingTarget(false);
     if (result.ok) {
-      onClose();
+      router.replace(inventoryListHref(listState));
       return;
     }
     setConfirmTargetRemoval(false);
     setMessage(result.message);
   }
 
-  return (
-    <div aria-describedby="inventory-card-description" aria-labelledby="inventory-card-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
-      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto overscroll-contain rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
-        <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div>
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Card inventory</span>
-            <h2 className="mt-1 text-xl font-black" id="inventory-card-title">{target.name}</h2>
-            <p className="mt-1 text-sm font-medium text-zinc-500" id="inventory-card-description">See every physical Copy and the Record it came from.</p>
-          </div>
-          <button aria-label="Close card inventory" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
-        </header>
+  async function saveCopyDetails(copyId: string, form: FormData) {
+    const condition = String(form.get("condition") || "");
+    if (!isCardCondition(condition)) {
+      setMessage("Choose a card condition before saving this Copy.");
+      return;
+    }
+    setSavingCopy(true);
+    const result = await source.updateCardCopy(copyId, {
+      condition,
+      location: String(form.get("location") || ""),
+      stickerNumber: String(form.get("stickerNumber") || ""),
+      privateNote: String(form.get("note") || ""),
+    });
+    setSavingCopy(false);
+    setMessage(result.ok ? "Copy details saved." : result.message);
+  }
 
-        <div className="grid gap-5 px-4 pb-24 pt-4 sm:p-6">
+  return (
+    <div className="grid gap-5 sm:gap-6">
+      <nav aria-label="Inventory breadcrumb">
+        <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft aria-hidden="true" className="size-4" /> Back to inventory</Link>
+      </nav>
+
+      <div className="grid items-start gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:gap-6 xl:grid-cols-[21rem_minmax(0,1fr)]">
+        <aside aria-labelledby="inventory-card-title" className="grid gap-5 rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:p-5 lg:sticky lg:top-5 lg:block">
+          <div className="mx-auto grid aspect-[59/86] w-32 shrink-0 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 shadow-sm sm:mx-0 sm:w-full lg:mx-auto lg:w-40">
+            {target.imageUrl ? <Image alt={`${target.name} card`} className="h-full w-full object-contain" height={256} loading="eager" sizes="(min-width: 1024px) 160px, 128px" src={`/api/image-proxy?url=${encodeURIComponent(target.imageUrl)}`} unoptimized width={176} /> : <WalletCards aria-hidden="true" className="size-8 text-zinc-400" />}
+          </div>
+          <div className="min-w-0 lg:mt-5">
+            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Card inventory</span>
+            <h2 className="mt-1 break-words text-2xl font-black leading-tight sm:text-3xl" id="inventory-card-title">{target.name}</h2>
+            <p className="mt-2 text-sm font-medium leading-6 text-zinc-500" id="inventory-card-description">Manage each physical Copy and the Record it came from.</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className={`rounded-md px-2 py-1 text-xs font-bold ${libraryStatus.status === "wishlist" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{libraryStatus.status === "wishlist" ? "Wishlist" : "Owned"}</span>
+              <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.rarity}</span>
+              <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.edition}</span>
+            </div>
+          </div>
+          <dl className="grid grid-cols-2 gap-2 text-center sm:col-span-2 lg:mt-5">
+            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Wanted</dt><dd className="mt-1 text-xl font-black tabular-nums">{libraryStatus.wantedQuantity}</dd></div>
+            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Owned</dt><dd className="mt-1 text-xl font-black tabular-nums">{libraryStatus.ownedQuantity}</dd></div>
+            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Sold</dt><dd className="mt-1 text-xl font-black tabular-nums">{soldQuantity}</dd></div>
+            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 text-base font-black tabular-nums">{hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "Unknown"}</dd></div>
+          </dl>
+        </aside>
+
+        <div aria-describedby="inventory-card-description" className="grid min-w-0 gap-4 sm:gap-5">
           {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
           {pendingRemoval ? (
             <section aria-labelledby="remove-copy-title" className="rounded-lg border border-rose-300 bg-rose-50 p-4" role="alert">
@@ -1068,56 +1112,177 @@ function InventoryCardDialog({
               </div>
             </section>
           ) : null}
-
-          <section className="flex flex-col gap-4 rounded-lg border border-zinc-300 bg-white p-4 sm:flex-row sm:items-center">
-            <div className="mx-auto grid h-32 w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 sm:mx-0">
-              {target.imageUrl ? <Image alt={`${target.name} card`} className="h-full w-full object-contain" height={128} loading="eager" src={`/api/image-proxy?url=${encodeURIComponent(target.imageUrl)}`} unoptimized width={96} /> : <WalletCards aria-hidden="true" className="size-7 text-zinc-400" />}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-md px-2 py-1 text-xs font-bold ${libraryStatus.status === "wishlist" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{libraryStatus.status === "wishlist" ? "Wishlist" : "Owned"}</span>
-                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.rarity}</span>
-                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.edition}</span>
+          <section aria-labelledby="physical-copies-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
+            <header className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
+              <div>
+                <h3 className="text-lg font-black" id="physical-copies-title">Physical copies</h3>
+                <p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Manage condition, photos, source, and selling details for one Copy at a time.</p>
               </div>
-              <dl className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4 sm:max-w-xl">
-                <div className="rounded-md bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Wanted</dt><dd className="mt-1 text-xl font-black tabular-nums">{libraryStatus.wantedQuantity}</dd></div>
-                <div className="rounded-md bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Owned</dt><dd className="mt-1 text-xl font-black tabular-nums">{libraryStatus.ownedQuantity}</dd></div>
-                <div className="rounded-md bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Sold</dt><dd className="mt-1 text-xl font-black tabular-nums">{soldQuantity}</dd></div>
-                <div className="rounded-md bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 text-base font-black tabular-nums">{hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "Unknown"}</dd></div>
-              </dl>
-            </div>
-          </section>
+              <span className="shrink-0 text-sm font-bold text-zinc-500">{copies.length} {copies.length === 1 ? "Copy" : "Copies"}</span>
+            </header>
 
-          <section>
-            <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="font-black">Physical copies</h3><p className="mt-1 text-sm font-medium text-zinc-500">Select one Copy to manage its photos, condition, note, source, or sale.</p></div><span className="text-sm font-bold text-zinc-500">{copies.length} physical {copies.length === 1 ? "Copy" : "Copies"}</span></div>
-            {selectedDetail ? <div className={`mt-3 grid gap-4 rounded-lg border border-zinc-300 bg-white p-3 md:p-4 ${copies.length > 1 ? "md:grid-cols-[15rem_minmax(0,1fr)]" : ""}`}>
-              {copies.length > 1 ? <nav aria-label="Physical copies" className="grid content-start gap-2">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; return <button aria-current={copy.id === selectedDetail.copy.id ? "true" : undefined} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-md border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50" : "border-zinc-200 hover:border-zinc-400"}`} key={copy.id} onClick={() => { setSelectedCopyId(copy.id); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.condition} · {copy.privateNote || "No note"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</nav> : null}
-              <article className="min-w-0"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-black">{copyDisplayLabel(copies, selectedDetail.copy.id)}</h4><span className={`rounded px-2 py-0.5 text-xs font-bold ${selectedDetail.copy.status === "available" ? "bg-emerald-50 text-emerald-700" : selectedDetail.copy.status === "sold" ? "bg-zinc-100 text-zinc-700" : "bg-amber-50 text-amber-800"}`}>{selectedDetail.copy.status === "available" ? "Owned" : selectedDetail.copy.status.charAt(0).toUpperCase() + selectedDetail.copy.status.slice(1)}</span></div><p className="mt-1 text-sm font-medium text-zinc-500">Ref #{copyShortReference(selectedDetail.copy.id)} · {selectedDetail.printing.setCode || "Unknown code"} · {selectedDetail.printing.setName || "Unknown set"}</p></div>{selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? <div className="flex flex-wrap gap-2"><EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} printing={selectedDetail.printing} target={target} /><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 className="size-4" />Remove</button></div> : null}</div>
-                <form className="mt-4 grid gap-3 rounded-md bg-zinc-50 p-3" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); setSavingCopy(true); void source.updateCardCopy(selectedDetail.copy.id, { condition: String(form.get("condition") || ""), privateNote: String(form.get("note") || "") }).then((result) => { setSavingCopy(false); setMessage(result.ok ? "Copy details saved." : result.message); }); }}><label className="grid gap-1 text-sm font-bold">Condition<input className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 font-medium" defaultValue={selectedDetail.copy.condition} name="condition" /></label><label className="grid gap-1 text-sm font-bold">Private note<textarea className="min-h-20 rounded-md border border-zinc-300 bg-white p-3 font-medium" defaultValue={selectedDetail.copy.privateNote} name="note" /></label><button className="min-h-11 justify-self-start rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white disabled:opacity-60" disabled={savingCopy} type="submit">{savingCopy ? "Saving…" : "Save copy details"}</button></form>
-                <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} key={`copy-images-${selectedDetail.copy.id}`} onImagesChange={(images) => setPhotoSummaries((current) => ({ ...current, [selectedDetail.copy.id]: { count: images.length, primary: images[0] ? { key: images[0].key, previewUrl: images[0].previewUrl } : null } }))} />
-                <section className="mt-4 rounded-md border border-zinc-200 p-3"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 text-sm font-bold text-[#8a1f2d] underline" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source record</button> : null}</section>
-              </article></div> : <div className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-10 text-center"><WalletCards className="mx-auto size-7 text-zinc-400" /><p className="mt-3 font-bold">No physical Copies yet</p><p className="mt-1 text-sm font-medium text-zinc-500">This card is on your Wishlist, so there is no acquisition source to edit.</p></div>}
+            {selectedDetail ? (
+              <div className="grid gap-4 p-3 sm:p-4 md:grid-cols-[16rem_minmax(0,1fr)] md:p-5">
+                {copies.length > 1 ? (
+                  <div className="md:hidden">
+                    <label className="grid gap-1.5 text-sm font-bold" htmlFor="physical-copy-select">Choose a physical Copy</label>
+                    <select className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-900 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" id="physical-copy-select" onChange={(event) => { router.replace(inventoryCardDetailHref(target.id, listState, event.currentTarget.value), { scroll: false }); setMessage(null); }} value={selectedDetail.copy.id}>
+                      {copyDetails.map(({ copy, printing }) => <option key={copy.id} value={copy.id}>{copyDisplayLabel(copies, copy.id)} · {printing.setCode || "Unknown set"} · {copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+
+                {copies.length > 1 ? <div aria-label="Choose a physical Copy" className="hidden content-start gap-2 md:grid" role="group">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; return <button aria-pressed={copy.id === selectedDetail.copy.id} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50 shadow-sm" : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"}`} key={copy.id} onClick={() => { router.replace(inventoryCardDetailHref(target.id, listState, copy.id), { scroll: false }); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition} · {copy.location || copy.privateNote || "No location"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</div> : null}
+
+                <article className={`grid min-w-0 gap-4 ${copies.length > 1 ? "md:border-l md:border-zinc-200 md:pl-5" : "md:col-span-2"}`}>
+                  <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2"><h4 className="text-lg font-black">{copyDisplayLabel(copies, selectedDetail.copy.id)}</h4><span className={`rounded px-2 py-0.5 text-xs font-bold ${selectedDetail.copy.status === "available" ? "bg-emerald-50 text-emerald-700" : selectedDetail.copy.status === "sold" ? "bg-zinc-100 text-zinc-700" : "bg-amber-50 text-amber-800"}`}>{selectedDetail.copy.status === "available" ? "Owned" : selectedDetail.copy.status.charAt(0).toUpperCase() + selectedDetail.copy.status.slice(1)}</span></div>
+                      <p className="mt-1 break-words text-sm font-medium leading-5 text-zinc-500">Ref #{copyShortReference(selectedDetail.copy.id)} · {selectedDetail.printing.setCode || "Unknown code"} · {selectedDetail.printing.setName || "Unknown set"}</p>
+                      {selectedDetail.copy.stickerNumber || selectedDetail.copy.location ? <p className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-zinc-700">{selectedDetail.copy.stickerNumber ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">Sticker {selectedDetail.copy.stickerNumber}</span> : null}{selectedDetail.copy.location ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">{selectedDetail.copy.location}</span> : null}</p> : null}
+                    </div>
+                    {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end"><EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} printing={selectedDetail.printing} target={target} /><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button></div> : null}
+                  </header>
+
+                  <form aria-labelledby={`copy-details-title-${selectedDetail.copy.id}`} className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }}>
+                    <div><h5 className="font-black" id={`copy-details-title-${selectedDetail.copy.id}`}>Copy details</h5><p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Record how this Copy looks and where to find it in your physical collection.</p></div>
+                    <div className="grid min-w-0 gap-4">
+                      <label className="grid min-w-0 content-start gap-1.5 text-sm font-bold">Condition<select className="min-h-11 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={isCardCondition(selectedDetail.copy.condition) ? selectedDetail.copy.condition : ""} name="condition" required>{!isCardCondition(selectedDetail.copy.condition) ? <option disabled value="">Choose a condition (currently {selectedDetail.copy.condition})</option> : null}{cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><span className="text-xs font-medium leading-5 text-zinc-500">Uses the same grading choices as the eBay listing form.</span></label>
+                      <label className="grid min-w-0 content-start gap-1.5 text-sm font-bold">Sticker number<input aria-describedby={`sticker-number-help-${selectedDetail.copy.id}`} className="min-h-11 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium tabular-nums focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.stickerNumber ?? ""} inputMode="numeric" maxLength={20} name="stickerNumber" pattern="[0-9]*" placeholder="e.g. 00042" /><span className="text-xs font-medium leading-5 text-zinc-500" id={`sticker-number-help-${selectedDetail.copy.id}`}>Optional, digits only, and unique to this collection. Leading zeroes are kept.</span></label>
+                      <label className="grid min-w-0 gap-1.5 text-sm font-bold">Card location<input aria-describedby={`card-location-help-${selectedDetail.copy.id}`} className="min-h-11 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.location ?? ""} maxLength={160} name="location" placeholder="e.g. Binder 2 · Page 7 · Slot 3" /><span className="text-xs font-medium leading-5 text-zinc-500" id={`card-location-help-${selectedDetail.copy.id}`}>Optional. Use whatever location format matches how you store your cards.</span></label>
+                    </div>
+                    <label className="grid gap-1.5 text-sm font-bold">Private note<textarea className="min-h-24 resize-y rounded-md border border-zinc-300 bg-white p-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={selectedDetail.copy.privateNote} maxLength={1_000} name="note" /></label>
+                    <button className="min-h-11 w-full rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#741a26] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto sm:justify-self-start" disabled={savingCopy} type="submit">{savingCopy ? "Saving…" : "Save copy details"}</button>
+                  </form>
+
+                  <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} key={`copy-images-${selectedDetail.copy.id}`} onImagesChange={(images) => setPhotoSummaries((current) => ({ ...current, [selectedDetail.copy.id]: { count: images.length, primary: images[0] ? { key: images[0].key, previewUrl: images[0].previewUrl } : null } }))} />
+                  <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
+                </article>
+              </div>
+            ) : (
+              <div className="px-4 py-5 sm:px-5">
+                <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center"><WalletCards aria-hidden="true" className="mx-auto size-7 text-zinc-400" /><p className="mt-3 font-bold">No physical Copies yet</p><p className="mx-auto mt-1 max-w-md text-sm font-medium leading-6 text-zinc-500">This card is still on your Wishlist. Its condition, photos, and acquisition source will appear here after you add a Copy.</p></div>
+                <div className="mt-5 flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 sm:flex-row sm:items-center sm:justify-between"><div><h4 className="font-black text-rose-950">Wishlist settings</h4><p className="mt-1 text-sm font-medium leading-5 text-rose-900">Remove this card if you no longer want to track it.</p></div><button className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-rose-300 bg-white px-4 text-sm font-bold text-rose-800 transition hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" onClick={() => setConfirmTargetRemoval(true)} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove from Wishlist</button></div>
+              </div>
+            )}
           </section>
         </div>
-
-        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-300 bg-white p-4 sm:px-6">{copies.length === 0 ? <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300 bg-white px-4 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" onClick={() => setConfirmTargetRemoval(true)} type="button"><Trash2 className="size-4" /> Remove from Wishlist</button> : <span />}<button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={onClose} type="button">Close</button></footer>
       </div>
+    </div>
+  );
+}
+
+export function InventoryCardDetail({ targetId }: { targetId: string }) {
+  const source = useRecordsDataSource();
+
+  if (source.status === "loading") {
+    return (
+      <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
+        <div className="text-center"><Clock3 className="mx-auto size-7 animate-pulse text-[#8a1f2d]" /><p className="mt-3 font-bold">Preparing card inventory</p></div>
+      </div>
+    );
+  }
+
+  if (source.status === "error") {
+    return (
+      <div className="rounded-lg border border-rose-300 bg-rose-50 px-5 py-8 text-center text-rose-950" role="alert">
+        <p className="font-black">Card inventory could not be loaded</p>
+        <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6">{source.errorMessage || "Refresh the page and try again."}</p>
+      </div>
+    );
+  }
+
+  return <InventoryCardDetailContent source={source} targetId={targetId} />;
+}
+
+function InventoryFilterModal({
+  activeFilterCount,
+  editionOptions,
+  listState,
+  onClear,
+  onClose,
+  onUpdate,
+  rarityOptions,
+}: {
+  activeFilterCount: number;
+  editionOptions: string[];
+  listState: InventoryListState;
+  onClear: () => void;
+  onClose: () => void;
+  onUpdate: (update: Partial<InventoryListState>) => void;
+  rarityOptions: string[];
+}) {
+  const [raritySearch, setRaritySearch] = useState("");
+  const visibleRarities = useMemo(() => {
+    const search = raritySearch.trim().toLocaleLowerCase("en-GB");
+    return search ? rarityOptions.filter((rarity) => rarity.toLocaleLowerCase("en-GB").includes(search)) : rarityOptions;
+  }, [rarityOptions, raritySearch]);
+  const allRaritiesSelected = rarityOptions.length > 0 && listState.rarity.length === rarityOptions.length;
+
+  function toggleRarity(rarity: string) {
+    onUpdate({
+      page: 1,
+      rarity: listState.rarity.includes(rarity)
+        ? listState.rarity.filter((selectedRarity) => selectedRarity !== rarity)
+        : [...listState.rarity, rarity],
+    });
+  }
+
+  return (
+    <div aria-labelledby="inventory-filter-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6" role="dialog">
+      <section className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">Filters</p>
+            <h2 className="mt-1 text-xl font-bold" id="inventory-filter-title">Refine inventory</h2>
+            <p className="mt-1 text-sm font-medium text-zinc-500">{activeFilterCount ? `${activeFilterCount} active` : "No filters active"} <span className="text-zinc-400">· narrow down your collection</span></p>
+          </div>
+          <button aria-label="Close filters" className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={onClose} type="button"><X className="size-4" /></button>
+        </div>
+
+        <div className="grid gap-4 overflow-auto p-4">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-zinc-700">Copies</span>{listState.copyQuantity !== "all" ? <button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]" onClick={() => onUpdate({ copyQuantity: "all", page: 1 })} type="button">Any quantity</button> : null}</div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {[{ label: "All copies", value: "all" }, { label: "2+ copies (same name)", value: "multiple" }].map((option) => {
+                const selected = listState.copyQuantity === option.value;
+                return <button aria-pressed={selected} className={`min-h-11 rounded-md border px-3 text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={option.value} onClick={() => onUpdate({ copyQuantity: option.value as InventoryListState["copyQuantity"], page: 1 })} type="button">{option.label}</button>;
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><div><span className="text-sm font-medium text-zinc-700">Rarity</span><span className="ml-2 text-xs font-semibold text-zinc-500">{listState.rarity.length ? `${listState.rarity.length} selected` : "Any rarity"}</span></div><div className="flex items-center gap-3"><button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826] disabled:text-zinc-400" disabled={allRaritiesSelected || !rarityOptions.length} onClick={() => onUpdate({ page: 1, rarity: rarityOptions })} type="button">Select all</button><button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826] disabled:text-zinc-400" disabled={!listState.rarity.length} onClick={() => onUpdate({ page: 1, rarity: [] })} type="button">Deselect all</button></div></div>
+            <label className="relative mt-2 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input aria-label="Search rarity filters" className="h-10 w-full rounded-md border border-zinc-300 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-[#8a1f2d]" onChange={(event) => setRaritySearch(event.target.value)} placeholder="Search and select multiple rarities" value={raritySearch} /></label>
+            <div className="mt-2 max-h-44 overflow-auto rounded-md border border-zinc-200 bg-white p-2">
+              {visibleRarities.length ? <div className="flex flex-wrap gap-2">{visibleRarities.map((rarity) => { const selected = listState.rarity.includes(rarity); return <button aria-pressed={selected} className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={rarity} onClick={() => toggleRarity(rarity)} type="button"><span>{rarity}</span>{selected ? <Check className="size-4 shrink-0" /> : null}</button>; })}</div> : <p className="px-2 py-3 text-sm font-semibold text-zinc-500">No rarities match that search.</p>}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-zinc-700">Edition</span>{listState.edition !== "all" ? <button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]" onClick={() => onUpdate({ edition: "all", page: 1 })} type="button">Any edition</button> : null}</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">{["all", ...editionOptions].map((edition) => { const selected = listState.edition === edition; return <button aria-pressed={selected} className={`min-h-11 rounded-md border px-3 text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={edition} onClick={() => onUpdate({ edition, page: 1 })} type="button">{edition === "all" ? "All editions" : edition}</button>; })}</div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-white p-4"><button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40" disabled={!activeFilterCount} onClick={onClear} type="button">Clear filters</button><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800" onClick={onClose} type="button">Done</button></div>
+      </section>
     </div>
   );
 }
 
 function InventoryView() {
   const source = useRecordsDataSource();
+  const router = useRouter();
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
   const searchParams = useSearchParams();
-  const requestedTab = searchParams.get("kind");
-  const activeTab: InventoryTab = inventoryTabs.some((tab) => tab.value === requestedTab) ? requestedTab as InventoryTab : "cards";
+  const searchParamsString = searchParams.toString();
+  const listState = useMemo(
+    () => parseInventoryListState(new URLSearchParams(searchParamsString)),
+    [searchParamsString],
+  );
+  const activeTab: InventoryTab = listState.kind;
   const { snapshot } = source;
-  const [cardQuery, setCardQuery] = useState(searchParams.get("card") ?? "");
-  const [cardStatusFilter, setCardStatusFilter] = useState<"all" | "wishlist" | "owned">("all");
-  const [rarityFilter, setRarityFilter] = useState("all");
-  const [editionFilter, setEditionFilter] = useState("all");
-  const [cardPage, setCardPage] = useState(1);
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const cardPageSize = 24;
   const inventoryCards = useMemo(() => {
     const printingsByTarget = new Map<string, CardPrinting[]>();
@@ -1155,22 +1320,51 @@ function InventoryView() {
   }, [snapshot.copies, snapshot.printings, snapshot.targets]);
   const rarityOptions = Array.from(new Set(snapshot.targets.map((target) => target.rarity))).sort();
   const editionOptions = Array.from(new Set(snapshot.targets.map((target) => target.edition))).sort();
-  const filteredTargets = inventoryCards.filter(({ libraryStatus, target }) => {
-    const search = cardQuery.trim().toLocaleLowerCase("en-GB");
+  const activeCopyCountByName = useMemo(() => {
+    const copyCounts = new Map<string, number>();
+
+    for (const { copies, target } of inventoryCards) {
+      const name = target.name.trim().toLocaleLowerCase("en-GB");
+      const activeCopyCount = copies.filter((copy) => copy.status !== "void").length;
+      if (!name || activeCopyCount === 0) continue;
+      copyCounts.set(name, (copyCounts.get(name) ?? 0) + activeCopyCount);
+    }
+
+    return copyCounts;
+  }, [inventoryCards]);
+  const filteredTargets = inventoryCards.filter(({ copies, libraryStatus, target }) => {
+    const search = listState.card.trim().toLocaleLowerCase("en-GB");
+    const normalizedName = target.name.trim().toLocaleLowerCase("en-GB");
+    const hasActiveCopy = copies.some((copy) => copy.status !== "void");
     return (
-      (cardStatusFilter === "all" || libraryStatus.status === cardStatusFilter)
-      && (rarityFilter === "all" || target.rarity === rarityFilter)
-      && (editionFilter === "all" || target.edition === editionFilter)
+      (listState.status === "all" || libraryStatus.status === listState.status)
+      && (listState.copyQuantity !== "multiple" || (hasActiveCopy && (activeCopyCountByName.get(normalizedName) ?? 0) > 1))
+      && (!listState.rarity.length || listState.rarity.includes(target.rarity))
+      && (listState.edition === "all" || target.edition === listState.edition)
       && (!search || [target.name, target.rarity, target.edition].join(" ").toLocaleLowerCase("en-GB").includes(search))
     );
   });
   const cardPageCount = Math.max(1, Math.ceil(filteredTargets.length / cardPageSize));
+  const cardPage = Math.min(listState.page, cardPageCount);
   const visibleTargets = filteredTargets.slice((cardPage - 1) * cardPageSize, cardPage * cardPageSize);
 
-  function switchInventoryTab(event: MouseEvent<HTMLAnchorElement>, href: string) {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    window.history.pushState(null, "", href);
+  useEffect(() => {
+    if (cardPage !== listState.page) {
+      router.replace(inventoryListHref({ ...listState, page: cardPage }), { scroll: false });
+    }
+  }, [cardPage, listState, router]);
+
+  function updateListState(update: Partial<InventoryListState>) {
+    window.history.replaceState(null, "", inventoryListHref({ ...listState, ...update }));
+  }
+
+  const activeFilterCount =
+    (listState.copyQuantity === "all" ? 0 : 1)
+    + listState.rarity.length
+    + (listState.edition === "all" ? 0 : 1);
+
+  function clearFilters() {
+    updateListState({ copyQuantity: "all", edition: "all", page: 1, rarity: [] });
   }
 
   return (
@@ -1180,9 +1374,8 @@ function InventoryView() {
           <Link
             aria-current={activeTab === tab.value ? "page" : undefined}
             className={`inline-flex min-h-11 shrink-0 items-center rounded-md border px-4 text-sm font-bold transition ${activeTab === tab.value ? "border-[#8a1f2d] bg-[#8a1f2d] text-white" : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-950"}`}
-            href={`/records/inventory?kind=${tab.value}`}
+            href={inventoryListHref({ ...listState, kind: tab.value, page: 1 })}
             key={tab.value}
-            onClick={(event) => switchInventoryTab(event, `/records/inventory?kind=${tab.value}`)}
           >
             {tab.label}
           </Link>
@@ -1191,29 +1384,19 @@ function InventoryView() {
 
       {activeTab === "cards" ? (
         <div className="grid gap-3">
-          <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
-            <div className="flex rounded-md border border-zinc-300 bg-zinc-100 p-1 sm:self-start">
-              {(["all", "wishlist", "owned"] as const).map((status) => (
-                <button className={`h-9 rounded px-3 text-sm font-semibold transition ${cardStatusFilter === status ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} key={status} onClick={() => { setCardStatusFilter(status); setCardPage(1); }} type="button">{status === "all" ? "All" : status === "wishlist" ? "Wishlist" : "Owned"}</button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <label className="relative w-full sm:max-w-md">
-              <span className="sr-only">Search card inventory</span>
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-              <input className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => { setCardQuery(event.target.value); setCardPage(1); }} placeholder="Search cards, rarity, or edition" value={cardQuery} />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <select aria-label="Filter inventory by rarity" className="h-11 min-w-40 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => { setRarityFilter(event.target.value); setCardPage(1); }} value={rarityFilter}><option value="all">All rarities</option>{rarityOptions.map((rarity) => <option key={rarity} value={rarity}>{rarity}</option>)}</select>
-              <select aria-label="Filter inventory by edition" className="h-11 min-w-40 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 outline-none focus:border-[#8a1f2d]" onChange={(event) => { setEditionFilter(event.target.value); setCardPage(1); }} value={editionFilter}><option value="all">All editions</option>{editionOptions.map((edition) => <option key={edition} value={edition}>{edition}</option>)}</select>
-              <p className="flex min-h-11 items-center text-sm font-bold text-zinc-500">{filteredTargets.length} card target{filteredTargets.length === 1 ? "" : "s"}</p>
-            </div>
+          <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex rounded-md border border-zinc-300 bg-zinc-100 p-1">
+                {(["all", "wishlist", "owned"] as const).map((status) => <button aria-pressed={listState.status === status} className={`min-h-10 rounded px-3 text-sm font-semibold transition ${listState.status === status ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} key={status} onClick={() => updateListState({ page: 1, status })} type="button">{status === "all" ? "All" : status === "wishlist" ? "Wishlist" : "Owned"}</button>)}
+              </div>
+              <label className="relative min-w-0 flex-1 basis-64"><span className="sr-only">Search card inventory</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => updateListState({ card: event.target.value, page: 1 })} placeholder="Search cards, rarity, or edition" value={listState.card} /></label>
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto"><p className="mr-auto text-sm font-bold text-zinc-500 sm:mr-1">{filteredTargets.length} card target{filteredTargets.length === 1 ? "" : "s"}</p><button className={`inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition ${activeFilterCount ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-950 hover:text-zinc-950"}`} onClick={() => setFilterModalOpen(true)} type="button"><SlidersHorizontal className="size-4" />Filters{activeFilterCount ? <span className="rounded bg-[#8a1f2d] px-1.5 py-0.5 text-xs font-bold text-white">{activeFilterCount}</span> : null}</button><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40" disabled={!activeFilterCount} onClick={clearFilters} type="button">Clear filters</button></div>
             </div>
           </div>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {visibleTargets.map(({ copies, hasKnownPurchaseValue, libraryStatus, printings, purchaseValuePence, target }) => {
             return (
-              <button aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" key={target.id} onClick={() => setSelectedTargetId(target.id)} type="button">
+              <Link aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" href={inventoryCardDetailHref(target.id, listState)} key={target.id}>
                 <span className="grid h-24 w-16 shrink-0 place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100">
                   {target.imageUrl ? (
                     <>
@@ -1236,14 +1419,16 @@ function InventoryView() {
                   </span>
                   <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">{copies.length ? "View copies and sources" : "View Wishlist Target"} <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" /></span>
                 </span>
-              </button>
+              </Link>
             );
           })}
           {visibleTargets.length === 0 ? <div className="col-span-full grid min-h-48 place-items-center rounded-lg border border-dashed border-zinc-300 bg-white text-center"><div><Search className="mx-auto size-6 text-zinc-400" /><p className="mt-2 font-bold">No matching cards</p></div></div> : null}
           </section>
-          {cardPageCount > 1 ? <nav aria-label="Card inventory pages" className="flex items-center justify-between rounded-lg border border-zinc-300 bg-white p-3 text-sm font-bold text-zinc-600"><button aria-label="Previous card inventory page" className="grid size-11 place-items-center rounded-md border border-zinc-300 disabled:opacity-40" disabled={cardPage === 1} onClick={() => setCardPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /></button><span>Page {cardPage} of {cardPageCount}</span><button aria-label="Next card inventory page" className="grid size-11 place-items-center rounded-md border border-zinc-300 disabled:opacity-40" disabled={cardPage === cardPageCount} onClick={() => setCardPage((current) => Math.min(cardPageCount, current + 1))} type="button"><ChevronRight className="size-4" /></button></nav> : null}
+          {cardPageCount > 1 ? <nav aria-label="Card inventory pages" className="flex items-center justify-between rounded-lg border border-zinc-300 bg-white p-3 text-sm font-bold text-zinc-600"><button aria-label="Previous card inventory page" className="grid size-11 place-items-center rounded-md border border-zinc-300 disabled:opacity-40" disabled={cardPage === 1} onClick={() => updateListState({ page: Math.max(1, cardPage - 1) })} type="button"><ChevronLeft className="size-4" /></button><span>Page {cardPage} of {cardPageCount}</span><button aria-label="Next card inventory page" className="grid size-11 place-items-center rounded-md border border-zinc-300 disabled:opacity-40" disabled={cardPage === cardPageCount} onClick={() => updateListState({ page: Math.min(cardPageCount, cardPage + 1) })} type="button"><ChevronRight className="size-4" /></button></nav> : null}
         </div>
       ) : null}
+
+      {filterModalOpen ? <InventoryFilterModal activeFilterCount={activeFilterCount} editionOptions={editionOptions} listState={listState} onClear={clearFilters} onClose={() => setFilterModalOpen(false)} onUpdate={updateListState} rarityOptions={rarityOptions} /> : null}
 
       {activeTab === "sealed" ? (
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1288,7 +1473,6 @@ function InventoryView() {
           </div>
         </section>
       ) : null}
-      {selectedTargetId ? <InventoryCardDialog key={selectedTargetId} onClose={() => setSelectedTargetId(null)} source={source} targetId={selectedTargetId} /> : null}
     </div>
   );
 }

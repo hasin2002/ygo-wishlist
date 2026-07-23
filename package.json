@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:auth": "node --experimental-strip-types --test tests/auth-hosts.test.ts",
-    "test:records": "node --experimental-strip-types --test tests/records-domain.test.ts",
+    "test:records": "node --experimental-strip-types --test tests/records-domain.test.ts tests/inventory-route-state.test.ts",
     "price:ebay": "node scripts/price-ebay.mjs",
     "price:qcsr": "node scripts/price-qcsr-ebay.mjs",
     "cards:types": "node scripts/backfill-card-types.mjs",

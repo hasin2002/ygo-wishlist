@@ -444,7 +444,11 @@ export const cardCopies = pgTable(
     status: text("status", { enum: ["available", "sold", "void"] })
       .notNull()
       .default("available"),
-    condition: text("condition").notNull().default("Near Mint"),
+    condition: text("condition", {
+      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played"],
+    }).notNull().default("Near Mint"),
+    location: text("location"),
+    stickerNumber: text("sticker_number"),
     privateNote: text("private_note").notNull().default(""),
     createdAt: timestamp("created_at", { mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
@@ -454,6 +458,9 @@ export const cardCopies = pgTable(
     index("card_copies_owner_status_idx").on(table.ownerId, table.status),
     index("card_copies_owner_acquired_record_idx").on(table.ownerId, table.acquiredRecordId),
     index("card_copies_owner_sold_record_idx").on(table.ownerId, table.soldRecordId),
+    uniqueIndex("card_copies_owner_sticker_number_unique")
+      .on(table.ownerId, table.stickerNumber)
+      .where(sql`${table.stickerNumber} is not null`),
     uniqueIndex("card_copies_bulk_allocation_unique").on(
       table.ownerId,
       table.bulkLotId,
