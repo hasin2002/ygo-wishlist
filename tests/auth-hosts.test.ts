@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allowedAuthHosts,
+  getAuthClientFetchHeaders,
   getAllowedRequestOrigin,
   isAllowedAuthOrigin,
 } from "../src/lib/auth-hosts.ts";
@@ -21,6 +22,16 @@ test("only approved origins are accepted", () => {
   assert.equal(isAllowedAuthOrigin("http://armless-backslid-surrogate.ngrok-free.dev"), false);
   assert.equal(isAllowedAuthOrigin("https://attacker.example"), false);
   assert.equal(isAllowedAuthOrigin("https://ygo-wishlist.vercel.app/path"), false);
+});
+
+test("only the configured ngrok host bypasses the browser warning", () => {
+  assert.deepEqual(
+    getAuthClientFetchHeaders("armless-backslid-surrogate.ngrok-free.dev"),
+    { "ngrok-skip-browser-warning": "true" },
+  );
+  assert.equal(getAuthClientFetchHeaders("localhost"), undefined);
+  assert.equal(getAuthClientFetchHeaders("ygo-wishlist.vercel.app"), undefined);
+  assert.equal(getAuthClientFetchHeaders("untrusted.ngrok-free.dev"), undefined);
 });
 
 test("the request origin uses validated forwarded public host and protocol", () => {

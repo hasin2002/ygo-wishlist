@@ -1,8 +1,9 @@
 const localhostAuthHost = "localhost:3000";
+const ngrokAuthHost = "armless-backslid-surrogate.ngrok-free.dev";
 
 export const allowedAuthHosts = [
   localhostAuthHost,
-  "armless-backslid-surrogate.ngrok-free.dev",
+  ngrokAuthHost,
   "ygo-wishlist.vercel.app",
 ] as const;
 
@@ -10,6 +11,12 @@ export const dynamicAuthBaseURL = {
   allowedHosts: [...allowedAuthHosts],
   protocol: "auto" as const,
 };
+
+export function getAuthClientFetchHeaders(hostname: string | undefined) {
+  return hostname === ngrokAuthHost
+    ? { "ngrok-skip-browser-warning": "true" }
+    : undefined;
+}
 
 function firstForwardedHeaderValue(value: string | null) {
   return value?.split(",", 1)[0]?.trim() || null;
