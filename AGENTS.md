@@ -4,6 +4,14 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Multi-Agent Collaboration
+
+- Use sub-agents proactively for independent, bounded work that can run in parallel, especially repository reconnaissance, test investigation, and focused implementation slices. This preserves the primary agent's context for integration and decisions.
+- Choose the model and reasoning effort appropriate to the task. Default to `gpt-5.6-terra` with high reasoning effort; use a stronger model only when the task's complexity or risk justifies it.
+- Give every sub-agent a concrete deliverable, relevant constraints, and clear file or ownership boundaries. Do not delegate broad, overlapping implementation work into the same checkout.
+- Check in on sub-agents at meaningful milestones. Review their findings or changes, redirect them when the scope drifts, and integrate only work that is relevant to the user's request.
+- Keep the primary agent accountable for final decisions, validation, user communication, and safe Git operations. Do not use sub-agents merely to offload coordination or to make irreversible decisions without review.
+
 # Concurrent Chat and Git Worktree Safety
 
 - Assume other chats or agents may be working on this repository at the same time.
@@ -86,6 +94,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - If you start a dev server for testing or any other reason, stop it completely when you are done using it.
 - Before finishing, make sure any server process you started has been killed and is no longer running.
+- When testing a local flow that relies on Better Auth callbacks, run the development server and `ngrok http 3000` in separate processes for the duration of the test. Verify that the active public tunnel matches the configured Better Auth base URL before exercising authentication.
+- Treat the Better Auth base URL and tunnel hostname as environment-specific configuration: do not hard-code them into source files or documentation, and do not modify `.env*` files unless the user explicitly asks.
+- Stop the ngrok tunnel as well as the development server when testing is complete. Do not expose a local server through a tunnel longer than needed.
 
 # Database, Environment, and Deployment Safety
 
