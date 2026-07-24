@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   ebayCardCategory,
@@ -11,9 +12,20 @@ import {
 import { isListingImageArchiveConfigured } from "@/server/ebay-listing-images";
 import {
   EbayListingError,
+  getEbayListingEligibility,
   publishEbayListing,
   verifyEbayListing,
 } from "@/server/ebay-listing";
+import {
+  EbayListingReconciliationError,
+  ebayListingStatusSummary,
+  getLatestEbayListingForCopy,
+  reconcileEbayListing,
+} from "@/server/ebay-listing-reconciliation";
+import {
+  ensureEbayNotificationSubscriptions,
+  getEbayNotificationSubscriptionStatus,
+} from "@/server/ebay-notification-service";
 import { adminProcedure, router } from "@/server/trpc";
 
 const itemSpecificValue = z.string().trim().min(1).max(65);
@@ -57,6 +69,8 @@ function ebayFailure(error: unknown) {
     code: "BAD_REQUEST",
     message: error instanceof EbayAuthorizationError
       ? error.message
+      : error instanceof EbayListingReconciliationError
+        ? error.message
       : error instanceof EbayListingError
       ? error.message
       : "The eBay request could not be completed. Try again shortly.",
@@ -64,11 +78,49 @@ function ebayFailure(error: unknown) {
 }
 
 export const ebayRouter = router({
-  status: adminProcedure.query(async ({ ctx }) => ({
-    configured: isEbayOAuthConfigured(),
-    connection: await getEbayConnectionStatus(ctx.session.user.id),
-    imageArchiveConfigured: isListingImageArchiveConfigured(),
-  })),
+  status: adminProcedure.query(async ({ ctx }) => {
+    const [connection, notifications] = await Promise.all([
+      getEbayConnectionStatus(ctx.session.user.id),
+      getEbayNotificationSubscriptionStatus(ctx.session.user.id),
+    ]);
+    return {
+      configured: isEbayOAuthConfigured(),
+      connection,
+      imageArchiveConfigured: isListingImageArchiveConfigured(),
+      notifications,
+    };
+  }),
+  eligibility: adminProcedure.input(z.object({ copyId: z.string().min(1) })).query(({ ctx, input }) =>
+    getEbayListingEligibility(ctx.session.user.id, input.copyId)),
+  listingStatus: adminProcedure.input(z.object({ copyId: z.string().min(1) })).query(async ({ ctx, input }) => {
+    const listing = await getLatestEbayListingForCopy(
+      ctx.session.user.id,
+      input.copyId,
+    );
+    return listing ? ebayListingStatusSummary(listing) : null;
+  }),
+  refreshListingStatus: adminProcedure.input(z.object({ copyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    const listing = await getLatestEbayListingForCopy(
+      ctx.session.user.id,
+      input.copyId,
+    );
+    if (!listing) return null;
+    try {
+      return (await reconcileEbayListing({
+        listingId: listing.id,
+        ownerId: ctx.session.user.id,
+      })).listing;
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
+  repairNotifications: adminProcedure.mutation(async ({ ctx }) => {
+    try {
+      return await ensureEbayNotificationSubscriptions(ctx.session.user.id);
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
   validate: adminProcedure.input(listingSchema).mutation(async ({ ctx, input }) => {
     try {
       return await verifyEbayListing(ctx.session.user.id, input);
@@ -84,4 +136,3 @@ export const ebayRouter = router({
     }
   }),
 });
-import { TRPCError } from "@trpc/server";

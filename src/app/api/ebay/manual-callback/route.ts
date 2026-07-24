@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
+import { ensureEbayNotificationSubscriptions } from "@/server/ebay-notification-service";
 import {
   EbayAuthorizationError,
   EbayConfigurationError,
@@ -76,6 +77,10 @@ export async function POST(request: NextRequest) {
       ownerId: session.user.id,
       refreshToken: token.refresh_token,
       refreshTokenExpiresIn: token.refresh_token_expires_in,
+      scopes: token.scope,
+    });
+    after(async () => {
+      await ensureEbayNotificationSubscriptions(session.user.id).catch(() => undefined);
     });
     return finish(request, "/ebay?connected=1");
   } catch (error) {

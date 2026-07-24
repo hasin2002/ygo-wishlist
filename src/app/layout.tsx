@@ -47,7 +47,11 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitializer }} />
+        <Script
+          dangerouslySetInnerHTML={{ __html: themeInitializer }}
+          id="theme-initializer"
+          strategy="beforeInteractive"
+        />
         {process.env.NODE_ENV === "development" ? (
           <Script
             crossOrigin="anonymous"

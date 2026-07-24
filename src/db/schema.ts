@@ -517,13 +517,192 @@ export const ebayListings = pgTable(
     status: text("status", { enum: ["active", "ended"] })
       .notNull()
       .default("active"),
+    listingState: text("listing_state", {
+      enum: ["active", "ended", "suspended", "unknown"],
+    })
+      .notNull()
+      .default("unknown"),
+    saleState: text("sale_state", {
+      enum: ["none", "pending", "paid", "cancelled", "needs_review"],
+    })
+      .notNull()
+      .default("none"),
+    remoteListingStatus: text("remote_listing_status"),
+    remoteOrderStatus: text("remote_order_status"),
+    quantitySold: integer("quantity_sold"),
+    endingReason: text("ending_reason"),
+    listingStartedAt: timestamp("listing_started_at", { mode: "date" }),
+    listingEndedAt: timestamp("listing_ended_at", { mode: "date" }),
+    paymentPendingAt: timestamp("payment_pending_at", { mode: "date" }),
+    paidAt: timestamp("paid_at", { mode: "date" }),
+    cancelledAt: timestamp("cancelled_at", { mode: "date" }),
+    orderId: text("order_id"),
+    orderLineItemId: text("order_line_item_id"),
+    transactionId: text("transaction_id"),
+    saleRecordId: text("sale_record_id").references(() => recordEntries.id, {
+      onDelete: "restrict",
+    }),
+    lastRemoteEventAt: timestamp("last_remote_event_at", { mode: "date" }),
+    lastNotificationId: text("last_notification_id"),
+    lastNotificationAt: timestamp("last_notification_at", { mode: "date" }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { mode: "date" }),
+    lastSyncedAt: timestamp("last_synced_at", { mode: "date" }),
+    retryCount: integer("retry_count").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { mode: "date" }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [
     uniqueIndex("ebay_listings_item_id_unique").on(table.itemId),
+    uniqueIndex("ebay_listings_owner_copy_open_unique")
+      .on(table.ownerId, table.copyId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex("ebay_listings_owner_order_line_unique")
+      .on(table.ownerId, table.orderId, table.orderLineItemId)
+      .where(sql`${table.orderId} is not null and ${table.orderLineItemId} is not null`),
+    uniqueIndex("ebay_listings_owner_transaction_unique")
+      .on(table.ownerId, table.transactionId)
+      .where(sql`${table.transactionId} is not null`),
     index("ebay_listings_owner_copy_idx").on(table.ownerId, table.copyId),
     index("ebay_listings_owner_status_idx").on(table.ownerId, table.status),
+    index("ebay_listings_owner_lifecycle_idx").on(
+      table.ownerId,
+      table.listingState,
+      table.saleState,
+    ),
+    index("ebay_listings_reconcile_due_idx").on(
+      table.listingState,
+      table.saleState,
+      table.nextRetryAt,
+    ),
+    index("ebay_listings_sale_record_idx").on(table.ownerId, table.saleRecordId),
+    check(
+      "ebay_listings_quantity_sold_nonnegative",
+      sql`${table.quantitySold} is null or ${table.quantitySold} >= 0`,
+    ),
+    check("ebay_listings_retry_count_nonnegative", sql`${table.retryCount} >= 0`),
+  ],
+);
+
+/**
+ * The expected state of one eBay notification subscription for an owner/topic.
+ * Notification setup is retained independently of a seller refresh token so
+ * connection or scope failures can be repaired without losing health history.
+ */
+export const ebayNotificationSubscriptions = pgTable(
+  "ebay_notification_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    topic: text("topic").notNull(),
+    destinationId: text("destination_id").notNull(),
+    remoteSubscriptionId: text("remote_subscription_id"),
+    status: text("status", {
+      enum: ["pending", "enabled", "disabled", "marked_down", "unsupported", "error"],
+    })
+      .notNull()
+      .default("pending"),
+    scopeVersion: integer("scope_version").notNull().default(1),
+    enabledAt: timestamp("enabled_at", { mode: "date" }),
+    disabledAt: timestamp("disabled_at", { mode: "date" }),
+    verifiedAt: timestamp("verified_at", { mode: "date" }),
+    expiresAt: timestamp("expires_at", { mode: "date" }),
+    lastCheckedAt: timestamp("last_checked_at", { mode: "date" }),
+    lastNotificationAt: timestamp("last_notification_at", { mode: "date" }),
+    retryCount: integer("retry_count").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { mode: "date" }),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_notification_sub_remote_id_unique")
+      .on(table.remoteSubscriptionId)
+      .where(sql`${table.remoteSubscriptionId} is not null`),
+    uniqueIndex("ebay_notification_sub_owner_topic_dest_unique").on(
+      table.ownerId,
+      table.topic,
+      table.destinationId,
+    ),
+    index("ebay_notification_sub_owner_status_idx").on(table.ownerId, table.status),
+    index("ebay_notification_sub_retry_idx").on(table.status, table.nextRetryAt),
+    check(
+      "ebay_notification_sub_scope_version_positive",
+      sql`${table.scopeVersion} >= 1`,
+    ),
+    check(
+      "ebay_notification_sub_retry_count_nonnegative",
+      sql`${table.retryCount} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Idempotent notification inbox. Only normalized routing/audit fields are
+ * stored; unnecessary buyer payload data does not belong in this table.
+ */
+export const ebayNotificationEvents = pgTable(
+  "ebay_notification_events",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").references(() => users.id, { onDelete: "cascade" }),
+    subscriptionId: text("subscription_id").references(
+      () => ebayNotificationSubscriptions.id,
+      { onDelete: "set null" },
+    ),
+    listingId: text("listing_id").references(() => ebayListings.id, {
+      onDelete: "set null",
+    }),
+    notificationId: text("notification_id").notNull(),
+    topic: text("topic").notNull(),
+    sellerUserId: text("seller_user_id"),
+    itemId: text("item_id"),
+    listingRefs: jsonb("listing_refs")
+      .$type<Array<{ itemId: string; orderLineItemId: string | null }>>()
+      .notNull()
+      .default([]),
+    orderId: text("order_id"),
+    orderLineItemId: text("order_line_item_id"),
+    eventAt: timestamp("event_at", { mode: "date" }),
+    publishedAt: timestamp("published_at", { mode: "date" }),
+    receivedAt: timestamp("received_at", { mode: "date" }).notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    processingStatus: text("processing_status", {
+      enum: ["pending", "processing", "processed", "ignored", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", { mode: "date" }),
+    processedAt: timestamp("processed_at", { mode: "date" }),
+    outcome: text("outcome"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_notification_events_notification_id_unique").on(
+      table.notificationId,
+    ),
+    index("ebay_notification_events_owner_status_retry_idx").on(
+      table.ownerId,
+      table.processingStatus,
+      table.nextAttemptAt,
+    ),
+    index("ebay_notification_events_owner_item_idx").on(table.ownerId, table.itemId),
+    index("ebay_notification_events_owner_order_idx").on(table.ownerId, table.orderId),
+    index("ebay_notification_events_seller_user_idx").on(table.sellerUserId),
+    index("ebay_notification_events_listing_idx").on(table.listingId),
+    check(
+      "ebay_notification_events_attempt_count_nonnegative",
+      sql`${table.attemptCount} >= 0`,
+    ),
   ],
 );
 
@@ -719,4 +898,7 @@ export type TargetBinderSlotRow = typeof targetBinderSlots.$inferSelect;
 export type TargetWheelEntryRow = typeof targetWheelEntries.$inferSelect;
 export type TargetMonthlyFavoriteRow = typeof targetMonthlyFavorites.$inferSelect;
 export type EbayListingRow = typeof ebayListings.$inferSelect;
+export type EbayNotificationEventRow = typeof ebayNotificationEvents.$inferSelect;
+export type EbayNotificationSubscriptionRow =
+  typeof ebayNotificationSubscriptions.$inferSelect;
 export type User = typeof users.$inferSelect;

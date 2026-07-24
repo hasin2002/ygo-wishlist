@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -24,6 +24,10 @@ import type {
   RecordLine,
   RecordsSnapshot,
 } from "@/lib/records/types";
+import {
+  EbayListingReconciliationError,
+  reconcileEbayListing,
+} from "@/server/ebay-listing-reconciliation";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -914,6 +918,49 @@ export const recordsRouter = router({
     const uniqueCopyIds = Array.from(new Set(input.copyIds));
     const saleId = id("record");
     const now = new Date();
+    const trackedListings = await db.select({
+      id: ebayListings.id,
+    }).from(ebayListings).where(and(
+      eq(ebayListings.ownerId, ownerId),
+      inArray(ebayListings.copyId, uniqueCopyIds),
+      or(
+        eq(ebayListings.status, "active"),
+        eq(ebayListings.listingState, "unknown"),
+        eq(ebayListings.saleState, "pending"),
+        eq(ebayListings.saleState, "needs_review"),
+      ),
+    ));
+    for (const listing of trackedListings) {
+      try {
+        await reconcileEbayListing({ listingId: listing.id, ownerId });
+      } catch (error) {
+        if (error instanceof EbayListingReconciliationError) {
+          conflict(`${error.message} The Sale has not been saved.`);
+        }
+        throw error;
+      }
+    }
+    const unresolvedListings = await db.select({
+      copyId: ebayListings.copyId,
+      saleState: ebayListings.saleState,
+    }).from(ebayListings).where(and(
+      eq(ebayListings.ownerId, ownerId),
+      inArray(ebayListings.copyId, uniqueCopyIds),
+      or(
+        eq(ebayListings.status, "active"),
+        eq(ebayListings.listingState, "unknown"),
+        eq(ebayListings.saleState, "pending"),
+        eq(ebayListings.saleState, "needs_review"),
+      ),
+    ));
+    const unpaidOrUncertain = unresolvedListings.filter((listing) => listing.saleState !== "paid");
+    if (unpaidOrUncertain.length) {
+      conflict("One or more selected Copies still has a live, pending, or uncertain eBay listing. Resolve it before recording this Sale.");
+    }
+    if (unresolvedListings.length && normalize(input.source) !== "ebay") {
+      conflict("This Sale matches a paid eBay listing. Set the Sale source to eBay so the listing and Record can be linked.");
+    }
+
     await db.transaction(async (tx) => {
       const copies = await tx.select().from(cardCopies).where(and(
         eq(cardCopies.ownerId, ownerId), inArray(cardCopies.id, uniqueCopyIds),
@@ -970,6 +1017,17 @@ export const recordsRouter = router({
           role: "sale" as const, createdAt: now,
         })));
         position += 1;
+      }
+      if (unresolvedListings.length) {
+        await tx.update(ebayListings).set({
+          saleRecordId: saleId,
+          status: "ended",
+          updatedAt: now,
+        }).where(and(
+          eq(ebayListings.ownerId, ownerId),
+          inArray(ebayListings.copyId, uniqueCopyIds),
+          eq(ebayListings.saleState, "paid"),
+        ));
       }
     });
     return { id: saleId };
@@ -1518,6 +1576,10 @@ export const recordsRouter = router({
         const links = await tx.select().from(recordLineCopies).where(and(
           eq(recordLineCopies.ownerId, ownerId), eq(recordLineCopies.recordId, record.id), eq(recordLineCopies.role, "sale"),
         ));
+        const linkedEbayListings = await tx.select({ id: ebayListings.id }).from(ebayListings).where(and(
+          eq(ebayListings.ownerId, ownerId),
+          eq(ebayListings.saleRecordId, record.id),
+        ));
         const copyIds = links.map((link) => link.copyId);
         if (input.status === "void") {
           await tx.update(cardCopies).set({
@@ -1525,6 +1587,16 @@ export const recordsRouter = router({
           }).where(and(
             eq(cardCopies.ownerId, ownerId), eq(cardCopies.soldRecordId, record.id),
           ));
+          if (linkedEbayListings.length) {
+            await tx.update(ebayListings).set({
+              saleState: "needs_review",
+              status: "active",
+              updatedAt: now,
+            }).where(and(
+              eq(ebayListings.ownerId, ownerId),
+              eq(ebayListings.saleRecordId, record.id),
+            ));
+          }
         } else if (copyIds.length) {
           const copies = await tx.select().from(cardCopies).where(and(
             eq(cardCopies.ownerId, ownerId), inArray(cardCopies.id, copyIds),
@@ -1537,6 +1609,16 @@ export const recordsRouter = router({
             await tx.update(cardCopies).set({
               status: "sold", soldRecordId: record.id, soldLineId: lineByCopy.get(copy.id), updatedAt: now,
             }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
+          }
+          if (linkedEbayListings.length) {
+            await tx.update(ebayListings).set({
+              saleState: "paid",
+              status: "ended",
+              updatedAt: now,
+            }).where(and(
+              eq(ebayListings.ownerId, ownerId),
+              eq(ebayListings.saleRecordId, record.id),
+            ));
           }
         }
       } else if (record.type === "pack-opening") {
