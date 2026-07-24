@@ -61,3 +61,12 @@ export function inventoryCardDetailHref(targetId: string, state: InventoryListSt
   if (copyId) searchParams.set("copy", copyId);
   return `/records/inventory/cards/${encodeURIComponent(targetId)}?${searchParams.toString()}`;
 }
+
+export function inventoryCopySellHref(
+  targetId: string,
+  copyId: string,
+  state: InventoryListState,
+) {
+  const searchParams = serializeInventoryListState({ ...state, kind: "cards" });
+  return `/records/inventory/cards/${encodeURIComponent(targetId)}/copies/${encodeURIComponent(copyId)}/sell?${searchParams.toString()}`;
+}

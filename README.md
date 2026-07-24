@@ -47,8 +47,26 @@ EBAY_MARKETPLACE_ID=EBAY_GB
 EBAY_OAUTH_RU_NAME=...
 # Optional development RuName whose accepted URL is eBay's standard success page.
 EBAY_OAUTH_LOCAL_RU_NAME=...
+# Optional when the production domain is not ygo-wishlist.vercel.app.
+EBAY_NOTIFICATION_ENDPOINT_URL=https://your-production-domain/api/ebay/notifications
+# Optional if eBay has no alert email configured and the admin uses a placeholder email.
+EBAY_NOTIFICATION_ALERT_EMAIL=you@example.com
+CRON_SECRET=<a long random value>
 BETTER_AUTH_SECRET=<a new random secret>
 ```
+
+eBay cannot verify a notification destination on `localhost`. To exercise
+notification setup locally, start the approved tunnel with `ngrok http 3000`,
+then add its exact webhook URL to `.env.local`:
+
+```bash
+EBAY_NOTIFICATION_ENDPOINT_URL=https://armless-backslid-surrogate.ngrok-free.dev/api/ebay/notifications
+```
+
+Restart the development server after changing `.env.local`, verify the tunnel
+is forwarding to port 3000, and then retry notification setup. Keep the tunnel
+running while testing notification delivery. Deployed environments should use
+the stable production webhook URL instead of the ngrok URL.
 
 Authentication hosts are defined in `src/lib/auth-hosts.ts`. The application accepts the approved local, tunnel, and deployed hosts through Better Auth's dynamic base-URL configuration; `BETTER_AUTH_URL` is not required.
 
@@ -70,34 +88,46 @@ To enable the connection:
 3. Apply the new schema using `npm run db:push` only when you are ready to make
    the database change, then deploy.
 4. Sign into the site as an administrator, open `/ebay`, and select **Connect
-   eBay**. eBay will request the `sell.inventory` permission. Then open a
-   physical Copy in Records → Inventory and select **Sell on eBay**.
+   eBay**. eBay requests listing access plus read-only order and notification
+   permissions. Then open a physical Copy in Records → Inventory and select
+   **Sell on eBay**.
 
 The app never stores the short-lived access token. It encrypts the eBay refresh
 token in the database using the existing server-only `BETTER_AUTH_SECRET` and
 obtains access tokens on demand. Do not paste a manually generated eBay token
 into environment files or source code.
 
-Before deploying a fresh database, create/update the tables:
+Existing seller connections must be reconnected once after this change so the
+stored grant includes the additional read-only scopes. The existing client ID,
+client secret, and RuName remain valid. The current production keyset supports
+an immediate `ORDER_CONFIRMATION` subscription. eBay advertises `LISTING`, but
+does not assign this keyset its required `sell.listing.read` consent scope, so
+the UI reports partial notification coverage instead of breaking connection.
+Listings are still reconciled when the user interacts with a Copy and by the
+daily safety-net job. Every delivered callback is validated against eBay's
+public key before it is persisted or processed.
+
+Before deploying, create/update the tables:
 
 ```bash
 npm run db:push
 ```
 
-## Scheduled price refresh
+## Scheduled eBay reconciliation
 
-Production refreshes the public Library collection every day at 23:45 UTC through
-Vercel Cron. Before the first production deployment, add a `CRON_SECRET`
-environment variable in the Vercel project settings. Use a long random value;
-Vercel sends it to the scheduled route automatically, and the route rejects
-requests without it.
+Production checks unresolved eBay listings and retries failed notification work
+every day at 02:15 UTC through Vercel Cron. This is a safety net for missed or
+delayed eBay notifications; user selling and Sale-record actions also reconcile
+on demand. Add a `CRON_SECRET` environment variable in the Vercel project
+settings and use a long random value. Vercel sends it to the scheduled route
+automatically, and the route rejects requests without it.
 
 The schedule is configured in `vercel.json`. Vercel Cron runs only on production
 deployments and uses UTC.
 
-The refresh timestamp also needs the `pricing_refresh_states` table. Apply the
-schema change once to the production database with `npm run db:push` using its
-production `DATABASE_URL`.
+The former daily price-refresh cron and its private endpoint were removed. The
+manual pricing actions remain available and continue to use their existing
+pricing tables.
 
 If migrating existing local SQLite data, run:
 

@@ -1,5 +1,13 @@
-import { CheckCircle2, CircleAlert, Link2, ShieldCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  CircleAlert,
+  Link2,
+  RefreshCw,
+  ShieldCheck,
+} from "lucide-react";
 import { AppHeader } from "@/components/app-header";
+import { EbayNotificationSetupCard } from "@/components/ebay-notification-setup-card";
+import { getEbayNotificationSubscriptionStatus } from "@/server/ebay-notification-service";
 import { getEbayConnectionStatus, isEbayOAuthConfigured } from "@/server/ebay-seller";
 import { getCurrentSession } from "@/server/session";
 
@@ -22,14 +30,19 @@ function formatDate(date: Date) {
 export default async function EbayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ connected?: string; disconnected?: string; error?: keyof typeof messages }>;
+  searchParams: Promise<{
+    connected?: string;
+    disconnected?: string;
+    error?: keyof typeof messages;
+  }>;
 }) {
   const session = await getCurrentSession();
   if (!session) return null;
 
-  const [params, connection] = await Promise.all([
+  const [params, connection, notifications] = await Promise.all([
     searchParams,
     getEbayConnectionStatus(session.user.id),
+    getEbayNotificationSubscriptionStatus(session.user.id),
   ]);
   const configured = isEbayOAuthConfigured();
   const localDevelopment = process.env.NODE_ENV !== "production";
@@ -61,9 +74,31 @@ export default async function EbayPage({
           {connection ? <div className="mt-6 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm"><p className="font-bold text-zinc-950">Connection details</p><dl className="mt-3 grid gap-3 sm:grid-cols-2"><div><dt className="text-zinc-500">Connected</dt><dd className="mt-1 font-semibold">{formatDate(connection.connectedAt)}</dd></div><div><dt className="text-zinc-500">Reconnect by</dt><dd className="mt-1 font-semibold">{formatDate(connection.refreshTokenExpiresAt)}</dd></div></dl></div> : null}
 
           <div className="mt-6 flex flex-wrap gap-3">
-            {connection ? <form action="/api/ebay/disconnect" method="post"><button className="inline-flex min-h-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]" type="submit">Disconnect eBay</button></form> : configured ? <a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#8a1f2d] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826]" href="/api/ebay/connect" rel={localDevelopment ? "noreferrer" : undefined} target={localDevelopment ? "_blank" : undefined}><Link2 className="size-4" />Connect eBay</a> : null}
+            {connection ? <><a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#8a1f2d] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826]" href="/api/ebay/connect" rel={localDevelopment ? "noreferrer" : undefined} target={localDevelopment ? "_blank" : undefined}><RefreshCw className="size-4" />Reconnect eBay</a><form action="/api/ebay/disconnect" method="post"><button className="inline-flex min-h-11 items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]" type="submit">Disconnect eBay</button></form></> : configured ? <a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#8a1f2d] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826]" href="/api/ebay/connect" rel={localDevelopment ? "noreferrer" : undefined} target={localDevelopment ? "_blank" : undefined}><Link2 className="size-4" />Connect eBay</a> : null}
           </div>
         </section>
+
+        {!notifications.schemaReady ? <section className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-sm sm:p-7">
+          <div className="flex gap-3">
+            <CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-800" />
+            <div>
+              <h2 className="text-xl font-black tracking-tight text-amber-950">Database update required</h2>
+              <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-amber-950">The app code is ready, but the eBay notification tables have not been added to this database yet. Apply the checked-in schema update before enabling immediate listing updates.</p>
+              <code className="mt-4 block w-fit rounded-lg bg-amber-950 px-3 py-2 text-sm font-bold text-amber-50">npm run db:push</code>
+            </div>
+          </div>
+        </section> : connection ? <EbayNotificationSetupCard
+          initialStatus={{
+            coverage: notifications.coverage,
+            enabled: notifications.enabled,
+            subscriptions: notifications.subscriptions.map((subscription) => ({
+              lastError: subscription.lastError,
+              status: subscription.status,
+              topic: subscription.topic,
+            })),
+          }}
+          notificationReady={connection.notificationReady}
+        /> : null}
 
         {localDevelopment && configured && !connection ? <section className="mt-5 rounded-2xl border border-sky-300 bg-sky-50 p-5 text-sky-950 sm:p-7"><h2 className="text-lg font-black">Finish the local connection</h2><p className="mt-2 max-w-2xl text-sm font-medium leading-6">eBay opens in a new tab. After it says “Authorization successfully completed,” copy the full URL from that tab and paste it below within five minutes. The app verifies the signed state and one-time code before saving anything.</p><form action="/api/ebay/manual-callback" className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" method="post"><label className="grid gap-1.5 text-sm font-bold">eBay success-page URL<input className="h-11 min-w-0 rounded-lg border border-sky-300 bg-white px-3 font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" name="callbackUrl" placeholder="https://auth2.ebay.com/oauth2/ThirdPartyAuthSucessFailure?..." required type="url" /></label><button className="inline-flex min-h-11 items-center justify-center rounded-lg bg-sky-900 px-4 text-sm font-bold text-white hover:bg-sky-800" type="submit">Complete connection</button></form></section> : null}
 

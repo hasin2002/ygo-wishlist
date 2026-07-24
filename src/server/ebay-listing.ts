@@ -24,10 +24,21 @@ import {
 } from "@/server/ebay-listing-images";
 import { readCardInventoryImage } from "@/server/card-inventory-images";
 import { getEbaySellerAccessToken } from "@/server/ebay-seller";
+import {
+  EbayListingReconciliationError,
+  ebayListingStatusSummary,
+  getLatestEbayListingForCopy,
+  reconcileEbayListing,
+} from "@/server/ebay-listing-reconciliation";
+import {
+  callEbayTradingApi,
+  EbayTradingError,
+  ebayXmlContainers,
+  ebayXmlEscape,
+  ebayXmlText,
+} from "@/server/ebay-trading";
 
 const marketplaceId = "EBAY_GB";
-const tradingCompatibilityLevel = "1423";
-const tradingSiteId = "3";
 
 export type EbayListingDetails = {
   copyId: string;
@@ -68,44 +79,42 @@ export type EbayVerification = {
   readyToPublish: boolean;
 };
 
+export type EbayListingEligibility =
+  | {
+    eligible: true;
+    listing: ReturnType<typeof ebayListingStatusSummary> | null;
+    status: "eligible";
+  }
+  | {
+    eligible: false;
+    listing?: ReturnType<typeof ebayListingStatusSummary> | null;
+    reconnectRequired?: boolean;
+    status:
+      | "not_owned"
+      | "unavailable"
+      | "active_listing"
+      | "payment_pending"
+      | "paid"
+      | "needs_review"
+      | "suspended"
+      | "sync_unavailable";
+  };
+
 export class EbayListingError extends Error {}
 
-function xmlEscape(value: string | number) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-function xmlUnescape(value: string) {
-  return value
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">");
-}
-
-function xmlText(xml: string, name: string) {
-  const value = xml.match(new RegExp(`<${name}(?: [^>]*)?>([^<]*)</${name}>`))?.[1];
-  return value === undefined ? null : xmlUnescape(value);
-}
-
 function errorsFromXml(xml: string): EbayError[] {
-  return [...xml.matchAll(/<Errors>([\s\S]*?)<\/Errors>/g)].map((match) => ({
-    code: xmlText(match[1], "ErrorCode"),
-    message: xmlText(match[1], "LongMessage") ?? xmlText(match[1], "ShortMessage"),
-    severity: xmlText(match[1], "SeverityCode"),
+  return ebayXmlContainers(xml, "Errors").map((errorXml) => ({
+    code: ebayXmlText(errorXml, "ErrorCode"),
+    message: ebayXmlText(errorXml, "LongMessage") ?? ebayXmlText(errorXml, "ShortMessage"),
+    severity: ebayXmlText(errorXml, "SeverityCode"),
   }));
 }
 
 function feesFromXml(xml: string): EbayFee[] {
-  return [...xml.matchAll(/<Fee>([\s\S]*?)<\/Fee>/g)].map((match) => ({
-    amount: Number(xmlText(match[1], "Fee") ?? 0),
-    currency: match[1].match(/<Fee currencyID="([^"]+)"/)?.[1] ?? "GBP",
-    name: xmlText(match[1], "Name"),
+  return ebayXmlContainers(xml, "Fee").map((feeXml) => ({
+    amount: Number(ebayXmlText(feeXml, "Fee") ?? 0),
+    currency: feeXml.match(/<Fee currencyID="([^"]+)"/)?.[1] ?? "GBP",
+    name: ebayXmlText(feeXml, "Name"),
   }));
 }
 
@@ -122,33 +131,31 @@ function descriptionHtml(value: string) {
 }
 
 async function tradingCall(ownerId: string, callName: "AddItem" | "VerifyAddItem", itemXml: string) {
-  const accessToken = await getEbaySellerAccessToken(ownerId);
-  const response = await fetch("https://api.ebay.com/ws/api.dll", {
-    body: `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents"><RequesterCredentials><eBayAuthToken>${xmlEscape(accessToken)}</eBayAuthToken></RequesterCredentials>${itemXml}</${callName}Request>`,
-    headers: {
-      "Content-Type": "text/xml",
-      "X-EBAY-API-CALL-NAME": callName,
-      "X-EBAY-API-COMPATIBILITY-LEVEL": tradingCompatibilityLevel,
-      "X-EBAY-API-SITEID": tradingSiteId,
-    },
-    method: "POST",
-  });
-  const xml = await response.text();
-  const errors = errorsFromXml(xml);
-  if (!response.ok && !errors.length) {
-    throw new EbayListingError(`eBay could not process the listing (${response.status}).`);
+  let xml: string;
+  try {
+    xml = (await callEbayTradingApi({
+      body: itemXml,
+      callName,
+      ownerId,
+    })).xml;
+  } catch (error) {
+    if (error instanceof EbayTradingError) {
+      throw new EbayListingError(error.message);
+    }
+    throw error;
   }
+  const errors = errorsFromXml(xml);
   return {
-    ack: xmlText(xml, "Ack"),
+    ack: ebayXmlText(xml, "Ack"),
     errors,
     fees: feesFromXml(xml),
-    itemId: xmlText(xml, "ItemID"),
+    itemId: ebayXmlText(xml, "ItemID"),
   };
 }
 
 function listingItemXml(details: EbayListingDetails) {
   const pictures = details.images
-    .map((image) => `<PictureURL>${xmlEscape(image.ebayUrl)}</PictureURL>`)
+    .map((image) => `<PictureURL>${ebayXmlEscape(image.ebayUrl)}</PictureURL>`)
     .join("");
   const specificValues: Array<[string, string]> = [
     ["Card Size", details.itemSpecifics.cardSize],
@@ -161,13 +168,13 @@ function listingItemXml(details: EbayListingDetails) {
     ["Language", details.language],
   ];
   const specifics = specificValues
-    .map(([name, value]) => `<NameValueList><Name>${xmlEscape(name)}</Name><Value>${xmlEscape(value)}</Value></NameValueList>`)
+    .map(([name, value]) => `<NameValueList><Name>${ebayXmlEscape(name)}</Name><Value>${ebayXmlEscape(value)}</Value></NameValueList>`)
     .join("");
   const location = details.location
-    ? `<Location>${xmlEscape(details.location)}</Location>`
+    ? `<Location>${ebayXmlEscape(details.location)}</Location>`
     : "";
 
-  return `<Item><Title>${xmlEscape(details.title)}</Title><Description>${descriptionHtml(details.description)}</Description><PrimaryCategory><CategoryID>${xmlEscape(details.categoryId)}</CategoryID></PrimaryCategory><ConditionDescriptors><ConditionDescriptor><Name>40001</Name><Value>${details.cardConditionDescriptorValueId}</Value></ConditionDescriptor></ConditionDescriptors><ConditionID>4000</ConditionID><ItemSpecifics>${specifics}</ItemSpecifics><StartPrice currencyID="GBP">${formatPrice(details.pricePence)}</StartPrice><CategoryMappingAllowed>true</CategoryMappingAllowed><Country>GB</Country><Currency>GBP</Currency><DispatchTimeMax>${details.dispatchTimeMax}</DispatchTimeMax><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType>${location}<PostalCode>${xmlEscape(details.postalCode)}</PostalCode><PictureDetails>${pictures}</PictureDetails><Quantity>1</Quantity><ReturnPolicy><ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption></ReturnPolicy><ShippingDetails><ShippingType>Flat</ShippingType><ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority><ShippingService>${xmlEscape(details.shippingService)}</ShippingService><ShippingServiceCost currencyID="GBP">${formatPrice(details.shippingCostPence)}</ShippingServiceCost><FreeShipping>${details.shippingCostPence === 0 ? "true" : "false"}</FreeShipping></ShippingServiceOptions></ShippingDetails><Site>UK</Site><UUID>${crypto.randomUUID().replaceAll("-", "").toUpperCase()}</UUID></Item>`;
+  return `<Item><Title>${ebayXmlEscape(details.title)}</Title><Description>${descriptionHtml(details.description)}</Description><PrimaryCategory><CategoryID>${ebayXmlEscape(details.categoryId)}</CategoryID></PrimaryCategory><ConditionDescriptors><ConditionDescriptor><Name>40001</Name><Value>${details.cardConditionDescriptorValueId}</Value></ConditionDescriptor></ConditionDescriptors><ConditionID>4000</ConditionID><ItemSpecifics>${specifics}</ItemSpecifics><StartPrice currencyID="GBP">${formatPrice(details.pricePence)}</StartPrice><CategoryMappingAllowed>true</CategoryMappingAllowed><Country>GB</Country><Currency>GBP</Currency><DispatchTimeMax>${details.dispatchTimeMax}</DispatchTimeMax><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType>${location}<PostalCode>${ebayXmlEscape(details.postalCode)}</PostalCode><PictureDetails>${pictures}</PictureDetails><Quantity>1</Quantity><ReturnPolicy><ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption></ReturnPolicy><ShippingDetails><ShippingType>Flat</ShippingType><ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority><ShippingService>${ebayXmlEscape(details.shippingService)}</ShippingService><ShippingServiceCost currencyID="GBP">${formatPrice(details.shippingCostPence)}</ShippingServiceCost><FreeShipping>${details.shippingCostPence === 0 ? "true" : "false"}</FreeShipping></ShippingServiceOptions></ShippingDetails><Site>UK</Site><UUID>${crypto.randomUUID().replaceAll("-", "").toUpperCase()}</UUID></Item>`;
 }
 
 async function loadOwnedCopy(ownerId: string, copyId: string) {
@@ -179,17 +186,98 @@ async function loadOwnedCopy(ownerId: string, copyId: string) {
   return copy;
 }
 
-async function loadSellableCopy(ownerId: string, copyId: string) {
+async function loadSellableCopy(
+  ownerId: string,
+  copyId: string,
+  reconcileActiveListing = false,
+) {
   const copy = await loadOwnedCopy(ownerId, copyId);
   if (copy.status !== "available") throw new EbayListingError("Only an available physical Copy can be listed.");
 
-  const [activeListing] = await db.select({ id: ebayListings.id }).from(ebayListings).where(and(
-    eq(ebayListings.ownerId, ownerId),
-    eq(ebayListings.copyId, copyId),
-    eq(ebayListings.status, "active"),
+  const latestListing = await getLatestEbayListingForCopy(ownerId, copyId);
+  if (!latestListing) return copy;
+  const currentStatus = ebayListingStatusSummary(latestListing);
+  if (currentStatus.relistAllowed) return copy;
+  if (reconcileActiveListing) {
+    try {
+      const result = await reconcileEbayListing({
+        listingId: latestListing.id,
+        ownerId,
+      });
+      if (result.listing.relistAllowed) return copy;
+    } catch (error) {
+      if (error instanceof EbayListingReconciliationError) {
+        throw new EbayListingError(error.message);
+      }
+      throw error;
+    }
+  }
+  throw new EbayListingError("This physical Copy already has an unresolved eBay listing.");
+}
+
+/**
+ * Checks whether an owned physical Copy can enter the eBay listing editor.
+ * A locally active listing is reconciled before eligibility is decided, so a
+ * listing ended directly on eBay does not block this Copy indefinitely.
+ */
+export async function getEbayListingEligibility(
+  ownerId: string,
+  copyId: string,
+): Promise<EbayListingEligibility> {
+  const [copy] = await db.select({ status: cardCopies.status }).from(cardCopies).where(and(
+    eq(cardCopies.id, copyId),
+    eq(cardCopies.ownerId, ownerId),
   )).limit(1);
-  if (activeListing) throw new EbayListingError("This physical Copy already has an active eBay listing.");
-  return copy;
+  if (!copy) return { eligible: false, status: "not_owned" };
+  if (copy.status !== "available") return { eligible: false, status: "unavailable" };
+
+  const latestListing = await getLatestEbayListingForCopy(ownerId, copyId);
+  if (latestListing) {
+    const currentStatus = ebayListingStatusSummary(latestListing);
+    if (currentStatus.relistAllowed) {
+      return { eligible: true, listing: currentStatus, status: "eligible" };
+    }
+    try {
+      const result = await reconcileEbayListing({
+        listingId: latestListing.id,
+        ownerId,
+      });
+      if (result.listing.relistAllowed) {
+        return { eligible: true, listing: result.listing, status: "eligible" };
+      }
+      if (result.listing.saleState === "pending") {
+        return { eligible: false, listing: result.listing, status: "payment_pending" };
+      }
+      if (result.listing.saleState === "paid") {
+        return { eligible: false, listing: result.listing, status: "paid" };
+      }
+      if (result.listing.saleState === "needs_review") {
+        return { eligible: false, listing: result.listing, status: "needs_review" };
+      }
+      if (
+        result.listing.listingState === "suspended"
+        || result.listing.listingState === "unknown"
+      ) {
+        return { eligible: false, listing: result.listing, status: "suspended" };
+      }
+      return { eligible: false, listing: result.listing, status: "active_listing" };
+    } catch (error) {
+      const latest = await getLatestEbayListingForCopy(ownerId, copyId);
+      return {
+        eligible: false,
+        listing: latest ? ebayListingStatusSummary(latest) : null,
+        reconnectRequired: error instanceof EbayListingReconciliationError
+          && error.reconnectRequired,
+        status: "sync_unavailable",
+      };
+    }
+  }
+
+  return {
+    eligible: true,
+    listing: null,
+    status: "eligible",
+  };
 }
 
 function verificationResult(result: Awaited<ReturnType<typeof tradingCall>>): EbayVerification {
@@ -249,6 +337,11 @@ export async function publishEbayListing(ownerId: string, details: EbayListingDe
     listingUrl,
     title: details.title,
     status: "active",
+    listingState: "active",
+    saleState: "none",
+    listingStartedAt: now,
+    lastRemoteEventAt: now,
+    lastSyncedAt: now,
     createdAt: now,
     updatedAt: now,
   });
@@ -396,7 +489,7 @@ export async function removeEbayListingImageDraft(ownerId: string, copyId: strin
 }
 
 async function listingCopyMetadata(ownerId: string, copyId: string) {
-  const copy = await loadSellableCopy(ownerId, copyId);
+  const copy = await loadSellableCopy(ownerId, copyId, true);
   const [printing] = await db.select().from(cardPrintings).where(and(
     eq(cardPrintings.id, copy.printingId),
     eq(cardPrintings.ownerId, ownerId),

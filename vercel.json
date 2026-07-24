@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/refresh-prices",
-      "schedule": "45 23 * * *"
+      "path": "/api/cron/reconcile-ebay-listings",
+      "schedule": "15 2 * * *"
     }
   ]
 }

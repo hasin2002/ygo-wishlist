@@ -11,17 +11,26 @@ import {
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { ebayConnections } from "@/db/schema";
+import {
+  ebayBaseScope,
+  ebaySellerScopeList,
+} from "@/lib/records/ebay-oauth-scopes";
 
-const ebayInventoryScope = "https://api.ebay.com/oauth/api_scope/sell.inventory";
-const ebayAccountReadonlyScope = "https://api.ebay.com/oauth/api_scope/sell.account.readonly";
-const ebaySellerScopes = [ebayInventoryScope, ebayAccountReadonlyScope].join(" ");
+export { ebaySellerScopeList } from "@/lib/records/ebay-oauth-scopes";
+const ebaySellerScopes = ebaySellerScopeList.join(" ");
 const stateLifetimeMs = 10 * 60 * 1_000;
+let applicationTokenCache: {
+  accessToken: string;
+  expiresAt: number;
+  scopes: string;
+} | null = null;
 
 type EbayTokenResponse = {
   access_token: string;
   expires_in: number;
   refresh_token?: string;
   refresh_token_expires_in?: number;
+  scope?: string;
 };
 
 type StoredSecret = {
@@ -181,14 +190,39 @@ export async function exchangeEbayAuthorizationCode(code: string) {
   return token as EbayTokenResponse & Required<Pick<EbayTokenResponse, "refresh_token" | "refresh_token_expires_in">>;
 }
 
+export async function getEbayApplicationAccessToken(
+  scopes: readonly string[] = [ebayBaseScope],
+) {
+  const scopeValue = scopes.join(" ");
+  if (
+    applicationTokenCache
+    && applicationTokenCache.scopes === scopeValue
+    && applicationTokenCache.expiresAt > Date.now() + 60_000
+  ) {
+    return applicationTokenCache.accessToken;
+  }
+  const token = await ebayTokenRequest(new URLSearchParams({
+    grant_type: "client_credentials",
+    scope: scopeValue,
+  }));
+  applicationTokenCache = {
+    accessToken: token.access_token,
+    expiresAt: Date.now() + token.expires_in * 1_000,
+    scopes: scopeValue,
+  };
+  return token.access_token;
+}
+
 export async function saveEbayConnection({
   ownerId,
   refreshToken,
   refreshTokenExpiresIn,
+  scopes,
 }: {
   ownerId: string;
   refreshToken: string;
   refreshTokenExpiresIn: number;
+  scopes?: string;
 }) {
   const now = new Date();
   const token = encryptSecret(refreshToken);
@@ -203,7 +237,7 @@ export async function saveEbayConnection({
       refreshTokenExpiresAt,
       refreshTokenIv: token.iv,
       refreshTokenTag: token.tag,
-      scopes: ebaySellerScopes,
+      scopes: scopes?.trim() || ebaySellerScopes,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -212,7 +246,7 @@ export async function saveEbayConnection({
         refreshTokenExpiresAt,
         refreshTokenIv: token.iv,
         refreshTokenTag: token.tag,
-        scopes: ebaySellerScopes,
+        scopes: scopes?.trim() || ebaySellerScopes,
         updatedAt: now,
       },
       target: ebayConnections.ownerId,
@@ -224,11 +258,19 @@ export async function getEbayConnectionStatus(ownerId: string) {
     .select({
       connectedAt: ebayConnections.createdAt,
       refreshTokenExpiresAt: ebayConnections.refreshTokenExpiresAt,
+      scopes: ebayConnections.scopes,
     })
     .from(ebayConnections)
     .where(eq(ebayConnections.ownerId, ownerId))
     .limit(1);
-  return connection ?? null;
+  if (!connection) return null;
+  const grantedScopes = new Set(connection.scopes.split(/\s+/).filter(Boolean));
+  const missingScopes = ebaySellerScopeList.filter((scope) => !grantedScopes.has(scope));
+  return {
+    ...connection,
+    missingScopes,
+    notificationReady: missingScopes.length === 0,
+  };
 }
 
 export async function deleteEbayConnection(ownerId: string) {
