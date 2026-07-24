@@ -4,6 +4,7 @@ import { createHash, createHmac } from "node:crypto";
 import {
   and,
   asc,
+  desc,
   eq,
   inArray,
   isNull,
@@ -22,6 +23,11 @@ import { isMissingDatabaseSchemaError } from "@/lib/database-error";
 import type {
   ParsedEbayNotification,
 } from "@/lib/records/ebay-notification-event";
+import {
+  latestEbayNotificationStatusRows,
+  planEbayNotificationRowConsolidation,
+  publicEbayNotificationError,
+} from "@/lib/records/ebay-notification-status";
 import {
   classifyEbayNotificationCapabilities,
   createEbayNotificationClient,
@@ -136,6 +142,62 @@ function subscriptionStatus(value: string) {
   return "error" as const;
 }
 
+type NotificationSubscriptionInsert =
+  typeof ebayNotificationSubscriptions.$inferInsert;
+
+async function persistSubscriptionState({
+  create,
+  update,
+}: {
+  create: NotificationSubscriptionInsert;
+  update: Partial<NotificationSubscriptionInsert>;
+}) {
+  await db.transaction(async (transaction) => {
+    const existingRows = await transaction
+      .select()
+      .from(ebayNotificationSubscriptions)
+      .where(and(
+        eq(ebayNotificationSubscriptions.ownerId, create.ownerId),
+        eq(ebayNotificationSubscriptions.topic, create.topic),
+      ))
+      .orderBy(desc(ebayNotificationSubscriptions.updatedAt));
+    const { preferredId, staleIds } = planEbayNotificationRowConsolidation({
+      destinationId: create.destinationId,
+      remoteSubscriptionId: create.remoteSubscriptionId,
+      rows: existingRows,
+    });
+
+    // Delete superseded destination rows before updating so a moved remote
+    // subscription cannot collide with its own globally unique eBay ID.
+    if (staleIds.length) {
+      await transaction
+        .delete(ebayNotificationSubscriptions)
+        .where(inArray(ebayNotificationSubscriptions.id, staleIds));
+    }
+    if (preferredId) {
+      await transaction
+        .update(ebayNotificationSubscriptions)
+        .set(update)
+        .where(eq(ebayNotificationSubscriptions.id, preferredId));
+      return;
+    }
+    await transaction.insert(ebayNotificationSubscriptions).values(create);
+  });
+}
+
+function storedSubscriptionError(error: unknown) {
+  if (error instanceof EbayNotificationApiError) {
+    return error.message.slice(0, 1_000);
+  }
+  if (error instanceof Error && (
+    error.message.startsWith("eBay created the ")
+    || error.message.startsWith("eBay does not advertise ")
+  )) {
+    return error.message.slice(0, 1_000);
+  }
+  return "Records could not save the latest notification status. Retry setup after confirming the production database schema is up to date.";
+}
+
 async function saveSubscriptionError({
   destinationId,
   error,
@@ -148,41 +210,37 @@ async function saveSubscriptionError({
   topic: EbayNotificationTopicId;
 }) {
   const now = new Date();
-  const [existing] = await db
+  const existingRows = await db
     .select()
     .from(ebayNotificationSubscriptions)
     .where(and(
       eq(ebayNotificationSubscriptions.ownerId, ownerId),
       eq(ebayNotificationSubscriptions.topic, topic),
-      eq(ebayNotificationSubscriptions.destinationId, destinationId),
     ))
-    .limit(1);
+    .orderBy(desc(ebayNotificationSubscriptions.updatedAt));
+  const existing = existingRows.find((row) => (
+    row.destinationId === destinationId
+  )) ?? existingRows[0];
   const retryCount = (existing?.retryCount ?? 0) + 1;
   const values = {
-    lastError: error instanceof Error
-      ? error.message.slice(0, 1_000)
-      : "eBay notification setup failed.",
+    destinationId,
+    lastError: storedSubscriptionError(error),
     lastErrorAt: now,
     nextRetryAt: new Date(now.getTime() + retryDelayMilliseconds(retryCount)),
     retryCount,
     status: "error" as const,
     updatedAt: now,
   };
-  if (existing) {
-    await db
-      .update(ebayNotificationSubscriptions)
-      .set(values)
-      .where(eq(ebayNotificationSubscriptions.id, existing.id));
-    return;
-  }
-  await db.insert(ebayNotificationSubscriptions).values({
-    ...values,
-    createdAt: now,
-    destinationId,
-    id: `ebay-notification-sub-${crypto.randomUUID()}`,
-    ownerId,
-    scopeVersion: subscriptionScopeVersion,
-    topic,
+  await persistSubscriptionState({
+    create: {
+      ...values,
+      createdAt: now,
+      id: `ebay-notification-sub-${crypto.randomUUID()}`,
+      ownerId,
+      scopeVersion: subscriptionScopeVersion,
+      topic,
+    },
+    update: values,
   });
 }
 
@@ -198,40 +256,28 @@ async function saveUnsupportedSubscription({
   topic: EbayNotificationTopicId;
 }) {
   const now = new Date();
-  await db
-    .insert(ebayNotificationSubscriptions)
-    .values({
+  const values = {
+    destinationId,
+    lastCheckedAt: now,
+    lastError: message,
+    lastErrorAt: now,
+    nextRetryAt: null,
+    remoteSubscriptionId: null,
+    retryCount: 0,
+    scopeVersion: subscriptionScopeVersion,
+    status: "unsupported" as const,
+    updatedAt: now,
+  };
+  await persistSubscriptionState({
+    create: {
+      ...values,
       createdAt: now,
-      destinationId,
       id: `ebay-notification-sub-${crypto.randomUUID()}`,
-      lastCheckedAt: now,
-      lastError: message,
-      lastErrorAt: now,
-      nextRetryAt: null,
       ownerId,
-      retryCount: 0,
-      scopeVersion: subscriptionScopeVersion,
-      status: "unsupported",
       topic,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      set: {
-        lastCheckedAt: now,
-        lastError: message,
-        lastErrorAt: now,
-        nextRetryAt: null,
-        retryCount: 0,
-        scopeVersion: subscriptionScopeVersion,
-        status: "unsupported",
-        updatedAt: now,
-      },
-      target: [
-        ebayNotificationSubscriptions.ownerId,
-        ebayNotificationSubscriptions.topic,
-        ebayNotificationSubscriptions.destinationId,
-      ],
-    });
+    },
+    update: values,
+  });
 }
 
 /**
@@ -396,43 +442,30 @@ export async function ensureEbayNotificationSubscriptions(ownerId: string) {
       }
 
       const now = new Date();
-      await db
-        .insert(ebayNotificationSubscriptions)
-        .values({
+      const values = {
+        destinationId: destination.destinationId,
+        enabledAt: subscription.status === "ENABLED" ? now : null,
+        lastCheckedAt: now,
+        lastError: null,
+        lastErrorAt: null,
+        nextRetryAt: null,
+        remoteSubscriptionId: subscription.subscriptionId,
+        retryCount: 0,
+        scopeVersion: subscriptionScopeVersion,
+        status: subscriptionStatus(subscription.status),
+        updatedAt: now,
+        verifiedAt: now,
+      };
+      await persistSubscriptionState({
+        create: {
+          ...values,
           createdAt: now,
-          destinationId: destination.destinationId,
-          enabledAt: subscription.status === "ENABLED" ? now : null,
           id: `ebay-notification-sub-${crypto.randomUUID()}`,
-          lastCheckedAt: now,
           ownerId,
-          remoteSubscriptionId: subscription.subscriptionId,
-          retryCount: 0,
-          scopeVersion: subscriptionScopeVersion,
-          status: subscriptionStatus(subscription.status),
           topic: topicId,
-          updatedAt: now,
-          verifiedAt: now,
-        })
-        .onConflictDoUpdate({
-          set: {
-            enabledAt: subscription.status === "ENABLED" ? now : null,
-            lastCheckedAt: now,
-            lastError: null,
-            lastErrorAt: null,
-            nextRetryAt: null,
-            remoteSubscriptionId: subscription.subscriptionId,
-            retryCount: 0,
-            scopeVersion: subscriptionScopeVersion,
-            status: subscriptionStatus(subscription.status),
-            updatedAt: now,
-            verifiedAt: now,
-          },
-          target: [
-            ebayNotificationSubscriptions.ownerId,
-            ebayNotificationSubscriptions.topic,
-            ebayNotificationSubscriptions.destinationId,
-          ],
-        });
+        },
+        update: values,
+      });
       results.push({
         remoteSubscriptionId: subscription.subscriptionId,
         status: subscription.status,
@@ -463,19 +496,20 @@ export async function getEbayNotificationSubscriptionStatus(ownerId: string) {
       .from(ebayNotificationSubscriptions)
       .where(eq(ebayNotificationSubscriptions.ownerId, ownerId))
       .orderBy(asc(ebayNotificationSubscriptions.topic));
+    const currentRows = latestEbayNotificationStatusRows(rows);
     return {
-      coverage: ebayNotificationTopics.every((topic) => rows.some(
+      coverage: ebayNotificationTopics.every((topic) => currentRows.some(
         (row) => row.topic === topic && row.status === "enabled",
       ))
         ? "full" as const
-        : rows.some((row) => row.status === "enabled")
+        : currentRows.some((row) => row.status === "enabled")
           ? "partial" as const
           : "none" as const,
-      enabled: rows.some((row) => row.status === "enabled"),
+      enabled: currentRows.some((row) => row.status === "enabled"),
       schemaReady: true,
-      subscriptions: rows.map((row) => ({
+      subscriptions: currentRows.map((row) => ({
         lastCheckedAt: row.lastCheckedAt,
-        lastError: row.lastError,
+        lastError: publicEbayNotificationError(row.lastError),
         lastNotificationAt: row.lastNotificationAt,
         status: row.status,
         topic: row.topic,
