@@ -18,6 +18,7 @@ import type {
 } from "./types.ts";
 import { allocatePenceAt } from "./allocation.ts";
 import { compactRecordName, generatedSaleRecordName } from "./record-name.ts";
+import { buildCopyEbayExposureStates } from "./copy-ebay-exposure.ts";
 
 export type LegacyCard = {
   id: number;
@@ -172,9 +173,9 @@ function seededSnapshot(): RecordsSnapshot {
           id: "line-preview-dark-magician",
           kind: "card",
           name: "Dark Magician",
-          quantity: 2,
+          quantity: 3,
           allocationPence: 4200,
-          entityIds: ["copy-preview-dark-1", "copy-preview-dark-2"],
+          entityIds: ["copy-preview-dark-1", "copy-preview-dark-2", "copy-preview-dark-3"],
           detail: "SDY-006 · Ultra Rare",
         },
         {
@@ -278,9 +279,31 @@ function seededSnapshot(): RecordsSnapshot {
         },
       ],
     },
+    {
+      id: "record-preview-void",
+      type: "purchase",
+      status: "void",
+      date: "2026-07-10",
+      title: "Voided source example",
+      source: "Manual correction",
+      listingUrl: null,
+      amountPence: 0,
+      notes: "Retained to demonstrate unavailable Copy history.",
+      revision: 1,
+      createdAt: "2026-07-10T12:00:00.000Z",
+      lines: [{
+        id: "line-preview-void",
+        kind: "card",
+        name: "Blue-Eyes White Dragon",
+        quantity: 1,
+        allocationPence: null,
+        entityIds: ["copy-preview-void"],
+        detail: "SDK-001 · unavailable history",
+      }],
+    },
   ];
 
-  return {
+  const snapshot: RecordsSnapshot = {
     version: 1,
     records,
     targets,
@@ -309,6 +332,17 @@ function seededSnapshot(): RecordsSnapshot {
         condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-12T18:20:01.000Z",
       },
       {
+        id: "copy-preview-dark-3",
+        printingId: printings[0].id,
+        acquiredRecordId: records[0].id,
+        soldRecordId: null,
+        bulkLotId: null,
+        allocationIndex: null,
+        allocationPence: 0,
+        status: "available",
+        condition: "Lightly Played", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-12T18:20:02.000Z",
+      },
+      {
         id: "copy-preview-blue-eyes",
         printingId: printings[1].id,
         acquiredRecordId: records[1].id,
@@ -330,7 +364,19 @@ function seededSnapshot(): RecordsSnapshot {
         status: "sold",
         condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-15T17:40:00.000Z",
       },
+      {
+        id: "copy-preview-void",
+        printingId: printings[1].id,
+        acquiredRecordId: records[4].id,
+        soldRecordId: null,
+        bulkLotId: null,
+        allocationIndex: null,
+        allocationPence: null,
+        status: "void",
+        condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: "2026-07-10T12:00:00.000Z",
+      },
     ],
+    copyEbayExposures: [],
     sealedUnits: [
       {
         id: "sealed-preview-tin",
@@ -382,6 +428,32 @@ function seededSnapshot(): RecordsSnapshot {
     ],
     attention: [],
   };
+  snapshot.copyEbayExposures = buildCopyEbayExposureStates(snapshot.copies, records, [
+    {
+      copyId: "copy-preview-dark-2", listingId: "preview-listing-dark-live", memberId: "preview-member-dark-live", fulfilmentPosition: 0, relationSource: "member", kind: "bundle", title: "Dark Magician bundle", itemId: "100000003", listingUrl: "https://www.ebay.co.uk/itm/100000003", listingState: "active", saleState: "none", saleRecordId: null, quantitySold: 0, listingStartedAt: "2026-07-25T10:00:00.000Z", listingEndedAt: null, paymentPendingAt: null, paidAt: null, cancelledAt: null, lastSyncedAt: "2026-07-27T09:00:00.000Z", lastError: null, lastErrorAt: null, updatedAt: "2026-07-27T09:00:00.000Z",
+    },
+    {
+      copyId: "copy-preview-dark-3", listingId: "preview-listing-dark-ended", memberId: "preview-member-dark-ended", fulfilmentPosition: 0, relationSource: "member", kind: "individual", title: "Dark Magician previous offer", itemId: "100000002", listingUrl: "https://www.ebay.co.uk/itm/100000002", listingState: "ended", saleState: "cancelled", saleRecordId: null, quantitySold: 0, listingStartedAt: "2026-07-18T10:00:00.000Z", listingEndedAt: "2026-07-19T10:00:00.000Z", paymentPendingAt: null, paidAt: null, cancelledAt: "2026-07-19T10:00:00.000Z", lastSyncedAt: "2026-07-19T10:00:00.000Z", lastError: null, lastErrorAt: null, updatedAt: "2026-07-19T10:00:00.000Z",
+    },
+    {
+      copyId: "copy-preview-dark-3", listingId: "preview-listing-dark-live", memberId: "preview-member-dark-live", fulfilmentPosition: 1, relationSource: "member", kind: "bundle", title: "Dark Magician bundle", itemId: "100000003", listingUrl: "https://www.ebay.co.uk/itm/100000003", listingState: "active", saleState: "none", saleRecordId: null, quantitySold: 0, listingStartedAt: "2026-07-25T10:00:00.000Z", listingEndedAt: null, paymentPendingAt: null, paidAt: null, cancelledAt: null, lastSyncedAt: "2026-07-27T09:00:00.000Z", lastError: null, lastErrorAt: null, updatedAt: "2026-07-27T09:00:00.000Z",
+    },
+    {
+      copyId: "copy-preview-dark-3", listingId: "preview-listing-dark-live-2", memberId: "preview-member-dark-live-2", fulfilmentPosition: 0, relationSource: "member", kind: "individual", title: "Dark Magician individual offer", itemId: "100000006", listingUrl: "https://www.ebay.co.uk/itm/100000006", listingState: "active", saleState: "none", saleRecordId: null, quantitySold: 0, listingStartedAt: "2026-07-26T10:00:00.000Z", listingEndedAt: null, paymentPendingAt: null, paidAt: null, cancelledAt: null, lastSyncedAt: "2026-07-27T09:00:00.000Z", lastError: null, lastErrorAt: null, updatedAt: "2026-07-27T09:00:00.000Z",
+    },
+    {
+      copyId: "copy-preview-ash", listingId: "preview-listing-ash-paid", memberId: "preview-member-ash-paid", fulfilmentPosition: 0, relationSource: "member", kind: "individual", title: "Ash Blossom", itemId: "100000004", listingUrl: "https://www.ebay.co.uk/itm/100000004", listingState: "ended", saleState: "paid", saleRecordId: records[3].id, quantitySold: 1, listingStartedAt: "2026-07-14T10:00:00.000Z", listingEndedAt: "2026-07-15T17:00:00.000Z", paymentPendingAt: "2026-07-15T16:00:00.000Z", paidAt: "2026-07-15T17:00:00.000Z", cancelledAt: null, lastSyncedAt: "2026-07-15T17:00:00.000Z", lastError: null, lastErrorAt: null, updatedAt: "2026-07-15T17:00:00.000Z",
+    },
+    {
+      copyId: "copy-preview-void", listingId: "preview-listing-void-live", memberId: null, fulfilmentPosition: null, relationSource: "legacy", kind: "individual", title: "Blue-Eyes listing needing takedown", itemId: "100000005", listingUrl: "https://www.ebay.co.uk/itm/100000005", listingState: "active", saleState: "none", saleRecordId: null, quantitySold: 0, listingStartedAt: "2026-07-09T10:00:00.000Z", listingEndedAt: null, paymentPendingAt: null, paidAt: null, cancelledAt: null, lastSyncedAt: "2026-07-10T10:00:00.000Z", lastError: null, lastErrorAt: null, updatedAt: "2026-07-10T10:00:00.000Z",
+    },
+  ]);
+  snapshot.copyEbayExposures = buildCopyEbayExposureStates(
+    snapshot.copies,
+    snapshot.records,
+    snapshot.copyEbayExposures.flatMap((state) => state.offers),
+  );
+  return snapshot;
 }
 
 export function createPreviewSnapshot(legacyCards: LegacyCard[]): RecordsSnapshot {
@@ -498,11 +570,25 @@ export function createPreviewSnapshot(legacyCards: LegacyCard[]): RecordsSnapsho
 
   snapshot.attention = attention;
   snapshot.records.sort((a, b) => b.date.localeCompare(a.date));
+  snapshot.copyEbayExposures = buildCopyEbayExposureStates(
+    snapshot.copies,
+    snapshot.records,
+    snapshot.copyEbayExposures.flatMap((state) => state.offers),
+  );
   return snapshot;
 }
 
 function clone(snapshot: RecordsSnapshot) {
   return structuredClone(snapshot);
+}
+
+function refreshCopyEbayExposures(snapshot: RecordsSnapshot) {
+  const offers = (snapshot.copyEbayExposures ?? []).flatMap((state) => state.offers);
+  snapshot.copyEbayExposures = buildCopyEbayExposureStates(
+    snapshot.copies,
+    snapshot.records,
+    offers,
+  );
 }
 
 export function deleteWishlistTarget(snapshot: RecordsSnapshot, targetId: string) {
@@ -1180,6 +1266,18 @@ export function removeCardCopy(snapshot: RecordsSnapshot, copyId: string) {
   const copy = next.copies.find((item) => item.id === copyId);
   if (!copy) return { next: snapshot, result: { ok: false, message: "Physical Copy not found." } satisfies DataSourceResult };
   if (copy.status !== "available") return { next: snapshot, result: { ok: false, message: copy.status === "sold" ? "Edit the Sale before removing this Copy." : "Restore the source Record before removing this Copy." } satisfies DataSourceResult };
+  const ebayHistory = next.copyEbayExposures
+    .find((exposure) => exposure.copyId === copyId)
+    ?.offers.length;
+  if (ebayHistory) {
+    return {
+      next: snapshot,
+      result: {
+        ok: false,
+        message: "This Copy has an eBay listing history and cannot be removed.",
+      } satisfies DataSourceResult,
+    };
+  }
   const record = next.records.find((item) => item.id === copy.acquiredRecordId);
   const line = record?.lines.find((item) => item.entityIds.includes(copyId));
   if (!record || !line) return { next: snapshot, result: { ok: false, message: "The source Record is unavailable." } satisfies DataSourceResult };
@@ -1321,8 +1419,32 @@ export function changeRecordStatus(snapshot: RecordsSnapshot, recordId: string, 
   if (record.status === status) return { next: snapshot, result: { ok: false, message: `Record is already ${status}.` } satisfies DataSourceResult };
 
   if (record.type === "sale") {
-    for (const copy of next.copies.filter((item) => item.soldRecordId === record.id)) {
+    const saleCopyIds = new Set(record.lines.flatMap((line) => line.entityIds));
+    if (status === "active") {
+      const unavailable = next.copies.find((copy) => (
+        saleCopyIds.has(copy.id)
+        && (copy.status !== "available" || copy.soldRecordId !== null)
+      ));
+      if (unavailable) {
+        return {
+          next: snapshot,
+          result: {
+            ok: false,
+            message: "A Copy from this Sale has since been used elsewhere, so the Sale cannot be restored.",
+          } satisfies DataSourceResult,
+        };
+      }
+    }
+    for (const copy of next.copies.filter((item) => saleCopyIds.has(item.id))) {
       copy.status = status === "void" ? "available" : "sold";
+      copy.soldRecordId = status === "void" ? null : record.id;
+    }
+    for (const exposure of next.copyEbayExposures) {
+      for (const offer of exposure.offers) {
+        if (offer.saleRecordId !== record.id) continue;
+        offer.saleState = status === "void" ? "needs_review" : "paid";
+        offer.updatedAt = nowIso();
+      }
     }
   } else if (record.type === "pack-opening") {
     for (const copy of next.copies.filter((item) => item.acquiredRecordId === record.id)) {
@@ -1355,5 +1477,6 @@ export function changeRecordStatus(snapshot: RecordsSnapshot, recordId: string, 
   }
   record.status = status;
   record.revision += 1;
+  refreshCopyEbayExposures(next);
   return { next, result: { ok: true, id: record.id } satisfies DataSourceResult };
 }

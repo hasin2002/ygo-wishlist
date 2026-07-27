@@ -36,13 +36,13 @@ import {
   isCardCondition,
   type CardCopy,
   type CardPrinting,
+  type CopyEbayExposureState,
   type WishlistTarget,
 } from "@/lib/records/types";
 import { copyShortReference } from "@/lib/records/copy-display";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
 import {
-  EbayListingStatusBadge,
   EbayListingStatusPanel,
 } from "@/components/records/ebay-listing-status";
 import { trpc } from "@/trpc/client";
@@ -264,19 +264,18 @@ function StatusCard({
 export function EbayListingAction(props: {
   copy: CardCopy;
   enabled?: boolean;
+  exposure: CopyEbayExposureState;
   printing: CardPrinting;
   target: WishlistTarget;
 }) {
-  const { copy, enabled = true, target } = props;
+  const { copy, enabled = true, exposure, target } = props;
   const { data: session } = useSession();
   const searchParams = useSearchParams();
-  const liveAdmin = enabled && session?.user.role === "admin";
-  const listingStatus = trpc.ebay.listingStatus.useQuery(
-    { copyId: copy.id },
-    { enabled: liveAdmin },
-  );
   if (!enabled || session?.user.role !== "admin") return null;
-  if (!isCardCondition(copy.condition)) {
+  const blocked = exposure.action.disposition === "blocked";
+  const reviewing = exposure.action.disposition === "review";
+  const needsTakedown = exposure.action.code === "needs_takedown";
+  if (!blocked && !reviewing && !isCardCondition(copy.condition)) {
     return (
       <span className="inline-flex min-h-11 items-center rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-bold text-amber-900">
         Set a supported condition before selling
@@ -284,31 +283,43 @@ export function EbayListingAction(props: {
     );
   }
   const state = parseInventoryListState(new URLSearchParams(searchParams.toString()));
-  const listing = listingStatus.data;
-  const hasUnresolvedListing = Boolean(listing && !listing.relistAllowed);
+  const href = inventoryCopySellHref(target.id, copy.id, state);
   return (
     <div className="grid min-w-0 gap-2">
-      {listing || listingStatus.isError ? (
-        <EbayListingStatusBadge
-          copyState={copy.status}
-          errorMessage={listingStatus.isError ? "Saved eBay status could not be loaded." : listing?.lastError}
-          listingState={listing?.listingState ?? "unknown"}
-          saleRecordId={listing?.saleRecordId}
-          saleState={listing?.saleState ?? "none"}
-          syncing={listingStatus.isFetching}
-        />
-      ) : null}
-      <Link
-        className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${
-          hasUnresolvedListing
-            ? "border border-zinc-300 bg-white text-zinc-800 hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
-            : "bg-[#8a1f2d] text-white hover:bg-[#711826]"
-        }`}
-        href={inventoryCopySellHref(target.id, copy.id, state)}
-      >
-        <Send className="size-4" />
-        {hasUnresolvedListing ? "Review eBay status" : "Sell on eBay"}
-      </Link>
+      {blocked ? (
+        <>
+          <button aria-describedby={`ebay-action-reason-${copy.id}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed" disabled type="button">
+            <Send aria-hidden="true" className="size-4" />
+            Sell on eBay unavailable
+          </button>
+          <p className="break-words text-xs font-semibold leading-5 text-zinc-600" id={`ebay-action-reason-${copy.id}`}>{exposure.action.reason}</p>
+        </>
+      ) : (
+        <>
+          {needsTakedown ? (
+            <a
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
+              href={`#ebay-exposure-panel-${copy.id}`}
+            >
+              <AlertTriangle aria-hidden="true" className="size-4" />
+              Review live offers below
+            </a>
+          ) : (
+            <Link
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${
+                reviewing
+                  ? "border border-zinc-300 bg-white text-zinc-800 hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
+                  : "bg-[#8a1f2d] text-white hover:bg-[#711826]"
+              }`}
+              href={href}
+            >
+              <Send aria-hidden="true" className="size-4" />
+              {reviewing ? "Review eBay status" : "Sell on eBay"}
+            </Link>
+          )}
+          {reviewing ? <p className="break-words text-xs font-semibold leading-5 text-zinc-600">{exposure.action.reason}</p> : null}
+        </>
+      )}
     </div>
   );
 }

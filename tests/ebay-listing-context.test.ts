@@ -7,6 +7,7 @@ function sellableSnapshot(): RecordsSnapshot {
   return {
     attention: [],
     bulkLots: [],
+    copyEbayExposures: [],
     copies: [{
       acquiredRecordId: "record-1",
       allocationIndex: null,
