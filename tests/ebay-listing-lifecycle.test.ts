@@ -147,6 +147,30 @@ test("confirmed cancellation releases pending inventory but not a paid or record
   assert.equal(cancellationAfterRecord.blocksRelisting, true);
 });
 
+test("a later pending observation cannot regress a paid parent lifecycle", () => {
+  const paid = decideEbayLifecycleTransition(pendingLifecycle(), {
+    effectiveAt: t3,
+    kind: "paid",
+    orderId: "order-1",
+    orderLineItemId: "line-1",
+    paidAt: t3,
+    quantitySold: 1,
+    transactionId: "transaction-1",
+  }).next;
+  const laterPending = decideEbayLifecycleTransition(paid, {
+    effectiveAt: new Date("2026-07-24T13:00:00.000Z"),
+    kind: "payment_pending",
+    orderId: "order-1",
+    orderLineItemId: "line-1",
+    quantitySold: 1,
+    transactionId: "transaction-1",
+  });
+
+  assert.equal(laterPending.next.saleState, "paid");
+  assert.equal(laterPending.next.paidAt?.toISOString(), t3.toISOString());
+  assert.equal(laterPending.blocksRelisting, true);
+});
+
 test("suspended and unknown observations fail closed", () => {
   const suspended = decideEbayLifecycleTransition(activeLifecycle(), {
     effectiveAt: t2,

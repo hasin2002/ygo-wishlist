@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -261,6 +262,7 @@ export const recordEntries = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [
+    uniqueIndex("record_entries_owner_id_unique").on(table.ownerId, table.id),
     index("record_entries_owner_date_idx").on(table.ownerId, table.occurredOn),
     index("record_entries_owner_type_idx").on(table.ownerId, table.type),
     check("record_entries_amount_nonnegative", sql`${table.amountPence} >= 0`),
@@ -454,6 +456,7 @@ export const cardCopies = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [
+    uniqueIndex("card_copies_owner_id_unique").on(table.ownerId, table.id),
     index("card_copies_owner_printing_idx").on(table.ownerId, table.printingId),
     index("card_copies_owner_status_idx").on(table.ownerId, table.status),
     index("card_copies_owner_acquired_record_idx").on(table.ownerId, table.acquiredRecordId),
@@ -511,6 +514,9 @@ export const ebayListings = pgTable(
     copyId: text("copy_id")
       .notNull()
       .references(() => cardCopies.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: ["individual", "quantity", "bundle"] })
+      .notNull()
+      .default("individual"),
     itemId: text("item_id").notNull(),
     listingUrl: text("listing_url").notNull(),
     title: text("title").notNull(),
@@ -539,9 +545,7 @@ export const ebayListings = pgTable(
     orderId: text("order_id"),
     orderLineItemId: text("order_line_item_id"),
     transactionId: text("transaction_id"),
-    saleRecordId: text("sale_record_id").references(() => recordEntries.id, {
-      onDelete: "restrict",
-    }),
+    saleRecordId: text("sale_record_id"),
     lastRemoteEventAt: timestamp("last_remote_event_at", { mode: "date" }),
     lastNotificationId: text("last_notification_id"),
     lastNotificationAt: timestamp("last_notification_at", { mode: "date" }),
@@ -555,6 +559,12 @@ export const ebayListings = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
   },
   (table) => [
+    uniqueIndex("ebay_listings_owner_id_unique").on(table.ownerId, table.id),
+    foreignKey({
+      name: "ebay_listings_owner_sale_record_fk",
+      columns: [table.ownerId, table.saleRecordId],
+      foreignColumns: [recordEntries.ownerId, recordEntries.id],
+    }).onDelete("restrict"),
     uniqueIndex("ebay_listings_item_id_unique").on(table.itemId),
     uniqueIndex("ebay_listings_owner_copy_open_unique")
       .on(table.ownerId, table.copyId)
@@ -583,6 +593,199 @@ export const ebayListings = pgTable(
       sql`${table.quantitySold} is null or ${table.quantitySold} >= 0`,
     ),
     check("ebay_listings_retry_count_nonnegative", sql`${table.retryCount} >= 0`),
+  ],
+);
+
+/**
+ * Exact physical Copies composing an eBay Listing. The legacy copyId remains
+ * the compatibility anchor while this relation becomes the authoritative
+ * composition once backfilled.
+ */
+export const ebayListingMembers = pgTable(
+  "ebay_listing_members",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    listingId: text("listing_id").notNull(),
+    copyId: text("copy_id").notNull(),
+    fulfilmentPosition: integer("fulfilment_position").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_listing_members_owner_id_unique").on(table.ownerId, table.id),
+    uniqueIndex("ebay_listing_members_owner_listing_id_unique").on(
+      table.ownerId,
+      table.listingId,
+      table.id,
+    ),
+    uniqueIndex("ebay_listing_members_owner_listing_copy_unique").on(
+      table.ownerId,
+      table.listingId,
+      table.copyId,
+    ),
+    uniqueIndex("ebay_listing_members_owner_listing_id_copy_unique").on(
+      table.ownerId,
+      table.listingId,
+      table.id,
+      table.copyId,
+    ),
+    foreignKey({
+      name: "ebay_listing_members_owner_listing_fk",
+      columns: [table.ownerId, table.listingId],
+      foreignColumns: [ebayListings.ownerId, ebayListings.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ebay_listing_members_owner_copy_fk",
+      columns: [table.ownerId, table.copyId],
+      foreignColumns: [cardCopies.ownerId, cardCopies.id],
+    }).onDelete("restrict"),
+    uniqueIndex("ebay_listing_members_listing_copy_unique").on(
+      table.listingId,
+      table.copyId,
+    ),
+    uniqueIndex("ebay_listing_members_listing_position_unique").on(
+      table.listingId,
+      table.fulfilmentPosition,
+    ),
+    index("ebay_listing_members_owner_copy_idx").on(table.ownerId, table.copyId),
+    index("ebay_listing_members_owner_listing_idx").on(table.ownerId, table.listingId),
+    check(
+      "ebay_listing_members_position_nonnegative",
+      sql`${table.fulfilmentPosition} >= 0`,
+    ),
+  ],
+);
+
+/** One normalized remote eBay order line for a Listing. */
+export const ebayOrderLines = pgTable(
+  "ebay_order_lines",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    listingId: text("listing_id").notNull(),
+    orderId: text("order_id"),
+    orderLineItemId: text("order_line_item_id"),
+    transactionId: text("transaction_id"),
+    quantityPurchased: integer("quantity_purchased").notNull(),
+    paymentState: text("payment_state", {
+      enum: ["pending", "paid", "cancelled", "needs_review"],
+    }).notNull().default("pending"),
+    remoteOrderStatus: text("remote_order_status"),
+    paymentPendingAt: timestamp("payment_pending_at", { mode: "date" }),
+    paidAt: timestamp("paid_at", { mode: "date" }),
+    cancelledAt: timestamp("cancelled_at", { mode: "date" }),
+    needsReviewAt: timestamp("needs_review_at", { mode: "date" }),
+    lastRemoteEventAt: timestamp("last_remote_event_at", { mode: "date" }),
+    saleRecordId: text("sale_record_id").references(() => recordEntries.id, {
+      onDelete: "restrict",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_order_lines_owner_id_unique").on(table.ownerId, table.id),
+    foreignKey({
+      name: "ebay_order_lines_owner_listing_fk",
+      columns: [table.ownerId, table.listingId],
+      foreignColumns: [ebayListings.ownerId, ebayListings.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ebay_order_lines_owner_sale_record_fk",
+      columns: [table.ownerId, table.saleRecordId],
+      foreignColumns: [recordEntries.ownerId, recordEntries.id],
+    }).onDelete("restrict"),
+    uniqueIndex("ebay_order_lines_owner_listing_id_unique").on(
+      table.ownerId,
+      table.listingId,
+      table.id,
+    ),
+    uniqueIndex("ebay_order_lines_owner_order_line_unique")
+      .on(table.ownerId, table.orderId, table.orderLineItemId)
+      .where(sql`${table.orderId} is not null and ${table.orderLineItemId} is not null`),
+    uniqueIndex("ebay_order_lines_owner_transaction_unique")
+      .on(table.ownerId, table.transactionId)
+      .where(sql`${table.transactionId} is not null`),
+    index("ebay_order_lines_owner_listing_idx").on(table.ownerId, table.listingId),
+    index("ebay_order_lines_owner_sale_record_idx").on(table.ownerId, table.saleRecordId),
+    check("ebay_order_lines_quantity_positive", sql`${table.quantityPurchased} >= 1`),
+  ],
+);
+
+/** Exact Copy allocations for an eBay order line, retained after release. */
+export const ebayOrderLineAllocations = pgTable(
+  "ebay_order_line_allocations",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    orderLineId: text("order_line_id").notNull(),
+    listingId: text("listing_id").notNull(),
+    listingMemberId: text("listing_member_id").notNull(),
+    copyId: text("copy_id").notNull(),
+    fulfilmentPosition: integer("fulfilment_position").notNull(),
+    allocatedAt: timestamp("allocated_at", { mode: "date" }).notNull(),
+    releasedAt: timestamp("released_at", { mode: "date" }),
+    releaseReason: text("release_reason"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "ebay_order_line_allocations_owner_line_fk",
+      columns: [table.ownerId, table.orderLineId],
+      foreignColumns: [ebayOrderLines.ownerId, ebayOrderLines.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ebay_order_line_allocations_owner_listing_line_fk",
+      columns: [table.ownerId, table.listingId, table.orderLineId],
+      foreignColumns: [
+        ebayOrderLines.ownerId,
+        ebayOrderLines.listingId,
+        ebayOrderLines.id,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ebay_order_line_allocations_owner_copy_fk",
+      columns: [table.ownerId, table.copyId],
+      foreignColumns: [cardCopies.ownerId, cardCopies.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "ebay_order_line_allocations_owner_listing_member_copy_fk",
+      columns: [
+        table.ownerId,
+        table.listingId,
+        table.listingMemberId,
+        table.copyId,
+      ],
+      foreignColumns: [
+        ebayListingMembers.ownerId,
+        ebayListingMembers.listingId,
+        ebayListingMembers.id,
+        ebayListingMembers.copyId,
+      ],
+    }).onDelete("restrict"),
+    uniqueIndex("ebay_order_line_allocations_line_copy_unique").on(
+      table.orderLineId,
+      table.copyId,
+    ),
+    uniqueIndex("ebay_order_line_allocations_line_position_unique").on(
+      table.orderLineId,
+      table.fulfilmentPosition,
+    ),
+    uniqueIndex("ebay_order_line_allocations_owner_copy_open_unique")
+      .on(table.ownerId, table.copyId)
+      .where(sql`${table.releasedAt} is null`),
+    index("ebay_order_line_allocations_owner_line_idx").on(table.ownerId, table.orderLineId),
+    check(
+      "ebay_order_line_allocations_position_nonnegative",
+      sql`${table.fulfilmentPosition} >= 0`,
+    ),
   ],
 );
 
@@ -898,6 +1101,9 @@ export type TargetBinderSlotRow = typeof targetBinderSlots.$inferSelect;
 export type TargetWheelEntryRow = typeof targetWheelEntries.$inferSelect;
 export type TargetMonthlyFavoriteRow = typeof targetMonthlyFavorites.$inferSelect;
 export type EbayListingRow = typeof ebayListings.$inferSelect;
+export type EbayListingMemberRow = typeof ebayListingMembers.$inferSelect;
+export type EbayOrderLineRow = typeof ebayOrderLines.$inferSelect;
+export type EbayOrderLineAllocationRow = typeof ebayOrderLineAllocations.$inferSelect;
 export type EbayNotificationEventRow = typeof ebayNotificationEvents.$inferSelect;
 export type EbayNotificationSubscriptionRow =
   typeof ebayNotificationSubscriptions.$inferSelect;

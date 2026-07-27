@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:auth": "node --experimental-strip-types --test tests/auth-hosts.test.ts",
-    "test:records": "node --experimental-strip-types --test tests/records-domain.test.ts tests/inventory-route-state.test.ts tests/ebay-listing-context.test.ts tests/ebay-listing-lifecycle.test.ts tests/ebay-notification-api.test.ts tests/ebay-notification-event.test.ts tests/ebay-notification-status.test.ts tests/ebay-oauth-scopes.test.ts tests/database-error.test.ts",
+    "test:records": "node --experimental-strip-types --test tests/records-domain.test.ts tests/inventory-route-state.test.ts tests/ebay-listing-context.test.ts tests/ebay-listing-lifecycle.test.ts tests/ebay-listing-backfill.test.ts tests/ebay-notification-api.test.ts tests/ebay-notification-event.test.ts tests/ebay-notification-status.test.ts tests/ebay-oauth-scopes.test.ts tests/database-error.test.ts",
     "test:ebay-sandbox": "node --test tests/ebay-sandbox-compatibility.test.mjs",
     "ebay:sandbox": "node scripts/ebay-sandbox-compatibility.mjs",
     "ebay:sandbox:preflight": "node scripts/ebay-sandbox-compatibility.mjs preflight",
@@ -26,6 +26,8 @@
     "records:migrate:apply": "node scripts/migrate-library-records.mjs --apply",
     "inventory-images:backfill:dry-run": "node scripts/backfill-card-copy-images.mjs",
     "inventory-images:backfill:apply": "node scripts/backfill-card-copy-images.mjs --apply",
+    "ebay:listings:backfill:dry-run": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/backfill-ebay-listing-composition.mjs",
+    "ebay:listings:backfill:apply": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/backfill-ebay-listing-composition.mjs --apply",
     "wishlist:seed-json": "node scripts/seed-wishlist-from-combined-json.mjs",
     "wishlist:backfill-types": "node scripts/backfill-unified-card-types.mjs"
   },

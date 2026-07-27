@@ -6,6 +6,7 @@ import {
   cardCopies,
   cardPrintings,
   cardTargets,
+  ebayListingMembers,
   ebayListings,
 } from "@/db/schema";
 import type {
@@ -30,6 +31,7 @@ import {
   getLatestEbayListingForCopy,
   reconcileEbayListing,
 } from "@/server/ebay-listing-reconciliation";
+import { isMissingEbayCompositionSchema } from "@/server/ebay-listing-composition";
 import {
   callEbayTradingApi,
   EbayTradingError,
@@ -329,22 +331,41 @@ export async function publishEbayListing(ownerId: string, details: EbayListingDe
 
   const now = new Date();
   const listingUrl = `https://www.ebay.co.uk/itm/${result.itemId}`;
-  await db.insert(ebayListings).values({
+  const listingValues = {
     id: listingId,
     ownerId,
     copyId: details.copyId,
     itemId: result.itemId,
     listingUrl,
     title: details.title,
-    status: "active",
-    listingState: "active",
-    saleState: "none",
+    status: "active" as const,
+    listingState: "active" as const,
+    saleState: "none" as const,
     listingStartedAt: now,
     lastRemoteEventAt: now,
     lastSyncedAt: now,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  try {
+    await db.transaction(async (tx) => {
+      await tx.insert(ebayListings).values(listingValues);
+      await tx.insert(ebayListingMembers).values({
+        copyId: details.copyId,
+        createdAt: now,
+        fulfilmentPosition: 0,
+        id: `ebay-listing-member-${crypto.randomUUID()}`,
+        listingId,
+        ownerId,
+        updatedAt: now,
+      });
+    });
+  } catch (error) {
+    // The approved additive migration may not yet be present. The legacy
+    // parent insert remains the safe compatibility path until it is applied.
+    if (!isMissingEbayCompositionSchema(error)) throw error;
+    await db.insert(ebayListings).values(listingValues);
+  }
   await deleteListingImageDrafts(ownerId, details.copyId, draftKeys);
   return { archivedImageCount: archivedKeys.length, itemId: result.itemId, listingUrl };
 }

@@ -9,6 +9,9 @@ import {
   cardPrintings,
   cardTargets,
   ebayListings,
+  ebayListingMembers,
+  ebayOrderLineAllocations,
+  ebayOrderLines,
   recordEntries,
   recordLineCopies,
   recordLines,
@@ -28,9 +31,40 @@ import {
   EbayListingReconciliationError,
   reconcileEbayListing,
 } from "@/server/ebay-listing-reconciliation";
+import {
+  hasEbayCompositionSchema,
+  isMissingEbayCompositionSchema,
+} from "@/server/ebay-listing-composition";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function listingIdsForCopies(
+  ownerId: string,
+  copyIds: string[],
+) {
+  if (!copyIds.length) return [];
+  const listingIds = new Set<string>();
+  try {
+    const members = await db.select({ copyId: ebayListingMembers.copyId, listingId: ebayListingMembers.listingId })
+      .from(ebayListingMembers)
+      .where(and(
+        eq(ebayListingMembers.ownerId, ownerId),
+        inArray(ebayListingMembers.copyId, copyIds),
+      ));
+    for (const member of members) {
+      listingIds.add(member.listingId);
+    }
+  } catch (error) {
+    if (!isMissingEbayCompositionSchema(error)) throw error;
+  }
+  const legacyRows = await db.select({ id: ebayListings.id }).from(ebayListings).where(and(
+    eq(ebayListings.ownerId, ownerId),
+    inArray(ebayListings.copyId, copyIds),
+  ));
+  for (const listing of legacyRows) listingIds.add(listing.id);
+  return [...listingIds];
+}
 
 const productEditionSchema = z.enum(["1st Edition", "Unlimited Edition", "Limited Edition"]);
 const supplyCategorySchema = z.enum(["sleeves", "binder", "storage", "playmat", "other"]);
@@ -594,6 +628,7 @@ export const recordsRouter = router({
 
   removeCardCopy: authenticatedProcedure.input(removeCardCopySchema).mutation(async ({ ctx, input }) => {
     const ownerId = ctx.collectionOwnerId;
+    const compositionSchemaReady = await hasEbayCompositionSchema();
     const keys: string[] = [];
     let removedCopy: { id: string; acquiredRecordId: string } | undefined;
     await db.transaction(async (tx) => {
@@ -607,8 +642,28 @@ export const recordsRouter = router({
       if (!record || record.status !== "active") conflict("Restore the source Record before removing this Copy.");
       const saleLinks = await tx.select({ id: recordLineCopies.id }).from(recordLineCopies).where(and(eq(recordLineCopies.ownerId, ownerId), eq(recordLineCopies.copyId, copy.id), eq(recordLineCopies.role, "sale"))).limit(1);
       if (saleLinks.length) conflict("This Copy has Sale history and cannot be removed.");
-      const listing = await tx.select({ id: ebayListings.id }).from(ebayListings).where(and(eq(ebayListings.ownerId, ownerId), eq(ebayListings.copyId, copy.id))).limit(1);
-      if (listing.length) conflict("This Copy has an eBay listing history and cannot be removed.");
+      const listingHistoryIds = new Set<string>();
+      if (compositionSchemaReady) {
+        const memberships = await tx.select({ listingId: ebayListingMembers.listingId })
+          .from(ebayListingMembers)
+          .where(and(
+            eq(ebayListingMembers.ownerId, ownerId),
+            eq(ebayListingMembers.copyId, copy.id),
+          ))
+          .limit(1);
+        for (const membership of memberships) {
+          listingHistoryIds.add(membership.listingId);
+        }
+      }
+      const legacyListings = await tx.select({ id: ebayListings.id })
+        .from(ebayListings)
+        .where(and(
+          eq(ebayListings.ownerId, ownerId),
+          eq(ebayListings.copyId, copy.id),
+        ))
+        .limit(1);
+      for (const listing of legacyListings) listingHistoryIds.add(listing.id);
+      if (listingHistoryIds.size) conflict("This Copy has an eBay listing history and cannot be removed.");
       const images = await tx.select({ objectKey: cardCopyImages.objectKey }).from(cardCopyImages).where(and(eq(cardCopyImages.ownerId, ownerId), eq(cardCopyImages.copyId, copy.id)));
       keys.push(...images.map((image) => image.objectKey));
       const [line] = await tx.select().from(recordLines).where(and(eq(recordLines.id, copy.acquiredLineId), eq(recordLines.ownerId, ownerId))).for("update");
@@ -918,18 +973,20 @@ export const recordsRouter = router({
     const uniqueCopyIds = Array.from(new Set(input.copyIds));
     const saleId = id("record");
     const now = new Date();
-    const trackedListings = await db.select({
+    const compositionSchemaReady = await hasEbayCompositionSchema();
+    const listingIds = await listingIdsForCopies(ownerId, uniqueCopyIds);
+    const trackedListings = listingIds.length ? await db.select({
       id: ebayListings.id,
     }).from(ebayListings).where(and(
       eq(ebayListings.ownerId, ownerId),
-      inArray(ebayListings.copyId, uniqueCopyIds),
+      inArray(ebayListings.id, listingIds),
       or(
         eq(ebayListings.status, "active"),
         eq(ebayListings.listingState, "unknown"),
         eq(ebayListings.saleState, "pending"),
         eq(ebayListings.saleState, "needs_review"),
       ),
-    ));
+    )) : [];
     for (const listing of trackedListings) {
       try {
         await reconcileEbayListing({ listingId: listing.id, ownerId });
@@ -940,19 +997,20 @@ export const recordsRouter = router({
         throw error;
       }
     }
-    const unresolvedListings = await db.select({
+    const unresolvedListings = listingIds.length ? await db.select({
+      id: ebayListings.id,
       copyId: ebayListings.copyId,
       saleState: ebayListings.saleState,
     }).from(ebayListings).where(and(
       eq(ebayListings.ownerId, ownerId),
-      inArray(ebayListings.copyId, uniqueCopyIds),
+      inArray(ebayListings.id, listingIds),
       or(
         eq(ebayListings.status, "active"),
         eq(ebayListings.listingState, "unknown"),
         eq(ebayListings.saleState, "pending"),
         eq(ebayListings.saleState, "needs_review"),
       ),
-    ));
+    )) : [];
     const unpaidOrUncertain = unresolvedListings.filter((listing) => listing.saleState !== "paid");
     if (unpaidOrUncertain.length) {
       conflict("One or more selected Copies still has a live, pending, or uncertain eBay listing. Resolve it before recording this Sale.");
@@ -969,6 +1027,69 @@ export const recordsRouter = router({
         copy.status !== "available" || copy.soldRecordId !== null
       ))) {
         conflict("One or more selected Copies are no longer available. Refresh and review the Sale.");
+      }
+      let normalizedPaidLineIds: string[] | null = null;
+      if (unresolvedListings.length && compositionSchemaReady) {
+          const paidLines = await tx.select().from(ebayOrderLines).where(and(
+            eq(ebayOrderLines.ownerId, ownerId),
+            inArray(ebayOrderLines.listingId, unresolvedListings.map((listing) => listing.id)),
+            eq(ebayOrderLines.paymentState, "paid"),
+          )).for("update");
+          const lineIds = paidLines.map((line) => line.id);
+          const allocations = lineIds.length
+            ? await tx.select().from(ebayOrderLineAllocations).where(and(
+              eq(ebayOrderLineAllocations.ownerId, ownerId),
+              inArray(ebayOrderLineAllocations.orderLineId, lineIds),
+              isNull(ebayOrderLineAllocations.releasedAt),
+            )).for("update")
+            : [];
+          const members = await tx.select().from(ebayListingMembers).where(and(
+            eq(ebayListingMembers.ownerId, ownerId),
+            inArray(
+              ebayListingMembers.listingId,
+              unresolvedListings.map((listing) => listing.id),
+            ),
+          )).for("update");
+          const selectedCopyIds = new Set(uniqueCopyIds);
+          const memberById = new Map(members.map((member) => [member.id, member]));
+          for (const listing of unresolvedListings) {
+            const listingLines = paidLines.filter((line) => line.listingId === listing.id);
+            if (listingLines.length !== 1 || listingLines[0]!.quantityPurchased !== 1) {
+              conflict("The paid eBay order does not have one exact order line for this Sale. Review it before continuing.");
+            }
+            const line = listingLines[0]!;
+            const lineAllocations = allocations.filter(
+              (allocation) => allocation.orderLineId === line.id,
+            );
+            const allocation = lineAllocations[0];
+            const member = allocation ? memberById.get(allocation.listingMemberId) : null;
+            const selectedMemberCopyIds = members
+              .filter((candidate) => (
+                candidate.listingId === listing.id
+                && selectedCopyIds.has(candidate.copyId)
+              ))
+              .map((candidate) => candidate.copyId)
+              .sort();
+            const allocatedCopyIds = lineAllocations
+              .map((candidate) => candidate.copyId)
+              .sort();
+            if (
+              lineAllocations.length !== 1
+              || !allocation
+              || allocation.listingId !== listing.id
+              || !selectedCopyIds.has(allocation.copyId)
+              || !member
+              || member.listingId !== listing.id
+              || member.copyId !== allocation.copyId
+              || selectedMemberCopyIds.length !== allocatedCopyIds.length
+              || selectedMemberCopyIds.some(
+                (copyId, index) => copyId !== allocatedCopyIds[index],
+              )
+            ) {
+              conflict("The paid eBay order is not allocated to the exact selected Copy. Review it before continuing.");
+            }
+          }
+        normalizedPaidLineIds = paidLines.map((line) => line.id);
       }
       const printingIds = Array.from(new Set(copies.map((copy) => copy.printingId)));
       const printingRows = await tx.select().from(cardPrintings).where(and(
@@ -1019,15 +1140,34 @@ export const recordsRouter = router({
         position += 1;
       }
       if (unresolvedListings.length) {
+        const exactListingIds = normalizedPaidLineIds
+          ? Array.from(new Set(
+            (await tx.select({ id: ebayOrderLines.id, listingId: ebayOrderLines.listingId })
+              .from(ebayOrderLines)
+              .where(and(
+                eq(ebayOrderLines.ownerId, ownerId),
+                inArray(ebayOrderLines.id, normalizedPaidLineIds),
+              ))).map((line) => line.listingId),
+          ))
+          : unresolvedListings.map((listing) => listing.id);
         await tx.update(ebayListings).set({
           saleRecordId: saleId,
           status: "ended",
           updatedAt: now,
         }).where(and(
           eq(ebayListings.ownerId, ownerId),
-          inArray(ebayListings.copyId, uniqueCopyIds),
+          inArray(ebayListings.id, exactListingIds),
           eq(ebayListings.saleState, "paid"),
         ));
+        if (normalizedPaidLineIds) {
+          await tx.update(ebayOrderLines).set({
+            saleRecordId: saleId,
+            updatedAt: now,
+          }).where(and(
+            eq(ebayOrderLines.ownerId, ownerId),
+            inArray(ebayOrderLines.id, normalizedPaidLineIds),
+          ));
+        }
       }
     });
     return { id: saleId };
@@ -1568,6 +1708,7 @@ export const recordsRouter = router({
   })).mutation(async ({ ctx, input }) => {
     const ownerId = ctx.collectionOwnerId;
     const now = new Date();
+    const compositionSchemaReady = await hasEbayCompositionSchema();
     await db.transaction(async (tx) => {
       const record = await lockRecord(tx, ownerId, input.recordId, input.expectedRevision);
       if (record.status === input.status) conflict(`Record is already ${input.status}.`);
@@ -1580,6 +1721,19 @@ export const recordsRouter = router({
           eq(ebayListings.ownerId, ownerId),
           eq(ebayListings.saleRecordId, record.id),
         ));
+        let orderLineListingIds: string[] = [];
+        if (compositionSchemaReady) {
+          orderLineListingIds = (await tx.select({ listingId: ebayOrderLines.listingId })
+            .from(ebayOrderLines)
+            .where(and(
+              eq(ebayOrderLines.ownerId, ownerId),
+              eq(ebayOrderLines.saleRecordId, record.id),
+            ))).map((line) => line.listingId);
+        }
+        const linkedListingIds = new Set([
+          ...linkedEbayListings.map((listing) => listing.id),
+          ...orderLineListingIds,
+        ]);
         const copyIds = links.map((link) => link.copyId);
         if (input.status === "void") {
           await tx.update(cardCopies).set({
@@ -1587,15 +1741,25 @@ export const recordsRouter = router({
           }).where(and(
             eq(cardCopies.ownerId, ownerId), eq(cardCopies.soldRecordId, record.id),
           ));
-          if (linkedEbayListings.length) {
+          if (linkedListingIds.size) {
             await tx.update(ebayListings).set({
               saleState: "needs_review",
               status: "active",
               updatedAt: now,
             }).where(and(
               eq(ebayListings.ownerId, ownerId),
-              eq(ebayListings.saleRecordId, record.id),
+              inArray(ebayListings.id, [...linkedListingIds]),
             ));
+            if (compositionSchemaReady) {
+              await tx.update(ebayOrderLines).set({
+                needsReviewAt: now,
+                paymentState: "needs_review",
+                updatedAt: now,
+              }).where(and(
+                eq(ebayOrderLines.ownerId, ownerId),
+                eq(ebayOrderLines.saleRecordId, record.id),
+              ));
+            }
           }
         } else if (copyIds.length) {
           const copies = await tx.select().from(cardCopies).where(and(
@@ -1610,15 +1774,25 @@ export const recordsRouter = router({
               status: "sold", soldRecordId: record.id, soldLineId: lineByCopy.get(copy.id), updatedAt: now,
             }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
           }
-          if (linkedEbayListings.length) {
+          if (linkedListingIds.size) {
             await tx.update(ebayListings).set({
               saleState: "paid",
               status: "ended",
               updatedAt: now,
             }).where(and(
               eq(ebayListings.ownerId, ownerId),
-              eq(ebayListings.saleRecordId, record.id),
+              inArray(ebayListings.id, [...linkedListingIds]),
             ));
+            if (compositionSchemaReady) {
+              await tx.update(ebayOrderLines).set({
+                needsReviewAt: null,
+                paymentState: "paid",
+                updatedAt: now,
+              }).where(and(
+                eq(ebayOrderLines.ownerId, ownerId),
+                eq(ebayOrderLines.saleRecordId, record.id),
+              ));
+            }
           }
         }
       } else if (record.type === "pack-opening") {
