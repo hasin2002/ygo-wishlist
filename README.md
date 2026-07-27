@@ -85,8 +85,10 @@ To enable the connection:
    that page's full URL into the development-only completion form.
 2. Add its RuName value to `EBAY_OAUTH_RU_NAME`, alongside the existing
    `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET`, in the production environment.
-3. Apply the new schema using `npm run db:push` only when you are ready to make
-   the database change, then deploy.
+3. Preview the eBay composite-key repair with
+   `npm run db:repair:ebay-composition:dry-run`, then apply the schema using
+   `npm run db:push` only when you are ready to make the database change.
+   Deploy after the schema command succeeds.
 4. Sign into the site as an administrator, open `/ebay`, and select **Connect
    eBay**. eBay requests listing access plus read-only order and notification
    permissions. Then open a physical Copy in Records → Inventory and select
@@ -110,8 +112,20 @@ public key before it is persisted or processed.
 Before deploying, create/update the tables:
 
 ```bash
+npm run db:repair:ebay-composition:dry-run
 npm run db:push
 ```
+
+`db:push` prepares the six composite keys used by the eBay foreign keys before
+Drizzle applies the remaining schema. It safely handles an empty database, the
+partial state left by PostgreSQL error `42830`, and an already-complete schema.
+The preparation runs in a transaction and stops without deleting data if an
+existing index has an unexpected definition or the required uniqueness cannot
+be established.
+
+Keep schema mutation separate from the Vercel frontend build. The Vercel Build
+Command should run `npm run build`, not `npm run db:push`; run the schema command
+as a controlled release step with the intended production `DATABASE_URL`.
 
 ## Scheduled eBay reconciliation
 
