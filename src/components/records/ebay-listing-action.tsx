@@ -42,6 +42,7 @@ import {
 import { copyShortReference } from "@/lib/records/copy-display";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
+import { ebayOffersDialogEventName } from "@/components/records/ebay-copy-exposure";
 import {
   EbayListingStatusPanel,
 } from "@/components/records/ebay-listing-status";
@@ -271,13 +272,21 @@ export function EbayListingAction(props: {
   const { copy, enabled = true, exposure, target } = props;
   const { data: session } = useSession();
   const searchParams = useSearchParams();
-  if (!enabled || session?.user.role !== "admin") return null;
+  if (!enabled) {
+    return (
+      <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled title="Selling is available from a saved Copy in live records" type="button">
+        <Send aria-hidden="true" className="size-4" />
+        Sell on eBay
+      </button>
+    );
+  }
+  if (session?.user.role !== "admin") return null;
   const blocked = exposure.action.disposition === "blocked";
   const reviewing = exposure.action.disposition === "review";
   const needsTakedown = exposure.action.code === "needs_takedown";
   if (!blocked && !reviewing && !isCardCondition(copy.condition)) {
     return (
-      <span className="inline-flex min-h-11 items-center rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-bold text-amber-900">
+      <span className="inline-flex min-h-11 w-full items-center rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-bold text-amber-900 sm:w-auto">
         Set a supported condition before selling
       </span>
     );
@@ -285,10 +294,10 @@ export function EbayListingAction(props: {
   const state = parseInventoryListState(new URLSearchParams(searchParams.toString()));
   const href = inventoryCopySellHref(target.id, copy.id, state);
   return (
-    <div className="grid min-w-0 gap-2">
+    <div className="grid min-w-0 w-full gap-2 sm:w-auto">
       {blocked ? (
         <>
-          <button aria-describedby={`ebay-action-reason-${copy.id}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed" disabled type="button">
+          <button aria-describedby={`ebay-action-reason-${copy.id}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled type="button">
             <Send aria-hidden="true" className="size-4" />
             Sell on eBay unavailable
           </button>
@@ -297,16 +306,17 @@ export function EbayListingAction(props: {
       ) : (
         <>
           {needsTakedown ? (
-            <a
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
-              href={`#ebay-exposure-panel-${copy.id}`}
+            <button
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 sm:w-auto"
+              onClick={() => window.dispatchEvent(new Event(ebayOffersDialogEventName(copy.id)))}
+              type="button"
             >
               <AlertTriangle aria-hidden="true" className="size-4" />
-              Review live offers below
-            </a>
+              Review live offers
+            </button>
           ) : (
             <Link
-              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${
+              className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 sm:w-auto ${
                 reviewing
                   ? "border border-zinc-300 bg-white text-zinc-800 hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
                   : "bg-[#8a1f2d] text-white hover:bg-[#711826]"
@@ -445,7 +455,7 @@ function EbayListingWorkspace({
     target.estimatedPricePence ?? target.marketPricePence,
   );
   const draftKey = `ygo-library:ebay-listing-draft:v${draftVersion}:${copy.id}`;
-  const catalogueImage = printing.imageUrl ?? target.imageUrl;
+  const catalogueImage = target.imageUrl ?? printing.imageUrl;
   const soldUrl = useMemo(() => soldListingsUrl(target, printing), [printing, target]);
   const refreshPricing = trpc.library.refreshPricing.useMutation({
     onSuccess: (pricing) => {
@@ -702,10 +712,12 @@ function EbayListingWorkspace({
 
   return (
     <div className="grid min-w-0 max-w-full gap-5">
+      <nav aria-label="Listing breadcrumb">
+        <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-700 transition hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={backHref}><ArrowLeft className="size-4" />Back to card inventory</Link>
+      </nav>
       <header className="flex min-w-0 max-w-full flex-col gap-4 rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-zinc-700 hover:text-[#8a1f2d]" href={backHref}><ArrowLeft className="size-4" />Back to card inventory</Link>
-          <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-[#8a1f2d]">eBay seller workspace</p>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a1f2d]">eBay seller workspace</p>
           <h1 className="mt-1 text-2xl font-black">Create listing</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-zinc-500">
@@ -715,7 +727,7 @@ function EbayListingWorkspace({
       </header>
 
       <section className="grid min-w-0 max-w-full gap-4 rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center">
-        <div className="mx-auto grid h-32 w-24 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 sm:mx-0">
+        <div className="mx-auto grid aspect-[59/86] w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 sm:mx-0">
           {catalogueImage ? <Image alt={`${target.name} card`} className="h-full w-full object-contain" height={160} src={catalogueImage} unoptimized width={120} /> : <WalletCards className="size-7 text-zinc-400" />}
         </div>
         <div className="min-w-0">

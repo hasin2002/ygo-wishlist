@@ -9,22 +9,25 @@ export function CardInventoryImages({
   canUpload,
   cardName,
   copyId,
+  isPreview = false,
   onImagesChange,
 }: {
   canUpload: boolean;
   cardName: string;
   copyId: string;
+  isPreview?: boolean;
   onImagesChange?: (images: InventoryImage[]) => void;
 }) {
   const [configured, setConfigured] = useState(true);
   const [images, setImages] = useState<InventoryImage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isPreview);
   const [uploading, setUploading] = useState(false);
   const [reordering, setReordering] = useState(false);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isPreview) return;
     let active = true;
     void fetch(`/api/inventory/card-images?copyId=${encodeURIComponent(copyId)}`)
       .then(async (response) => {
@@ -39,7 +42,10 @@ export function CardInventoryImages({
         setImages(payload.images ?? []);
       })
       .catch((error) => {
-        if (active) setMessage(error instanceof Error ? error.message : "Card photos could not be loaded.");
+        if (active) {
+          const nextMessage = error instanceof Error ? error.message : "Card photos could not be loaded.";
+          setMessage(nextMessage === "That physical card Copy was not found." ? "This Copy is no longer available. Go back to inventory and choose another Copy." : nextMessage);
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -47,7 +53,7 @@ export function CardInventoryImages({
     return () => {
       active = false;
     };
-  }, [copyId]);
+  }, [copyId, isPreview]);
 
   async function upload(files: File[]) {
     if (!files.length) return;
@@ -147,6 +153,7 @@ export function CardInventoryImages({
       onReorder={reorder}
       onUpload={upload}
       previewSubtitle="Saved privately in S3"
+      previewNotice={isPreview ? "Upload photos or take a photo on your phone once this Copy is saved in your live collection. This preview does not store photos." : undefined}
       removalDescription="It will also be removed from the private S3 archive."
       removalTitle="Remove this photo from the Copy?"
       removingId={removingKey}
