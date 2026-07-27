@@ -1,0 +1,44 @@
+<Item>
+  <Title>SANDBOX VERIFY ONLY - Heterogeneous Yu-Gi-Oh card lot</Title>
+  <Description>Synthetic mixed-card lot containing two distinct test cards: TEST-LOT-A Common and TEST-LOT-B Rare. VerifyAddItem only; never publish.</Description>
+  <PrimaryCategory>
+    <CategoryID>183455</CategoryID>
+  </PrimaryCategory>
+  <CategoryMappingAllowed>false</CategoryMappingAllowed>
+  <ConditionID>3000</ConditionID>
+  <ItemSpecifics>
+    <NameValueList><Name>Game</Name><Value>Yu-Gi-Oh! TCG</Value></NameValueList>
+    <NameValueList><Name>Language</Name><Value>English</Value></NameValueList>
+    <NameValueList><Name>Manufacturer</Name><Value>Konami</Value></NameValueList>
+    <NameValueList><Name>Set</Name><Value>Mixed Sandbox Test Sets</Value></NameValueList>
+  </ItemSpecifics>
+  <StartPrice currencyID="GBP">0.99</StartPrice>
+  <Country>GB</Country>
+  <Currency>GBP</Currency>
+  <DispatchTimeMax>3</DispatchTimeMax>
+  <ListingDuration>GTC</ListingDuration>
+  <ListingType>FixedPriceItem</ListingType>
+  <Quantity>1</Quantity>
+  <LotSize>2</LotSize>
+  <Location>London</Location>
+  <PostalCode>SW1A 1AA</PostalCode>
+  <PictureDetails>
+    <PictureURL>https://images.ygoprodeck.com/images/cards/89631139.jpg</PictureURL>
+  </PictureDetails>
+  <ReturnPolicy>
+    <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+    <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+    <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+  </ReturnPolicy>
+  <ShippingDetails>
+    <ShippingType>Flat</ShippingType>
+    <ShippingServiceOptions>
+      <ShippingServicePriority>1</ShippingServicePriority>
+      <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
+      <ShippingServiceCost currencyID="GBP">0.00</ShippingServiceCost>
+      <ShippingServiceAdditionalCost currencyID="GBP">0.00</ShippingServiceAdditionalCost>
+      <FreeShipping>true</FreeShipping>
+    </ShippingServiceOptions>
+  </ShippingDetails>
+  <Site>UK</Site>
+</Item>

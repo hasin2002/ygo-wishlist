@@ -1,0 +1,27 @@
+{
+  "complete": true,
+  "fulfillment": {
+    "complete": true,
+    "matchingOrders": [],
+    "pagesScanned": 1,
+    "totalOrdersScanned": 0
+  },
+  "trading": {
+    "ack": "Success",
+    "complete": true,
+    "errors": [],
+    "hasMoreTransactions": false,
+    "pageNumber": 1,
+    "returnedTransactionCountActual": 1,
+    "totalNumberOfEntries": 1,
+    "totalNumberOfPages": 1,
+    "transactions": [
+      {
+        "cancellationState": "not-cancelled",
+        "cancelled": false,
+        "paymentState": "unpaid",
+        "quantityPurchased": 2
+      }
+    ]
+  }
+}

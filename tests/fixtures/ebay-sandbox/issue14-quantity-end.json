@@ -1,0 +1,44 @@
+{
+  "alreadyApplied": false,
+  "outcome": "confirmed",
+  "plan": {
+    "bounded": true,
+    "callName": "EndItem",
+    "command": "end-not-available",
+    "quantity": null,
+    "sandboxOnly": true
+  },
+  "preRead": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200,
+    "listing": {
+      "available": 3,
+      "endingReason": null,
+      "listingStatus": "Active",
+      "quantity": 3,
+      "quantitySold": 0
+    }
+  },
+  "reconciliation": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200,
+    "listing": {
+      "available": 3,
+      "endingReason": "NotAvailable",
+      "listingStatus": "Ended",
+      "quantity": 3,
+      "quantitySold": 0
+    }
+  },
+  "recoveredDuplicate": false,
+  "reusedRecordedItem": false,
+  "result": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200,
+    "listing": null
+  },
+  "verification": null
+}

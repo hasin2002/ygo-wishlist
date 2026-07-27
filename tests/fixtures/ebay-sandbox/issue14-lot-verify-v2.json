@@ -1,0 +1,18 @@
+{
+  "accepted": true,
+  "callName": "VerifyAddItem",
+  "publishingAttempted": false,
+  "request": {
+    "categoryId": "183455",
+    "categoryMappingAllowed": false,
+    "lotSize": 2,
+    "quantity": 1,
+    "requestSha256": "c4f3da4ef03be0502c0cf2712f6eb829fe12eb5ce40bb29c0cfea3cf3d81bd84"
+  },
+  "response": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200
+  },
+  "sandboxOnly": true
+}

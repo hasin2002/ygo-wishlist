@@ -1,0 +1,39 @@
+{
+  "alreadyApplied": false,
+  "outcome": "confirmed",
+  "plan": {
+    "bounded": true,
+    "callName": "AddItem",
+    "command": "add-quantity",
+    "quantity": 3,
+    "sandboxOnly": true
+  },
+  "preRead": null,
+  "reconciliation": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200,
+    "listing": {
+      "available": 3,
+      "endingReason": null,
+      "listingStatus": "Active",
+      "quantity": 3,
+      "quantitySold": 0
+    }
+  },
+  "recoveredDuplicate": false,
+  "reusedRecordedItem": false,
+  "result": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200,
+    "listing": null
+  },
+  "transactionPrecheck": null,
+  "verification": {
+    "ack": "Success",
+    "errors": [],
+    "httpStatus": 200,
+    "listing": null
+  }
+}
