@@ -1,0 +1,33 @@
+{
+  "alreadyApplied": false,
+  "outcome": null,
+  "plan": {
+    "bounded": true,
+    "callName": "AddItem",
+    "command": "add-quantity",
+    "quantity": 3,
+    "sandboxOnly": true
+  },
+  "preRead": null,
+  "reconciliation": null,
+  "recoveredDuplicate": false,
+  "reusedRecordedItem": false,
+  "result": {
+    "error": {
+      "ack": "Failure",
+      "errors": [
+        {
+          "code": "219026",
+          "severity": "Warning"
+        },
+        {
+          "code": "21916328",
+          "severity": "Error"
+        }
+      ],
+      "httpStatus": 200,
+      "listing": null
+    }
+  },
+  "verification": null
+}

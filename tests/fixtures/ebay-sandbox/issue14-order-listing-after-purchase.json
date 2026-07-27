@@ -1,0 +1,12 @@
+{
+  "ack": "Success",
+  "errors": [],
+  "httpStatus": 200,
+  "listing": {
+    "available": 1,
+    "endingReason": null,
+    "listingStatus": "Active",
+    "quantity": 3,
+    "quantitySold": 2
+  }
+}

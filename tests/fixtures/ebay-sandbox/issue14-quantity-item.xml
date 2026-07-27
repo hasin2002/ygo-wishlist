@@ -1,0 +1,52 @@
+<Item>
+  <Title>SANDBOX TEST - YGO multi-copy compatibility - DO NOT BUY</Title>
+  <Description>Temporary automated compatibility listing in eBay Sandbox only. No real item is offered.</Description>
+  <PrimaryCategory>
+    <CategoryID>183454</CategoryID>
+  </PrimaryCategory>
+  <ConditionDescriptors>
+    <ConditionDescriptor>
+      <Name>40001</Name>
+      <Value>400010</Value>
+    </ConditionDescriptor>
+  </ConditionDescriptors>
+  <ConditionID>4000</ConditionID>
+  <ItemSpecifics>
+    <NameValueList><Name>Card Size</Name><Value>Japanese</Value></NameValueList>
+    <NameValueList><Name>Rarity</Name><Value>Common</Value></NameValueList>
+    <NameValueList><Name>Manufacturer</Name><Value>Konami</Value></NameValueList>
+    <NameValueList><Name>Set</Name><Value>Sandbox Test</Value></NameValueList>
+    <NameValueList><Name>Game</Name><Value>Yu-Gi-Oh! TCG</Value></NameValueList>
+    <NameValueList><Name>Features</Name><Value>Unlimited</Value></NameValueList>
+    <NameValueList><Name>Card Number</Name><Value>TEST-001</Value></NameValueList>
+    <NameValueList><Name>Language</Name><Value>English</Value></NameValueList>
+  </ItemSpecifics>
+  <StartPrice currencyID="GBP">0.99</StartPrice>
+  <CategoryMappingAllowed>true</CategoryMappingAllowed>
+  <Country>GB</Country>
+  <Currency>GBP</Currency>
+  <DispatchTimeMax>3</DispatchTimeMax>
+  <ListingDuration>GTC</ListingDuration>
+  <ListingType>FixedPriceItem</ListingType>
+  <Location>London</Location>
+  <PostalCode>SW1A 1AA</PostalCode>
+  <PictureDetails>
+    <PictureURL>https://images.ygoprodeck.com/images/cards/89631139.jpg</PictureURL>
+  </PictureDetails>
+  <ReturnPolicy>
+    <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+    <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+    <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+  </ReturnPolicy>
+  <ShippingDetails>
+    <ShippingType>Flat</ShippingType>
+    <ShippingServiceOptions>
+      <ShippingServicePriority>1</ShippingServicePriority>
+      <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
+      <ShippingServiceCost currencyID="GBP">0.00</ShippingServiceCost>
+      <ShippingServiceAdditionalCost currencyID="GBP">0.00</ShippingServiceAdditionalCost>
+      <FreeShipping>true</FreeShipping>
+    </ShippingServiceOptions>
+  </ShippingDetails>
+  <Site>UK</Site>
+</Item>

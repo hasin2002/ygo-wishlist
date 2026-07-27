@@ -1,0 +1,27 @@
+{
+  "accepted": false,
+  "callName": "VerifyAddItem",
+  "publishingAttempted": false,
+  "request": {
+    "categoryId": "183455",
+    "categoryMappingAllowed": false,
+    "lotSize": 2,
+    "quantity": 1,
+    "requestSha256": "8c858cb010e01e78fff5adea02c7020beea23be5a80c47fc79f0cf9871942980"
+  },
+  "response": {
+    "ack": "Failure",
+    "errors": [
+      {
+        "code": "21920360",
+        "severity": "Warning"
+      },
+      {
+        "code": "21916883",
+        "severity": "Error"
+      }
+    ],
+    "httpStatus": 200
+  },
+  "sandboxOnly": true
+}

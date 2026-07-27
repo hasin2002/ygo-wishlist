@@ -37,6 +37,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Raw eBay Sandbox payloads may contain seller, buyer, address, and token data.
+# Only deterministic sanitized .json evidence under tests/fixtures may be committed.
+tests/fixtures/ebay-sandbox/*.raw.*
+/.ebay-sandbox-operation-intents/
+
 # vercel
 .vercel
 
