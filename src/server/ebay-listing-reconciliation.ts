@@ -3,7 +3,6 @@ import "server-only";
 import {
   and,
   asc,
-  desc,
   eq,
   gte,
   isNull,
@@ -12,7 +11,11 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  cardCopies,
   ebayListings,
+  ebayListingMembers,
+  ebayOrderLineAllocations,
+  ebayOrderLines,
   type EbayListingRow,
 } from "@/db/schema";
 import {
@@ -21,6 +24,11 @@ import {
   type EbayLifecycleObservation,
   type EbayListingLifecycle,
 } from "@/lib/records/ebay-listing-lifecycle";
+import {
+  getLatestEbayListingForCopyMembershipFirst,
+  hasEbayCompositionSchema,
+  legacySafeEbayListingSelection,
+} from "@/server/ebay-listing-composition";
 import { EbayAuthorizationError } from "@/server/ebay-seller";
 import {
   EbayTradingError,
@@ -198,16 +206,270 @@ export function ebayListingStatusSummary(row: EbayListingRow) {
 }
 
 export async function getLatestEbayListingForCopy(ownerId: string, copyId: string) {
-  const [listing] = await db
-    .select()
-    .from(ebayListings)
-    .where(and(
-      eq(ebayListings.ownerId, ownerId),
-      eq(ebayListings.copyId, copyId),
-    ))
-    .orderBy(desc(ebayListings.createdAt))
-    .limit(1);
-  return listing ?? null;
+  return getLatestEbayListingForCopyMembershipFirst(ownerId, copyId);
+}
+
+function parentObservationWithoutConflictingOrderLine(
+  current: EbayListingRow,
+  observation: EbayLifecycleObservation,
+): EbayLifecycleObservation {
+  const identifiersConflict = [
+    [current.orderId, observation.orderId],
+    [current.orderLineItemId, observation.orderLineItemId],
+    [current.transactionId, observation.transactionId],
+  ].some(([existing, incoming]) => existing != null && incoming != null && existing !== incoming);
+  if (!identifiersConflict) return observation;
+
+  // A quantity listing can have several legitimate order lines. The legacy
+  // parent row retains its first compatibility identifiers while normalized
+  // order lines retain every remote line.
+  return {
+    ...observation,
+    orderId: undefined,
+    orderLineItemId: undefined,
+    transactionId: undefined,
+  };
+}
+
+function paymentStateForRemoteTransaction(
+  transaction: EbayRemoteTransaction,
+): "pending" | "paid" | "cancelled" | "needs_review" {
+  if (transaction.cancelled) return "cancelled" as const;
+  if (transaction.paid) return "paid" as const;
+  return "pending" as const;
+}
+
+async function persistRemoteOrderLines({
+  listingId,
+  ownerId,
+  remote,
+  timestamp,
+  tx,
+  enabled,
+}: {
+  enabled: boolean;
+  listingId: string;
+  ownerId: string;
+  remote: EbayRemoteListing;
+  timestamp: Date;
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0];
+}) {
+  if (!enabled) return { failClosed: false };
+  let failClosed = false;
+  const members = await tx
+      .select()
+      .from(ebayListingMembers)
+      .where(and(
+        eq(ebayListingMembers.ownerId, ownerId),
+        eq(ebayListingMembers.listingId, listingId),
+      ))
+      .orderBy(asc(ebayListingMembers.fulfilmentPosition));
+
+  for (const transaction of remote.transactions) {
+      if (!transaction.orderLineItemId && !transaction.transactionId) continue;
+      const existingRows = await tx
+        .select()
+        .from(ebayOrderLines)
+        .where(and(
+          eq(ebayOrderLines.ownerId, ownerId),
+          or(
+            transaction.orderLineItemId && transaction.orderId
+              ? and(
+                eq(ebayOrderLines.orderId, transaction.orderId),
+                eq(ebayOrderLines.orderLineItemId, transaction.orderLineItemId),
+              )
+              : undefined,
+            transaction.transactionId
+              ? eq(ebayOrderLines.transactionId, transaction.transactionId)
+              : undefined,
+          ),
+        ))
+        .limit(2);
+      const existing = existingRows[0];
+      let state = paymentStateForRemoteTransaction(transaction);
+      const identifiersChanged = Boolean(existing && (
+        (existing.orderId && transaction.orderId && existing.orderId !== transaction.orderId)
+        || (
+          existing.orderLineItemId
+          && transaction.orderLineItemId
+          && existing.orderLineItemId !== transaction.orderLineItemId
+        )
+        || (
+          existing.transactionId
+          && transaction.transactionId
+          && existing.transactionId !== transaction.transactionId
+        )
+      ));
+      const terminalRegression = Boolean(
+        existing
+        && (
+          existing.paymentState === "needs_review"
+          || (
+            existing.paymentState === "cancelled"
+            && state !== "cancelled"
+          )
+          || (
+            (existing.paymentState === "paid" || existing.saleRecordId)
+            && state !== "paid"
+          )
+        ),
+      );
+      const quantityChanged = Boolean(
+        existing && existing.quantityPurchased !== transaction.quantityPurchased,
+      );
+      if (
+        existingRows.length > 1
+        || existing?.listingId !== undefined && existing.listingId !== listingId
+        || identifiersChanged
+        || terminalRegression
+        || quantityChanged
+      ) {
+        state = "needs_review";
+        failClosed = true;
+      }
+      const values = {
+        cancelledAt: state === "cancelled"
+          ? existing?.cancelledAt ?? timestamp
+          : existing?.cancelledAt ?? null,
+        lastRemoteEventAt: timestamp,
+        needsReviewAt: state === "needs_review"
+          ? existing?.needsReviewAt ?? timestamp
+          : null,
+        orderId: existing?.orderId ?? transaction.orderId,
+        orderLineItemId: existing?.orderLineItemId ?? transaction.orderLineItemId,
+        paidAt: existing?.paidAt
+          ?? (state === "paid" ? transaction.paidAt ?? timestamp : null),
+        paymentPendingAt: existing?.paymentPendingAt
+          ?? (state === "pending" ? timestamp : null),
+        paymentState: state,
+        quantityPurchased: existing?.quantityPurchased
+          ?? Math.max(1, transaction.quantityPurchased),
+        remoteOrderStatus: remoteOrderStatus(transaction),
+        transactionId: existing?.transactionId ?? transaction.transactionId,
+        updatedAt: timestamp,
+      };
+      const orderLineId = existing?.id ?? `ebay-order-line-${crypto.randomUUID()}`;
+      if (existing) {
+        await tx.update(ebayOrderLines).set(values).where(and(
+          eq(ebayOrderLines.id, existing.id),
+          eq(ebayOrderLines.ownerId, ownerId),
+        ));
+      } else {
+        await tx.insert(ebayOrderLines).values({
+          ...values,
+          createdAt: timestamp,
+          id: orderLineId,
+          listingId,
+          ownerId,
+        });
+      }
+
+      if (state === "cancelled") {
+        await tx.update(ebayOrderLineAllocations).set({
+          releasedAt: timestamp,
+          releaseReason: "eBay order line cancelled",
+          updatedAt: timestamp,
+        }).where(and(
+          eq(ebayOrderLineAllocations.ownerId, ownerId),
+          eq(ebayOrderLineAllocations.orderLineId, orderLineId),
+          isNull(ebayOrderLineAllocations.releasedAt),
+        ));
+        continue;
+      }
+
+      // #15 preserves the existing one-Copy behaviour only. Quantity and
+      // bundle fulfilment rules are owned by later tickets.
+      if (
+        state === "needs_review"
+        || members.length !== 1
+        || transaction.quantityPurchased !== 1
+      ) {
+        if (state !== "needs_review") {
+          failClosed = true;
+          await tx.update(ebayOrderLines).set({
+            needsReviewAt: timestamp,
+            paymentState: "needs_review",
+            updatedAt: timestamp,
+          }).where(and(
+            eq(ebayOrderLines.id, orderLineId),
+            eq(ebayOrderLines.ownerId, ownerId),
+          ));
+        }
+        continue;
+      }
+      const member = members[0]!;
+      const [copy] = await tx.select({
+        id: cardCopies.id,
+        soldRecordId: cardCopies.soldRecordId,
+        status: cardCopies.status,
+      }).from(cardCopies).where(and(
+        eq(cardCopies.ownerId, ownerId),
+        eq(cardCopies.id, member.copyId),
+      )).for("update").limit(1);
+      const [openAllocation] = await tx.select({
+        id: ebayOrderLineAllocations.id,
+        listingId: ebayOrderLineAllocations.listingId,
+        listingMemberId: ebayOrderLineAllocations.listingMemberId,
+        orderLineId: ebayOrderLineAllocations.orderLineId,
+      })
+        .from(ebayOrderLineAllocations)
+        .where(and(
+          eq(ebayOrderLineAllocations.ownerId, ownerId),
+          eq(ebayOrderLineAllocations.copyId, member.copyId),
+          isNull(ebayOrderLineAllocations.releasedAt),
+        ))
+        .limit(1);
+      const allocationConflict = Boolean(
+        !copy
+        || (
+          (
+            copy.status !== "available"
+            || copy.soldRecordId
+          )
+          && !(
+            copy.status === "sold"
+            && existing?.saleRecordId
+            && copy.soldRecordId === existing.saleRecordId
+            && openAllocation?.orderLineId === orderLineId
+            && openAllocation.listingId === listingId
+            && openAllocation.listingMemberId === member.id
+          )
+        )
+        || (
+          openAllocation
+          && (
+            openAllocation.orderLineId !== orderLineId
+            || openAllocation.listingId !== listingId
+            || openAllocation.listingMemberId !== member.id
+          )
+        ),
+      );
+      if (allocationConflict) {
+        failClosed = true;
+        await tx.update(ebayOrderLines).set({
+          needsReviewAt: timestamp,
+          paymentState: "needs_review",
+          updatedAt: timestamp,
+        }).where(and(
+          eq(ebayOrderLines.id, orderLineId),
+          eq(ebayOrderLines.ownerId, ownerId),
+        ));
+      } else if (!openAllocation) {
+        await tx.insert(ebayOrderLineAllocations).values({
+          allocatedAt: timestamp,
+          copyId: member.copyId,
+          createdAt: timestamp,
+          fulfilmentPosition: 0,
+          id: `ebay-order-line-allocation-${crypto.randomUUID()}`,
+          listingId,
+          listingMemberId: member.id,
+          orderLineId,
+          ownerId,
+          updatedAt: timestamp,
+        });
+      }
+  }
+  return { failClosed };
 }
 
 export async function reconcileEbayListing({
@@ -222,7 +484,7 @@ export async function reconcileEbayListing({
   ownerId: string;
 }) {
   const [knownListing] = await db
-    .select()
+    .select(legacySafeEbayListingSelection)
     .from(ebayListings)
     .where(and(
       eq(ebayListings.id, listingId),
@@ -234,6 +496,7 @@ export async function reconcileEbayListing({
   }
 
   const attemptedAt = new Date();
+  const compositionSchemaReady = await hasEbayCompositionSchema();
   let remote: EbayRemoteListing;
   try {
     remote = await getEbayRemoteListing(ownerId, knownListing.itemId);
@@ -259,7 +522,7 @@ export async function reconcileEbayListing({
 
   return db.transaction(async (tx) => {
     const [currentRow] = await tx
-      .select()
+      .select(legacySafeEbayListingSelection)
       .from(ebayListings)
       .where(and(
         eq(ebayListings.id, listingId),
@@ -271,15 +534,28 @@ export async function reconcileEbayListing({
       throw new EbayListingReconciliationError("That tracked eBay listing no longer exists.");
     }
 
-    const observation = ebayObservationFromRemote(remote, {
+    const normalized = await persistRemoteOrderLines({
+      enabled: compositionSchemaReady,
+      listingId: currentRow.id,
+      ownerId,
+      remote,
+      timestamp: attemptedAt,
+      tx,
+    });
+
+    const observation = parentObservationWithoutConflictingOrderLine(
+      currentRow,
+      ebayObservationFromRemote(remote, {
       effectiveAt: effectiveAt ?? attemptedAt,
       notificationId,
-    });
+      }),
+    );
     const decision = decideEbayLifecycleTransition(
       lifecycleFromRow(currentRow),
       observation,
     );
     const next = decision.next;
+    const normalizedFailClosed = normalized.failClosed;
     const compatibilityStatus = decision.relistAllowed
       || (next.saleRecordId !== null && next.saleState === "paid")
       ? "ended"
@@ -290,19 +566,23 @@ export async function reconcileEbayListing({
       .set({
         cancelledAt: next.cancelledAt,
         endingReason: next.endingReason,
-        lastError: decision.action === "fail_closed"
+        lastError: decision.action === "fail_closed" || normalizedFailClosed
           ? "eBay returned a listing state that needs review."
           : null,
-        lastErrorAt: decision.action === "fail_closed" ? attemptedAt : null,
+        lastErrorAt: decision.action === "fail_closed" || normalizedFailClosed
+          ? attemptedAt
+          : null,
         lastNotificationAt: notificationId ? attemptedAt : currentRow.lastNotificationAt,
         lastNotificationId: next.lastNotificationId,
         lastRemoteEventAt: next.lastRemoteEventAt,
         lastSyncAttemptAt: attemptedAt,
-        lastSyncedAt: decision.action === "fail_closed" ? currentRow.lastSyncedAt : attemptedAt,
+        lastSyncedAt: decision.action === "fail_closed" || normalizedFailClosed
+          ? currentRow.lastSyncedAt
+          : attemptedAt,
         listingEndedAt: next.listingEndedAt,
         listingStartedAt: next.listingStartedAt,
         listingState: next.listingState,
-        nextRetryAt: decision.action === "fail_closed"
+        nextRetryAt: decision.action === "fail_closed" || normalizedFailClosed
           ? new Date(attemptedAt.getTime() + retryDelayMilliseconds(currentRow.retryCount + 1))
           : null,
         orderId: next.orderId,
@@ -312,10 +592,12 @@ export async function reconcileEbayListing({
         quantitySold: next.quantitySold,
         remoteListingStatus: next.remoteListingStatus,
         remoteOrderStatus: next.remoteOrderStatus,
-        retryCount: decision.action === "fail_closed" ? currentRow.retryCount + 1 : 0,
+        retryCount: decision.action === "fail_closed" || normalizedFailClosed
+          ? currentRow.retryCount + 1
+          : 0,
         saleRecordId: next.saleRecordId,
-        saleState: next.saleState,
-        status: compatibilityStatus,
+        saleState: normalizedFailClosed ? "needs_review" : next.saleState,
+        status: normalizedFailClosed ? "active" : compatibilityStatus,
         transactionId: next.transactionId,
         updatedAt: attemptedAt,
       })
@@ -326,7 +608,7 @@ export async function reconcileEbayListing({
       .returning();
 
     return {
-      decision: decision.action,
+      decision: normalizedFailClosed ? "fail_closed" as const : decision.action,
       reason: decision.reason,
       listing: ebayListingStatusSummary(updated),
     };

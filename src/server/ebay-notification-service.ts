@@ -536,7 +536,7 @@ export async function persistEbayNotification({
   const itemIds = parsed.listingRefs.map((reference) => reference.itemId);
   const listings = itemIds.length
     ? await db
-      .select()
+      .select({ id: ebayListings.id, ownerId: ebayListings.ownerId })
       .from(ebayListings)
       .where(inArray(ebayListings.itemId, itemIds))
     : [];
@@ -600,7 +600,7 @@ export async function processEbayNotificationEvent(eventId: string) {
     const itemIds = event.listingRefs.map((reference) => reference.itemId);
     const listings = itemIds.length
       ? await db
-        .select()
+        .select({ id: ebayListings.id, ownerId: ebayListings.ownerId })
         .from(ebayListings)
         .where(inArray(ebayListings.itemId, itemIds))
       : [];
