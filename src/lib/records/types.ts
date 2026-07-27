@@ -76,6 +76,81 @@ export type CardCopy = {
   createdAt: string;
 };
 
+/** The physical ownership of a Copy, deliberately independent of eBay offers. */
+export type CopyPhysicalState = {
+  state: "owned" | "sold" | "unavailable";
+  code:
+    | "owned"
+    | "sold"
+    | "copy_void"
+    | "source_record_void"
+    | "source_record_unavailable";
+  reason: string;
+};
+
+/** One persisted eBay offer related to an exact physical Copy. */
+export type EbayOfferExposure = {
+  copyId: string;
+  listingId: string;
+  memberId: string | null;
+  fulfilmentPosition: number | null;
+  relationSource: "member" | "legacy";
+  kind: "individual" | "quantity" | "bundle";
+  title: string;
+  itemId: string;
+  listingUrl: string;
+  listingState: "active" | "ended" | "suspended" | "unknown";
+  saleState: "none" | "pending" | "paid" | "cancelled" | "needs_review";
+  saleRecordId: string | null;
+  quantitySold: number | null;
+  listingStartedAt: string | null;
+  listingEndedAt: string | null;
+  paymentPendingAt: string | null;
+  paidAt: string | null;
+  cancelledAt: string | null;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  updatedAt: string;
+};
+
+export type EbayExposureAggregateState =
+  | "not_listed"
+  | "live"
+  | "reserved_by_order"
+  | "payment_pending"
+  | "ending_automatically"
+  | "needs_takedown"
+  | "paid_sale_recorded"
+  | "needs_attention";
+
+/** A persisted explanation for the Inventory action; validate/publish still recheck on the server. */
+export type CopyEbayActionState = {
+  disposition: "sell" | "review" | "blocked";
+  code:
+    | "no_related_offers"
+    | "only_ended_offers"
+    | "live_offer"
+    | "payment_pending"
+    | "paid_sale_recorded"
+    | "needs_takedown"
+    | "needs_attention"
+    | "copy_sold"
+    | "copy_unavailable";
+  reason: string;
+};
+
+/** Per-Copy ownership and eBay exposure summary returned in the Records snapshot. */
+export type CopyEbayExposureState = {
+  copyId: string;
+  physical: CopyPhysicalState;
+  offers: EbayOfferExposure[];
+  liveOfferCount: number;
+  endedOfferCount: number;
+  aggregateState: EbayExposureAggregateState;
+  action: CopyEbayActionState;
+};
+
 export type RecordLine = {
   id: string;
   kind: InventoryKind;
@@ -148,6 +223,7 @@ export type RecordsSnapshot = {
   targets: WishlistTarget[];
   printings: CardPrinting[];
   copies: CardCopy[];
+  copyEbayExposures: CopyEbayExposureState[];
   sealedUnits: SealedUnit[];
   bulkLots: BulkLot[];
   supplies: SupplyItem[];

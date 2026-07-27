@@ -3,7 +3,7 @@ import test from "node:test";
 import { allocatePence, allocatePenceAt } from "../src/lib/records/allocation.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
-import { createPreviewSnapshot, removeCardCopy, replaceRecordCards, updateCardCopy } from "../src/lib/records/preview-data.ts";
+import { changeRecordStatus, createPreviewSnapshot, removeCardCopy, replaceRecordCards, updateCardCopy } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
 
 function twoCopyPurchase(): RecordsSnapshot {
@@ -64,6 +64,7 @@ function twoCopyPurchase(): RecordsSnapshot {
       privateNote: "",
       createdAt: `2026-07-20T12:00:0${index}.000Z`,
     })),
+    copyEbayExposures: [],
     sealedUnits: [],
     bulkLots: [],
     supplies: [],
@@ -96,6 +97,53 @@ test("removing a physical Copy removes that exact Copy and rebases its purchase 
   assert.equal(result.next.copies[0]?.allocationPence, 101);
   assert.deepEqual(result.next.records[0]?.lines[0]?.entityIds, ["copy-one"]);
   assert.equal(result.next.records[0]?.lines[0]?.quantity, 1);
+});
+
+test("preview cannot remove a Copy with eBay listing history", () => {
+  const snapshot = createPreviewSnapshot([]);
+  const before = snapshot.copyEbayExposures.find((state) => (
+    state.copyId === "copy-preview-dark-2"
+  ));
+  const result = removeCardCopy(snapshot, "copy-preview-dark-2");
+
+  assert.equal(result.result.ok, false);
+  if (!result.result.ok) assert.match(result.result.message, /eBay listing history/i);
+  assert.ok(result.next.copies.some((copy) => copy.id === "copy-preview-dark-2"));
+  assert.deepEqual(
+    result.next.copyEbayExposures.find((state) => state.copyId === "copy-preview-dark-2"),
+    before,
+  );
+});
+
+test("preview Sale void and restore update linked paid-offer exposure", () => {
+  const snapshot = createPreviewSnapshot([]);
+  const initial = snapshot.copyEbayExposures.find((state) => state.copyId === "copy-preview-ash");
+  assert.equal(initial?.aggregateState, "paid_sale_recorded");
+
+  const voided = changeRecordStatus(snapshot, "record-preview-sale", "void");
+  assert.equal(voided.result.ok, true);
+  const voidedCopy = voided.next.copies.find((copy) => copy.id === "copy-preview-ash");
+  const voidedExposure = voided.next.copyEbayExposures.find((state) => (
+    state.copyId === "copy-preview-ash"
+  ));
+  assert.equal(voidedCopy?.status, "available");
+  assert.equal(voidedCopy?.soldRecordId, null);
+  assert.equal(voidedExposure?.physical.state, "owned");
+  assert.equal(voidedExposure?.aggregateState, "needs_attention");
+  assert.equal(voidedExposure?.offers[0]?.saleState, "needs_review");
+  assert.equal(voidedExposure?.offers[0]?.saleRecordId, "record-preview-sale");
+
+  const restored = changeRecordStatus(voided.next, "record-preview-sale", "active");
+  assert.equal(restored.result.ok, true);
+  const restoredCopy = restored.next.copies.find((copy) => copy.id === "copy-preview-ash");
+  const restoredExposure = restored.next.copyEbayExposures.find((state) => (
+    state.copyId === "copy-preview-ash"
+  ));
+  assert.equal(restoredCopy?.status, "sold");
+  assert.equal(restoredCopy?.soldRecordId, "record-preview-sale");
+  assert.equal(restoredExposure?.physical.state, "sold");
+  assert.equal(restoredExposure?.aggregateState, "paid_sale_recorded");
+  assert.equal(restoredExposure?.offers[0]?.saleState, "paid");
 });
 
 test("copy details are edited independently", () => {
@@ -256,6 +304,7 @@ test("pack-opening records use the opened product image instead of pulled card i
     privateNote: "",
     createdAt: "2026-07-01T00:00:00.000Z",
     }],
+    copyEbayExposures: [],
     sealedUnits: [{
       id: "sealed-set",
       name: "Example Booster Set",

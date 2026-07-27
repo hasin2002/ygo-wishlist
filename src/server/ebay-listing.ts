@@ -14,6 +14,7 @@ import type {
   EbayListingItemSpecifics,
   EbayListingLanguage,
 } from "@/lib/ebay-listing-options";
+import { decideEbayCopyListingEligibility } from "@/lib/records/ebay-copy-listing-eligibility";
 import {
   copyListingImageDraftsToArchive,
   deleteArchivedListingImages,
@@ -28,10 +29,12 @@ import { getEbaySellerAccessToken } from "@/server/ebay-seller";
 import {
   EbayListingReconciliationError,
   ebayListingStatusSummary,
-  getLatestEbayListingForCopy,
   reconcileEbayListing,
 } from "@/server/ebay-listing-reconciliation";
-import { isMissingEbayCompositionSchema } from "@/server/ebay-listing-composition";
+import {
+  getEbayListingsForCopiesMembershipFirst,
+  isMissingEbayCompositionSchema,
+} from "@/server/ebay-listing-composition";
 import {
   callEbayTradingApi,
   EbayTradingError,
@@ -188,6 +191,47 @@ async function loadOwnedCopy(ownerId: string, copyId: string) {
   return copy;
 }
 
+type RelatedEbayListing = Awaited<
+  ReturnType<typeof getEbayListingsForCopiesMembershipFirst>
+>[number];
+
+function decideRelatedListingEligibility(relatedListings: RelatedEbayListing[]) {
+  return decideEbayCopyListingEligibility(relatedListings.map(({ listing }) => ({
+    createdAt: listing.createdAt,
+    id: listing.id,
+    listingState: listing.listingState,
+    relistAllowed: ebayListingStatusSummary(listing).relistAllowed,
+    saleState: listing.saleState,
+  })));
+}
+
+function representativeListingSummary(
+  relatedListings: RelatedEbayListing[],
+  representativeListingId: string | null,
+) {
+  const representative = relatedListings.find(
+    ({ listing }) => listing.id === representativeListingId,
+  )?.listing;
+  return representative ? ebayListingStatusSummary(representative) : null;
+}
+
+async function reconcileBlockingListings(
+  ownerId: string,
+  listingIds: string[],
+) {
+  let failed = false;
+  let firstError: unknown;
+  for (const listingId of listingIds) {
+    try {
+      await reconcileEbayListing({ listingId, ownerId });
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
+  }
+  if (failed) throw firstError;
+}
+
 async function loadSellableCopy(
   ownerId: string,
   copyId: string,
@@ -196,17 +240,15 @@ async function loadSellableCopy(
   const copy = await loadOwnedCopy(ownerId, copyId);
   if (copy.status !== "available") throw new EbayListingError("Only an available physical Copy can be listed.");
 
-  const latestListing = await getLatestEbayListingForCopy(ownerId, copyId);
-  if (!latestListing) return copy;
-  const currentStatus = ebayListingStatusSummary(latestListing);
-  if (currentStatus.relistAllowed) return copy;
+  let relatedListings = await getEbayListingsForCopiesMembershipFirst(ownerId, [copyId]);
+  let decision = decideRelatedListingEligibility(relatedListings);
+  if (decision.eligible) return copy;
   if (reconcileActiveListing) {
     try {
-      const result = await reconcileEbayListing({
-        listingId: latestListing.id,
-        ownerId,
-      });
-      if (result.listing.relistAllowed) return copy;
+      await reconcileBlockingListings(ownerId, decision.blockingListingIds);
+      relatedListings = await getEbayListingsForCopiesMembershipFirst(ownerId, [copyId]);
+      decision = decideRelatedListingEligibility(relatedListings);
+      if (decision.eligible) return copy;
     } catch (error) {
       if (error instanceof EbayListingReconciliationError) {
         throw new EbayListingError(error.message);
@@ -233,53 +275,53 @@ export async function getEbayListingEligibility(
   if (!copy) return { eligible: false, status: "not_owned" };
   if (copy.status !== "available") return { eligible: false, status: "unavailable" };
 
-  const latestListing = await getLatestEbayListingForCopy(ownerId, copyId);
-  if (latestListing) {
-    const currentStatus = ebayListingStatusSummary(latestListing);
-    if (currentStatus.relistAllowed) {
-      return { eligible: true, listing: currentStatus, status: "eligible" };
-    }
-    try {
-      const result = await reconcileEbayListing({
-        listingId: latestListing.id,
-        ownerId,
-      });
-      if (result.listing.relistAllowed) {
-        return { eligible: true, listing: result.listing, status: "eligible" };
-      }
-      if (result.listing.saleState === "pending") {
-        return { eligible: false, listing: result.listing, status: "payment_pending" };
-      }
-      if (result.listing.saleState === "paid") {
-        return { eligible: false, listing: result.listing, status: "paid" };
-      }
-      if (result.listing.saleState === "needs_review") {
-        return { eligible: false, listing: result.listing, status: "needs_review" };
-      }
-      if (
-        result.listing.listingState === "suspended"
-        || result.listing.listingState === "unknown"
-      ) {
-        return { eligible: false, listing: result.listing, status: "suspended" };
-      }
-      return { eligible: false, listing: result.listing, status: "active_listing" };
-    } catch (error) {
-      const latest = await getLatestEbayListingForCopy(ownerId, copyId);
-      return {
-        eligible: false,
-        listing: latest ? ebayListingStatusSummary(latest) : null,
-        reconnectRequired: error instanceof EbayListingReconciliationError
-          && error.reconnectRequired,
-        status: "sync_unavailable",
-      };
-    }
+  let relatedListings = await getEbayListingsForCopiesMembershipFirst(ownerId, [copyId]);
+  let decision = decideRelatedListingEligibility(relatedListings);
+  if (decision.eligible) {
+    return {
+      eligible: true,
+      listing: representativeListingSummary(
+        relatedListings,
+        decision.representativeListingId,
+      ),
+      status: "eligible",
+    };
   }
 
-  return {
-    eligible: true,
-    listing: null,
-    status: "eligible",
-  };
+  try {
+    await reconcileBlockingListings(ownerId, decision.blockingListingIds);
+    relatedListings = await getEbayListingsForCopiesMembershipFirst(ownerId, [copyId]);
+    decision = decideRelatedListingEligibility(relatedListings);
+    const listing = representativeListingSummary(
+      relatedListings,
+      decision.representativeListingId,
+    );
+    if (decision.eligible) {
+      return {
+        eligible: true,
+        listing,
+        status: "eligible",
+      };
+    }
+    return {
+      eligible: false,
+      listing,
+      status: decision.status,
+    };
+  } catch (error) {
+    relatedListings = await getEbayListingsForCopiesMembershipFirst(ownerId, [copyId]);
+    decision = decideRelatedListingEligibility(relatedListings);
+    return {
+      eligible: false,
+      listing: representativeListingSummary(
+        relatedListings,
+        decision.representativeListingId,
+      ),
+      reconnectRequired: error instanceof EbayListingReconciliationError
+        && error.reconnectRequired,
+      status: "sync_unavailable",
+    };
+  }
 }
 
 function verificationResult(result: Awaited<ReturnType<typeof tradingCall>>): EbayVerification {
