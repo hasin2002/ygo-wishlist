@@ -51,6 +51,7 @@ export function CardPhotoManager({
   onReorder,
   onUpload,
   previewSubtitle,
+  previewNotice,
   removalDescription,
   removalTitle,
   removingId,
@@ -78,6 +79,7 @@ export function CardPhotoManager({
   onReorder: (ids: string[]) => Promise<boolean>;
   onUpload: (files: File[]) => Promise<void>;
   previewSubtitle: string;
+  previewNotice?: string;
   removalDescription: string;
   removalTitle: string;
   removingId?: string | null;
@@ -273,43 +275,12 @@ export function CardPhotoManager({
         </div>
       </div>
 
-      {canManage && configured && !arranging && !atLimit ? (
-        <label
-          className={`mt-4 grid cursor-pointer place-items-center rounded-lg border-2 border-dashed px-4 text-center transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#8a1f2d] has-[:focus-visible]:ring-offset-2 ${images.length ? "min-h-16 py-3" : "min-h-28 py-5"} ${draggingFiles ? "border-[#8a1f2d] bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-zinc-50 text-zinc-600 hover:border-[#8a1f2d] hover:bg-rose-50/50"} ${changing ? "cursor-wait opacity-60" : ""}`}
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        >
-          <input
-            accept="image/avif,image/bmp,image/gif,image/heic,image/jpeg,image/png,image/tiff,image/webp"
-            className="sr-only"
-            disabled={uploadDisabled}
-            multiple
-            onChange={(event) => {
-              uploadFiles(Array.from(event.target.files ?? []));
-              event.currentTarget.value = "";
-            }}
-            type="file"
-          />
-          <span className={images.length ? "flex items-center justify-center gap-2" : ""}>
-            <UploadCloud aria-hidden="true" className={images.length ? "size-4" : "mx-auto size-5"} />
-            <span>
-              <span className={`${images.length ? "" : "mt-2"} block text-sm font-bold`}>
-                {uploading ? "Uploading photos…" : draggingFiles ? "Drop photos to upload" : images.length ? "Add more photos" : "Drag photos here, or click to choose files"}
-              </span>
-              {!images.length ? <span className="mt-1 block text-xs font-medium text-zinc-500">Choose one or more images · 12 MB each.</span> : null}
-            </span>
-          </span>
-        </label>
-      ) : null}
-
       {!arranging && ((canManage && configured && !atLimit) || secondaryAction) ? (
-        <div className="mt-3 flex min-w-0 max-w-full flex-wrap gap-2">
+        <div className={`mt-4 flex min-w-0 max-w-full flex-wrap gap-2 ${secondaryAction ? "" : "sm:hidden"}`}>
           {canManage && configured && !atLimit ? (
             <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 has-[:disabled]:cursor-wait has-[:disabled]:opacity-50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#8a1f2d] has-[:focus-visible]:ring-offset-2 sm:hidden">
               <Camera aria-hidden="true" className="size-4" />
-              {uploading ? "Uploading…" : "Take photo"}
+              {uploading ? "Uploading…" : "Take photo on phone"}
               <input
                 accept="image/*"
                 capture="environment"
@@ -334,6 +305,47 @@ export function CardPhotoManager({
               {secondaryAction.label}
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {canManage && configured && !arranging && !atLimit ? (
+        <label
+          className={`mt-3 grid cursor-pointer place-items-center rounded-lg border-2 border-dashed px-4 text-center transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#8a1f2d] has-[:focus-visible]:ring-offset-2 ${!secondaryAction ? "sm:mt-4" : ""} ${images.length ? "min-h-16 py-3" : "min-h-28 py-5"} ${draggingFiles ? "border-[#8a1f2d] bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-zinc-50 text-zinc-600 hover:border-[#8a1f2d] hover:bg-rose-50/50"} ${changing ? "cursor-wait opacity-60" : ""}`}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          <input
+            accept="image/avif,image/bmp,image/gif,image/heic,image/jpeg,image/png,image/tiff,image/webp"
+            className="sr-only"
+            disabled={uploadDisabled}
+            multiple
+            onChange={(event) => {
+              uploadFiles(Array.from(event.target.files ?? []));
+              event.currentTarget.value = "";
+            }}
+            type="file"
+          />
+          <span className={images.length ? "flex items-center justify-center gap-2" : ""}>
+            <UploadCloud aria-hidden="true" className={images.length ? "size-4" : "mx-auto size-5"} />
+            <span>
+              <span className={`${images.length ? "" : "mt-2"} block text-sm font-bold`}>
+                {uploading ? "Uploading photos…" : draggingFiles ? "Drop photos to upload" : images.length ? "Add more photos" : "Upload photos"}
+              </span>
+              {!images.length ? <span className="mt-1 block text-xs font-medium text-zinc-500">Choose one or more images, or drag them here · 12 MB each.</span> : null}
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      {previewNotice ? (
+        <div className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3">
+          <p className="text-sm font-medium leading-5 text-zinc-600">{previewNotice}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed disabled:opacity-70" disabled type="button"><UploadCloud aria-hidden="true" className="size-4" />Upload photos</button>
+            <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed disabled:opacity-70 sm:hidden" disabled type="button"><Camera aria-hidden="true" className="size-4" />Take photo on phone</button>
+          </div>
         </div>
       ) : null}
 

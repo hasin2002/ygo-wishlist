@@ -9,11 +9,13 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   Clock3,
   History,
+  Info,
   PackageCheck,
   PackageOpen,
   Pencil,
@@ -30,7 +32,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   CardContentsEditor,
   type CardContentsDraft,
@@ -38,15 +40,14 @@ import {
 import { CardInventoryImages } from "@/components/records/card-inventory-images";
 import { EbayCopyExposure } from "@/components/records/ebay-copy-exposure";
 import {
-  copyExposureSelectorLabel,
   copyRemovalDecision,
-  ebayExposureSummary,
   physicalCopyStateLabel,
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { EbayListingAction } from "@/components/records/ebay-listing-action";
+import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
 import { poundsToPence } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
-import { getLibraryCardStatus } from "@/lib/records/library-status";
+import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import {
   recordImagePreviewsFor,
   type RecordImagePreview,
@@ -949,6 +950,146 @@ function inventoryCopySourceGroups(
   ));
 }
 
+function InventoryCardSummary({
+  hasKnownPurchaseValue,
+  libraryStatus,
+  purchaseValuePence,
+  soldQuantity,
+  target,
+}: {
+  hasKnownPurchaseValue: boolean;
+  libraryStatus: LibraryCardStatusSummary;
+  purchaseValuePence: number;
+  soldQuantity: number;
+  target: WishlistTarget;
+}) {
+  return (
+    <section aria-labelledby="inventory-card-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
+      <div className="grid gap-4 p-4 sm:grid-cols-[5rem_minmax(0,1fr)_auto] sm:items-center sm:p-5">
+        <div className="mx-auto grid aspect-[59/86] w-20 shrink-0 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 shadow-sm sm:mx-0">
+          {target.imageUrl ? <Image alt={`${target.name} card`} className="h-full w-full object-contain" height={172} loading="eager" sizes="80px" src={`/api/image-proxy?url=${encodeURIComponent(target.imageUrl)}`} unoptimized width={118} /> : <WalletCards aria-hidden="true" className="size-7 text-zinc-400" />}
+        </div>
+        <div className="min-w-0">
+          <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Card inventory</span>
+          <h2 className="mt-1 break-words text-xl font-black leading-tight sm:text-2xl" id="inventory-card-title">{target.name}</h2>
+          <p className="sr-only" id="inventory-card-description">Manage each physical Copy and the Record it came from.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className={`rounded-md px-2 py-1 text-xs font-bold ${libraryStatus.status === "wishlist" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{libraryStatus.status === "wishlist" ? "Wishlist" : "Owned"}</span>
+            <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.rarity}</span>
+            <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.edition}</span>
+          </div>
+        </div>
+        <dl className="grid grid-cols-3 gap-2 text-center sm:min-w-60">
+          <div className="rounded-lg bg-zinc-50 px-2 py-2"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Wanted</dt><dd className="mt-0.5 text-lg font-black tabular-nums">{libraryStatus.wantedQuantity}</dd></div>
+          <div className="rounded-lg bg-zinc-50 px-2 py-2"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Owned</dt><dd className="mt-0.5 text-lg font-black tabular-nums">{libraryStatus.ownedQuantity}</dd></div>
+          <div className="rounded-lg bg-zinc-50 px-2 py-2"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Sold</dt><dd className="mt-0.5 text-lg font-black tabular-nums">{soldQuantity}</dd></div>
+        </dl>
+      </div>
+      <details className="border-t border-zinc-200 bg-zinc-50">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-bold text-zinc-700 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-inset [&::-webkit-details-marker]:hidden sm:px-5">
+          <span>Card details</span>
+          <span className="text-xs font-semibold text-zinc-500">Show details</span>
+        </summary>
+        <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-3 sm:px-5">
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity</dt><dd className="mt-1 font-bold text-zinc-800">{target.rarity}</dd></div>
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition</dt><dd className="mt-1 font-bold text-zinc-800">{target.edition}</dd></div>
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "Unknown"}</dd></div>
+        </dl>
+      </details>
+    </section>
+  );
+}
+
+type PhysicalCopyPickerOption = {
+  detail: string;
+  displayText: string;
+  id: string;
+  label: string;
+  searchText: string;
+};
+
+function PhysicalCopyCombobox({
+  onSelect,
+  options,
+  selectedCopyId,
+}: {
+  onSelect: (copyId: string) => void;
+  options: PhysicalCopyPickerOption[];
+  selectedCopyId: string;
+}) {
+  const selectedOption = options.find((option) => option.id === selectedCopyId) ?? options[0];
+  const selectedOptionIndex = Math.max(options.findIndex((option) => option.id === selectedCopyId), 0);
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState(selectedOption?.displayText ?? "");
+  const [activeIndex, setActiveIndex] = useState(selectedOptionIndex);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const normalizedQuery = query.trim().toLocaleLowerCase("en-GB");
+  const selectedText = selectedOption?.displayText.toLocaleLowerCase("en-GB") ?? "";
+  const visibleOptions = !normalizedQuery || normalizedQuery === selectedText
+    ? options
+    : options.filter((option) => option.searchText.includes(normalizedQuery));
+  const activeOption = visibleOptions[Math.min(activeIndex, Math.max(visibleOptions.length - 1, 0))];
+
+  function selectOption(option: PhysicalCopyPickerOption) {
+    setQuery(option.displayText);
+    setIsOpen(false);
+    onSelect(option.id);
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIsOpen(true);
+      setActiveIndex((current) => Math.min(current + 1, Math.max(visibleOptions.length - 1, 0)));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setIsOpen(true);
+      setActiveIndex((current) => Math.max(current - 1, 0));
+      return;
+    }
+    if (event.key === "Enter" && isOpen && activeOption) {
+      event.preventDefault();
+      selectOption(activeOption);
+      return;
+    }
+    if (event.key === "Escape") {
+      setQuery(selectedOption?.displayText ?? "");
+      setIsOpen(false);
+    }
+  }
+
+  return (
+    <div className="relative max-w-xl" onBlur={(event) => {
+      if (containerRef.current?.contains(event.relatedTarget)) return;
+      setQuery(selectedOption?.displayText ?? "");
+      setIsOpen(false);
+    }} ref={containerRef}>
+      <label className="text-sm font-bold text-zinc-800" htmlFor="physical-copy-combobox">Physical Copy</label>
+      <div className="relative mt-1.5">
+        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+        <input aria-activedescendant={isOpen && activeOption ? `physical-copy-option-${activeOption.id}` : undefined} aria-autocomplete="list" aria-controls="physical-copy-options" aria-expanded={isOpen} className="min-h-11 w-full rounded-md border border-zinc-300 bg-white py-2 pl-9 pr-10 text-base font-semibold text-zinc-900 transition placeholder:text-zinc-400 hover:border-zinc-400 focus-visible:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d]/20" id="physical-copy-combobox" onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); setIsOpen(true); }} onClick={(event) => { event.currentTarget.select(); setActiveIndex(selectedOptionIndex); setIsOpen(true); }} onFocus={(event) => { event.currentTarget.select(); setActiveIndex(selectedOptionIndex); setIsOpen(true); }} onKeyDown={handleKeyDown} placeholder="Search by Copy number, set, or sticker" role="combobox" value={query} />
+        <ChevronDown aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`} />
+      </div>
+      {isOpen ? (
+        <div aria-label="Physical Copies" className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg" id="physical-copy-options" role="listbox">
+          {visibleOptions.length ? visibleOptions.map((option, index) => {
+            const isSelected = option.id === selectedCopyId;
+            const isActive = option.id === activeOption?.id;
+            return (
+              <button aria-selected={isSelected} className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-bold transition-colors ${isActive ? "bg-zinc-100" : "hover:bg-zinc-50"} ${isSelected ? "text-[#8a1f2d]" : "text-zinc-900"}`} id={`physical-copy-option-${option.id}`} key={option.id} onClick={() => selectOption(option)} onFocus={() => setActiveIndex(index)} role="option" type="button">
+                <span className="min-w-0 flex-1 truncate">{option.label} · {option.detail}</span>
+                {isSelected ? <Check aria-hidden="true" className="size-4 shrink-0" /> : null}
+              </button>
+            );
+          }) : <p className="px-3 py-4 text-sm font-medium text-zinc-500">No Copies match that search.</p>}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function InventoryCardDetailContent({
   source,
   targetId,
@@ -966,7 +1107,6 @@ function InventoryCardDetailContent({
   const [confirmTargetRemoval, setConfirmTargetRemoval] = useState(false);
   const [deletingTarget, setDeletingTarget] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [photoSummaries, setPhotoSummaries] = useState<Record<string, { count: number; primary: { key: string; previewUrl: string } | null }>>({});
   const target = source.snapshot.targets.find((item) => item.id === targetId) ?? null;
   const sourceGroups = target ? inventoryCopySourceGroups(source.snapshot, target) : [];
   const copies = orderCopies(sourceGroups.flatMap((group) => group.copies.map(({ copy }) => copy)));
@@ -977,9 +1117,20 @@ function InventoryCardDetailContent({
     : copies[0]?.id ?? null;
   const selectedDetail = copyDetails.find((item) => item.copy.id === effectiveCopyId) ?? null;
   const copyExposureByCopyId = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
+  const copyPickerOptions = copyDetails.map(({ copy, printing }) => {
+    const copyNumber = copies.findIndex((item) => item.id === copy.id) + 1;
+    const label = copyDisplayLabel(copies, copy.id);
+    const detail = `#${copyShortReference(copy.id)} · ${printing.setCode || "Unknown set"} · ${copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition}`;
+    return {
+      detail,
+      displayText: `${label} · ${detail}`,
+      id: copy.id,
+      label,
+      searchText: [`Copy ${copyNumber}`, copyShortReference(copy.id), printing.setCode, copy.stickerNumber].filter(Boolean).join(" ").toLocaleLowerCase("en-GB"),
+    };
+  });
   const selectedExposure = selectedDetail ? copyExposureByCopyId.get(selectedDetail.copy.id) : undefined;
   const selectedCopyRemoval = copyRemovalDecision(selectedExposure);
-  const copyIdsKey = copies.map((copy) => copy.id).join(",");
   const ownedCopies = copies.filter((copy) => copy.status === "available");
   const ownedQuantity = ownedCopies.length;
   const soldQuantity = copies.filter((copy) => copy.status === "sold").length;
@@ -991,19 +1142,6 @@ function InventoryCardDetailContent({
   const editingRecord = editingSource
     ? source.snapshot.records.find((record) => record.id === editingSource.recordId) ?? null
     : null;
-
-  useEffect(() => {
-    if (source.mode !== "live" || !copyIdsKey) return;
-    let active = true;
-    void fetch(`/api/inventory/card-images?copyIds=${encodeURIComponent(copyIdsKey)}`)
-      .then(async (response) => {
-        const payload = await response.json() as { summaries?: Record<string, { count: number; primary: { key: string; previewUrl: string } | null }> };
-        if (!response.ok) throw new Error();
-        if (active) setPhotoSummaries(payload.summaries ?? {});
-      })
-      .catch(() => { if (active) setPhotoSummaries({}); });
-    return () => { active = false; };
-  }, [copyIdsKey, source.mode]);
 
   if (!target || !libraryStatus) {
     return (
@@ -1078,30 +1216,9 @@ function InventoryCardDetailContent({
         <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft aria-hidden="true" className="size-4" /> Back to inventory</Link>
       </nav>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[18rem_minmax(0,1fr)] lg:gap-6 xl:grid-cols-[21rem_minmax(0,1fr)]">
-        <aside aria-labelledby="inventory-card-title" className="grid gap-5 rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:grid-cols-[8rem_minmax(0,1fr)] sm:p-5 lg:sticky lg:top-5 lg:block">
-          <div className="mx-auto grid aspect-[59/86] w-32 shrink-0 place-items-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 shadow-sm sm:mx-0 sm:w-full lg:mx-auto lg:w-40">
-            {target.imageUrl ? <Image alt={`${target.name} card`} className="h-full w-full object-contain" height={256} loading="eager" sizes="(min-width: 1024px) 160px, 128px" src={`/api/image-proxy?url=${encodeURIComponent(target.imageUrl)}`} unoptimized width={176} /> : <WalletCards aria-hidden="true" className="size-8 text-zinc-400" />}
-          </div>
-          <div className="min-w-0 lg:mt-5">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Card inventory</span>
-            <h2 className="mt-1 break-words text-2xl font-black leading-tight sm:text-3xl" id="inventory-card-title">{target.name}</h2>
-            <p className="mt-2 text-sm font-medium leading-6 text-zinc-500" id="inventory-card-description">Manage each physical Copy and the Record it came from.</p>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className={`rounded-md px-2 py-1 text-xs font-bold ${libraryStatus.status === "wishlist" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{libraryStatus.status === "wishlist" ? "Wishlist" : "Owned"}</span>
-              <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.rarity}</span>
-              <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">{target.edition}</span>
-            </div>
-          </div>
-          <dl className="grid grid-cols-2 gap-2 text-center sm:col-span-2 lg:mt-5">
-            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Wanted</dt><dd className="mt-1 text-xl font-black tabular-nums">{libraryStatus.wantedQuantity}</dd></div>
-            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Owned</dt><dd className="mt-1 text-xl font-black tabular-nums">{libraryStatus.ownedQuantity}</dd></div>
-            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Sold</dt><dd className="mt-1 text-xl font-black tabular-nums">{soldQuantity}</dd></div>
-            <div className="rounded-lg bg-zinc-50 px-2 py-3"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 text-base font-black tabular-nums">{hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "Unknown"}</dd></div>
-          </dl>
-        </aside>
+      <InventoryCardSummary hasKnownPurchaseValue={hasKnownPurchaseValue} libraryStatus={libraryStatus} purchaseValuePence={purchaseValuePence} soldQuantity={soldQuantity} target={target} />
 
-        <div aria-describedby="inventory-card-description" className="grid min-w-0 gap-4 sm:gap-5">
+      <div aria-describedby="inventory-card-description" className="grid min-w-0 gap-4 sm:gap-5">
           {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
           {pendingRemoval ? (
             <section aria-labelledby="remove-copy-title" className="rounded-lg border border-rose-300 bg-rose-50 p-4" role="alert">
@@ -1133,19 +1250,12 @@ function InventoryCardDetailContent({
             </header>
 
             {selectedDetail ? (
-              <div className="grid gap-4 p-3 sm:p-4 md:grid-cols-[16rem_minmax(0,1fr)] md:p-5">
+              <div className="grid gap-4 p-3 sm:p-4 md:p-5">
                 {copies.length > 1 ? (
-                  <div className="md:hidden">
-                    <label className="grid gap-1.5 text-sm font-bold" htmlFor="physical-copy-select">Choose a physical Copy</label>
-                    <select className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-900 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" id="physical-copy-select" onChange={(event) => { router.replace(inventoryCardDetailHref(target.id, listState, event.currentTarget.value), { scroll: false }); setMessage(null); }} value={selectedDetail.copy.id}>
-                      {copyDetails.map(({ copy, printing }) => <option key={copy.id} value={copy.id}>{copyExposureSelectorLabel(`${copyDisplayLabel(copies, copy.id)} · ${printing.setCode || "Unknown set"} · ${copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition}`, copyExposureByCopyId.get(copy.id))}</option>)}
-                    </select>
-                  </div>
+                  <PhysicalCopyCombobox key={selectedDetail.copy.id} onSelect={(copyId) => { router.replace(inventoryCardDetailHref(target.id, listState, copyId), { scroll: false }); setMessage(null); }} options={copyPickerOptions} selectedCopyId={selectedDetail.copy.id} />
                 ) : null}
 
-                {copies.length > 1 ? <div aria-label="Choose a physical Copy" className="hidden content-start gap-2 md:grid" role="group">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; const exposure = copyExposureByCopyId.get(copy.id); return <button aria-label={copyExposureSelectorLabel(copyDisplayLabel(copies, copy.id), exposure)} aria-pressed={copy.id === selectedDetail.copy.id} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50 shadow-sm" : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"}`} key={copy.id} onClick={() => { router.replace(inventoryCardDetailHref(target.id, listState, copy.id), { scroll: false }); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition} · {copy.location || copy.privateNote || "No location"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{exposure ? `${physicalCopyStateLabel(exposure)} · eBay ${ebayExposureSummary(exposure)}` : "eBay exposure unavailable"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</div> : null}
-
-                <article className={`grid min-w-0 gap-4 ${copies.length > 1 ? "md:border-l md:border-zinc-200 md:pl-5" : "md:col-span-2"}`}>
+                <article className="grid min-w-0 gap-4">
                   <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2"><h4 className="text-lg font-black">{copyDisplayLabel(copies, selectedDetail.copy.id)}</h4><span className={`rounded px-2 py-0.5 text-xs font-bold ${selectedExposure?.physical.state === "owned" ? "bg-emerald-50 text-emerald-700" : selectedExposure?.physical.state === "sold" ? "bg-zinc-100 text-zinc-700" : "bg-amber-50 text-amber-800"}`}>{selectedExposure ? physicalCopyStateLabel(selectedExposure) : selectedDetail.copy.status === "available" ? "Owned" : selectedDetail.copy.status === "sold" ? "Sold" : "Unavailable"}</span></div>
@@ -1155,11 +1265,12 @@ function InventoryCardDetailContent({
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                       {selectedExposure ? <EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} exposure={selectedExposure} printing={selectedDetail.printing} target={target} /> : null}
                       {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? selectedCopyRemoval.available ? (
-                        <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
+                        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 sm:w-auto" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
                       ) : (
-                        <div className="grid min-w-0 gap-1 sm:max-w-72">
-                          <button aria-describedby={`remove-copy-reason-${selectedDetail.copy.id}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed" disabled type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy unavailable</button>
-                          <p className="break-words text-xs font-semibold leading-5 text-zinc-600" id={`remove-copy-reason-${selectedDetail.copy.id}`}>{selectedCopyRemoval.reason}</p>
+                        <div className="group relative min-w-0 w-full sm:w-auto">
+                          <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 pr-10 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
+                          <button aria-describedby={`remove-copy-reason-${selectedDetail.copy.id}`} aria-label="Why Remove Copy is unavailable" className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-700 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" type="button"><Info aria-hidden="true" className="size-3.5" /></button>
+                          <span className="pointer-events-none absolute right-0 top-full z-20 mt-2 w-72 rounded-md border border-zinc-300 bg-zinc-950 px-3 py-2 text-xs font-semibold leading-5 text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100" id={`remove-copy-reason-${selectedDetail.copy.id}`} role="tooltip">{selectedCopyRemoval.reason}</span>
                         </div>
                       ) : null}
                     </div>
@@ -1178,7 +1289,7 @@ function InventoryCardDetailContent({
                     <button className="min-h-11 w-full rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#741a26] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto sm:justify-self-start" disabled={savingCopy} type="submit">{savingCopy ? "Saving…" : "Save copy details"}</button>
                   </form>
 
-                  <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} key={`copy-images-${selectedDetail.copy.id}`} onImagesChange={(images) => setPhotoSummaries((current) => ({ ...current, [selectedDetail.copy.id]: { count: images.length, primary: images[0] ? { key: images[0].key, previewUrl: images[0].previewUrl } : null } }))} />
+                  <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} />
                   <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
                 </article>
               </div>
@@ -1190,7 +1301,6 @@ function InventoryCardDetailContent({
             )}
           </section>
         </div>
-      </div>
     </div>
   );
 }
@@ -1264,6 +1374,16 @@ function InventoryFilterModal({
         </div>
 
         <div className="grid gap-4 overflow-auto p-4">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-zinc-700">Inventory type</span>{listState.kind !== "cards" ? <button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]" onClick={() => onUpdate({ kind: "cards", page: 1 })} type="button">Cards</button> : null}</div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {inventoryTabs.map((tab) => {
+                const selected = listState.kind === tab.value;
+                return <button aria-pressed={selected} className={`min-h-11 rounded-md border px-3 text-sm font-semibold transition ${selected ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-600 hover:border-zinc-950 hover:text-zinc-950"}`} key={tab.value} onClick={() => onUpdate({ kind: tab.value, page: 1 })} type="button">{tab.label}</button>;
+              })}
+            </div>
+          </div>
+
           <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
             <div className="flex items-center justify-between gap-3"><span className="text-sm font-medium text-zinc-700">Copies</span>{listState.copyQuantity !== "all" ? <button className="text-xs font-bold text-[#8a1f2d] transition hover:text-[#711826]" onClick={() => onUpdate({ copyQuantity: "all", page: 1 })} type="button">Any quantity</button> : null}</div>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1392,28 +1512,18 @@ function InventoryView() {
   }
 
   const activeFilterCount =
-    (listState.copyQuantity === "all" ? 0 : 1)
+    (listState.kind === "cards" ? 0 : 1)
+    + (listState.copyQuantity === "all" ? 0 : 1)
     + listState.rarity.length
     + (listState.edition === "all" ? 0 : 1);
 
   function clearFilters() {
-    updateListState({ copyQuantity: "all", edition: "all", page: 1, rarity: [] });
+    updateListState({ copyQuantity: "all", edition: "all", kind: "cards", page: 1, rarity: [] });
   }
 
   return (
     <div className="grid gap-4">
-      <nav aria-label="Inventory type" className="flex gap-2 overflow-x-auto pb-1">
-        {inventoryTabs.map((tab) => (
-          <Link
-            aria-current={activeTab === tab.value ? "page" : undefined}
-            className={`inline-flex min-h-11 shrink-0 items-center rounded-md border px-4 text-sm font-bold transition ${activeTab === tab.value ? "border-[#8a1f2d] bg-[#8a1f2d] text-white" : "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-950"}`}
-            href={inventoryListHref({ ...listState, kind: tab.value, page: 1 })}
-            key={tab.value}
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
+      {activeTab !== "cards" ? <div className="flex justify-end"><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#8a1f2d]/30 bg-rose-50 px-3 text-sm font-semibold text-[#8a1f2d] transition hover:bg-rose-100" onClick={() => setFilterModalOpen(true)} type="button"><SlidersHorizontal className="size-4" />Filters <span className="rounded bg-[#8a1f2d] px-1.5 py-0.5 text-xs font-bold text-white">{activeFilterCount}</span></button></div> : null}
 
       {activeTab === "cards" ? (
         <div className="grid gap-3">
@@ -1428,9 +1538,10 @@ function InventoryView() {
           </div>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {visibleTargets.map(({ copies, endedOfferCount, hasKnownPurchaseValue, libraryStatus, liveOfferCount, printings, purchaseValuePence, target }) => {
+            const ebayListings = inventoryEbayListingSummary(liveOfferCount, endedOfferCount);
             return (
-              <Link aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}. Wanted ${libraryStatus.wantedQuantity}. Owned ${libraryStatus.ownedQuantity}. ${copies.filter((copy) => copy.status === "sold").length} sold. eBay exposure: ${liveOfferCount} live ${liveOfferCount === 1 ? "offer" : "offers"}, ${endedOfferCount} ended ${endedOfferCount === 1 ? "offer" : "offers"}.`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" href={inventoryCardDetailHref(target.id, listState)} key={target.id}>
-                <span className="grid h-24 w-16 shrink-0 place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100">
+              <Link aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}. Wanted ${libraryStatus.wantedQuantity}. Owned ${libraryStatus.ownedQuantity}. ${copies.filter((copy) => copy.status === "sold").length} sold. ${ebayListings.accessibleLabel}`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" href={inventoryCardDetailHref(target.id, listState)} key={target.id}>
+                <span className="grid h-24 w-16 shrink-0 self-center place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100">
                   {target.imageUrl ? (
                     <>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1442,11 +1553,11 @@ function InventoryView() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-start justify-between gap-2">
-                    <span className="line-clamp-2 font-bold leading-5">{target.name}</span>
+                    <span className="min-w-0 flex-1 truncate font-bold leading-5">{target.name}</span>
                     <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-bold ${libraryStatus.status === "wishlist" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{libraryStatus.status === "wishlist" ? "Wishlist" : "Owned"}</span>
                   </span>
                   <span className="mt-1 block text-xs font-semibold text-zinc-500">Wanted {libraryStatus.wantedQuantity} · Owned {libraryStatus.ownedQuantity}{libraryStatus.wishlistRemainingQuantity ? ` · ${libraryStatus.wishlistRemainingQuantity} still wanted` : ""} · {copies.filter((copy) => copy.status === "sold").length} sold</span>
-                  <span className="mt-1 block break-words text-xs font-bold text-zinc-700">eBay exposure · {liveOfferCount} live {liveOfferCount === 1 ? "offer" : "offers"} · {endedOfferCount} ended {endedOfferCount === 1 ? "offer" : "offers"}</span>
+                  <span className="mt-2 block text-xs font-bold text-zinc-700"><span className="text-zinc-500">{ebayListings.heading}</span><span aria-hidden="true"> · </span><span>{ebayListings.summary}</span></span>
                   {libraryStatus.ownedQuantity ? <span className="mt-1 block text-xs font-bold text-emerald-700">Purchase value {hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "unknown"}</span> : null}
                   <span className="mt-2 flex flex-wrap gap-1">
                     {printings.map((printing) => <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px] font-bold text-zinc-600" key={printing.id}>{printing.setCode}</span>)}
