@@ -37,6 +37,7 @@ import {
   type RecordsSnapshot,
   type ResolveProductResult,
 } from "@/lib/records/types";
+import { buildCopyEbayExposureStates } from "@/lib/records/copy-ebay-exposure";
 import { trpc } from "@/trpc/client";
 import { useClientReady } from "@/lib/use-client-ready";
 
@@ -46,6 +47,7 @@ const emptySnapshot: RecordsSnapshot = {
   targets: [],
   printings: [],
   copies: [],
+  copyEbayExposures: [],
   sealedUnits: [],
   bulkLots: [],
   supplies: [],
@@ -74,13 +76,18 @@ function readJson<T>(key: string): T | null {
 }
 
 function normalizePreviewSnapshot(snapshot: RecordsSnapshot): RecordsSnapshot {
+  const copies = snapshot.copies.map((copy) => ({
+    ...copy,
+    location: copy.location ?? null,
+    stickerNumber: copy.stickerNumber ?? null,
+  }));
+  const existingOffers = Array.isArray(snapshot.copyEbayExposures)
+    ? snapshot.copyEbayExposures.flatMap((state) => Array.isArray(state.offers) ? state.offers : [])
+    : [];
   return {
     ...snapshot,
-    copies: snapshot.copies.map((copy) => ({
-      ...copy,
-      location: copy.location ?? null,
-      stickerNumber: copy.stickerNumber ?? null,
-    })),
+    copies,
+    copyEbayExposures: buildCopyEbayExposureStates(copies, snapshot.records, existingOffers),
   };
 }
 
@@ -208,7 +215,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
   ): Promise<DataSourceResult> {
     if (!snapshot) return { ok: false, message: "Preview data is still loading." };
     const outcome = action(snapshot);
-    if (outcome.result.ok) setSnapshot(outcome.next);
+    if (outcome.result.ok) setSnapshot(normalizePreviewSnapshot(outcome.next));
     return outcome.result;
   }
 

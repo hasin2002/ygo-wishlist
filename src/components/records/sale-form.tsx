@@ -28,11 +28,18 @@ import {
   WizardProgress,
 } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import {
+  copyExposureSelectorLabel,
+  ebayExposurePresentation,
+  ebayExposureSummary,
+  physicalCopyStateLabel,
+} from "@/components/records/ebay-copy-exposure-presentation";
 import { generatedSaleRecordName } from "@/lib/records/record-name";
 import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
 import type {
   CardCopy,
   CardPrinting,
+  CopyEbayExposureState,
   WishlistTarget,
 } from "@/lib/records/types";
 
@@ -53,6 +60,7 @@ type SaleDraft = {
 
 type AvailableCopy = {
   copy: CardCopy;
+  exposure: CopyEbayExposureState | undefined;
   printing: CardPrinting;
   target: WishlistTarget;
   imageUrl: string | null;
@@ -84,6 +92,9 @@ function newSaleDraft(): SaleDraft {
 
 function CopyThumbnail({ eager = false, item, primaryPhotoUrl }: { eager?: boolean; item: AvailableCopy; primaryPhotoUrl?: string | null }) {
   const imageUrl = primaryPhotoUrl || (item.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}` : null);
+  const exposurePresentation = item.exposure
+    ? ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount)
+    : null;
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="relative aspect-[3/4] bg-zinc-100">
@@ -105,6 +116,8 @@ function CopyThumbnail({ eager = false, item, primaryPhotoUrl }: { eager?: boole
         <p className="line-clamp-2 min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</p>
         <p className="mt-1 text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</p>
         <p className="mt-1 text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.target.edition || "Unknown edition"} · {item.copy.condition}</p>
+        <p className="mt-2 text-xs font-bold text-zinc-700">Physical · {item.exposure ? physicalCopyStateLabel(item.exposure) : "Status unavailable"}</p>
+        <p className="mt-1 text-xs font-bold text-zinc-700">eBay exposure · {exposurePresentation?.label ?? "Unavailable"}{item.exposure ? ` · ${ebayExposureSummary(item.exposure)}` : ""}</p>
       </div>
     </div>
   );
@@ -147,15 +160,16 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   const availableCopies = useMemo<AvailableCopy[]>(() => {
     const printings = new Map(source.snapshot.printings.map((printing) => [printing.id, printing]));
     const targets = new Map(source.snapshot.targets.map((target) => [target.id, target]));
+    const exposures = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
 
     return source.snapshot.copies.flatMap((copy) => {
       if (copy.status !== "available") return [];
       const printing = printings.get(copy.printingId);
       const target = printing ? targets.get(printing.targetId) : undefined;
       if (!printing || !target) return [];
-      return [{ copy, printing, target, imageUrl: printing.imageUrl || target.imageUrl }];
+      return [{ copy, exposure: exposures.get(copy.id), printing, target, imageUrl: printing.imageUrl || target.imageUrl }];
     });
-  }, [source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
+  }, [source.snapshot.copies, source.snapshot.copyEbayExposures, source.snapshot.printings, source.snapshot.targets]);
 
   const rarityOptions = useMemo(
     () => Array.from(new Set(availableCopies.map((item) => item.target.rarity).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
@@ -176,6 +190,9 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
     return availableCopies.filter((item) => {
       if (selectedOnly && !draft.copyIds.includes(item.copy.id)) return false;
       if (rarity !== "all" && item.target.rarity !== rarity) return false;
+      const exposure = item.exposure
+        ? ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount)
+        : null;
       if (!search) return true;
       return [
         item.target.name,
@@ -184,6 +201,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
         item.printing.setName,
         item.printing.setCode,
         item.copy.condition,
+        exposure?.label ?? "exposure unavailable",
       ].some((value) => value.toLowerCase().includes(search));
     });
   }, [availableCopies, draft.copyIds, query, rarity, selectedOnly]);
@@ -463,7 +481,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
               </label>
             </div>
 
-            <div className="mt-4 flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div aria-atomic="true" aria-live="polite" className="mt-4 flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <strong>{draft.copyIds.length} {draft.copyIds.length === 1 ? "copy" : "copies"} selected</strong>
                 <span className="mt-0.5 block text-sm font-medium text-zinc-500">
@@ -483,6 +501,10 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
               <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
                 {visibleCopies.map((item, index) => {
                   const selected = draft.copyIds.includes(item.copy.id);
+                  const exposurePresentation = item.exposure
+                    ? ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount)
+                    : null;
+                  const copyLabel = `${item.target.name}, ${item.printing.setCode || "unknown set"}, Copy ${item.copy.id.slice(-6)}`;
                   return (
                     <label
                       className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-white transition focus-within:ring-2 focus-within:ring-[#8a1f2d] focus-within:ring-offset-2 ${selected ? "border-[#8a1f2d] ring-1 ring-[#8a1f2d]" : "border-zinc-200 hover:border-zinc-400 hover:shadow-sm"}`}
@@ -503,7 +525,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                           <span className="grid h-full place-items-center text-xs font-black text-zinc-400">CARD</span>
                         )}
                         <input
-                          aria-label={`Select ${item.target.name}, ${item.printing.setCode || "unknown set"}, copy ${item.copy.id.slice(-6)}`}
+                          aria-label={`Select ${copyExposureSelectorLabel(copyLabel, item.exposure)}. eBay status ${exposurePresentation?.label ?? "Unavailable"}.`}
                           checked={selected}
                           className="sr-only"
                           name={draft.kind === "single" ? "sale-copy" : undefined}
@@ -525,6 +547,8 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
                         <span className="mt-1 block text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</span>
                         <span className="mt-1 block text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.target.edition || "Unknown edition"}</span>
                         <span className="mt-1 block text-xs font-medium text-zinc-500">{copyDisplayLabel(copiesForTarget(item), item.copy.id)} · #{copyShortReference(item.copy.id)} · {item.copy.condition}</span>
+                        <span className="mt-2 block text-xs font-bold text-zinc-700">Physical · {item.exposure ? physicalCopyStateLabel(item.exposure) : "Status unavailable"}</span>
+                        <span className="mt-1 block break-words text-xs font-bold text-zinc-700">eBay exposure · {exposurePresentation?.label ?? "Unavailable"}{item.exposure ? ` · ${ebayExposureSummary(item.exposure)}` : ""}</span>
                         {item.copy.privateNote ? <span className="mt-1 block text-[11px] font-medium text-zinc-500">{item.copy.privateNote}</span> : null}
                         {photoSummaries[item.copy.id]?.count ? <span className="mt-1 block text-[11px] font-bold text-zinc-500">{photoSummaries[item.copy.id].count} saved {photoSummaries[item.copy.id].count === 1 ? "photo" : "photos"}</span> : null}
                       </span>

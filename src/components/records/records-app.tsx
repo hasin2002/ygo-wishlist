@@ -36,6 +36,13 @@ import {
   type CardContentsDraft,
 } from "@/components/records/card-contents-editor";
 import { CardInventoryImages } from "@/components/records/card-inventory-images";
+import { EbayCopyExposure } from "@/components/records/ebay-copy-exposure";
+import {
+  copyExposureSelectorLabel,
+  copyRemovalDecision,
+  ebayExposureSummary,
+  physicalCopyStateLabel,
+} from "@/components/records/ebay-copy-exposure-presentation";
 import { EbayListingAction } from "@/components/records/ebay-listing-action";
 import { poundsToPence } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
@@ -49,6 +56,7 @@ import type {
   CardAttentionUpdate,
   CardCopy,
   CardPrinting,
+  EbayOfferExposure,
   RecordEntry,
   RecordEntryType,
   RecordLine,
@@ -968,6 +976,9 @@ function InventoryCardDetailContent({
     ? requestedCopyId
     : copies[0]?.id ?? null;
   const selectedDetail = copyDetails.find((item) => item.copy.id === effectiveCopyId) ?? null;
+  const copyExposureByCopyId = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
+  const selectedExposure = selectedDetail ? copyExposureByCopyId.get(selectedDetail.copy.id) : undefined;
+  const selectedCopyRemoval = copyRemovalDecision(selectedExposure);
   const copyIdsKey = copies.map((copy) => copy.id).join(",");
   const ownedCopies = copies.filter((copy) => copy.status === "available");
   const ownedQuantity = ownedCopies.length;
@@ -1127,22 +1138,34 @@ function InventoryCardDetailContent({
                   <div className="md:hidden">
                     <label className="grid gap-1.5 text-sm font-bold" htmlFor="physical-copy-select">Choose a physical Copy</label>
                     <select className="min-h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-900 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" id="physical-copy-select" onChange={(event) => { router.replace(inventoryCardDetailHref(target.id, listState, event.currentTarget.value), { scroll: false }); setMessage(null); }} value={selectedDetail.copy.id}>
-                      {copyDetails.map(({ copy, printing }) => <option key={copy.id} value={copy.id}>{copyDisplayLabel(copies, copy.id)} · {printing.setCode || "Unknown set"} · {copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition}</option>)}
+                      {copyDetails.map(({ copy, printing }) => <option key={copy.id} value={copy.id}>{copyExposureSelectorLabel(`${copyDisplayLabel(copies, copy.id)} · ${printing.setCode || "Unknown set"} · ${copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition}`, copyExposureByCopyId.get(copy.id))}</option>)}
                     </select>
                   </div>
                 ) : null}
 
-                {copies.length > 1 ? <div aria-label="Choose a physical Copy" className="hidden content-start gap-2 md:grid" role="group">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; return <button aria-pressed={copy.id === selectedDetail.copy.id} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50 shadow-sm" : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"}`} key={copy.id} onClick={() => { router.replace(inventoryCardDetailHref(target.id, listState, copy.id), { scroll: false }); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition} · {copy.location || copy.privateNote || "No location"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</div> : null}
+                {copies.length > 1 ? <div aria-label="Choose a physical Copy" className="hidden content-start gap-2 md:grid" role="group">{copyDetails.map(({ copy, printing }) => { const summary = photoSummaries[copy.id]; const exposure = copyExposureByCopyId.get(copy.id); return <button aria-label={copyExposureSelectorLabel(copyDisplayLabel(copies, copy.id), exposure)} aria-pressed={copy.id === selectedDetail.copy.id} className={`grid min-h-20 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${copy.id === selectedDetail.copy.id ? "border-[#8a1f2d] bg-rose-50 shadow-sm" : "border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50"}`} key={copy.id} onClick={() => { router.replace(inventoryCardDetailHref(target.id, listState, copy.id), { scroll: false }); setMessage(null); }} type="button"><div className="relative grid aspect-[3/4] place-items-center overflow-hidden rounded bg-zinc-100">{summary?.primary ? <Image alt="" className="h-full w-full object-contain" height={64} src={summary.primary.previewUrl} unoptimized width={48} /> : <WalletCards aria-hidden="true" className="size-5 text-zinc-400" />}</div><span className="min-w-0"><span className="block text-sm font-black">{copyDisplayLabel(copies, copy.id)}</span><span className="block text-xs font-bold text-zinc-600">#{copyShortReference(copy.id)} · {printing.setCode || "Unknown set"}</span><span className="block truncate text-xs text-zinc-500">{copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : copy.condition} · {copy.location || copy.privateNote || "No location"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{exposure ? `${physicalCopyStateLabel(exposure)} · eBay ${ebayExposureSummary(exposure)}` : "eBay exposure unavailable"}</span><span className="mt-1 block text-[11px] font-bold text-zinc-500">{summary?.count ? `${summary.count} saved ${summary.count === 1 ? "photo" : "photos"}` : "No saved photos"}</span></span></button>; })}</div> : null}
 
                 <article className={`grid min-w-0 gap-4 ${copies.length > 1 ? "md:border-l md:border-zinc-200 md:pl-5" : "md:col-span-2"}`}>
                   <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2"><h4 className="text-lg font-black">{copyDisplayLabel(copies, selectedDetail.copy.id)}</h4><span className={`rounded px-2 py-0.5 text-xs font-bold ${selectedDetail.copy.status === "available" ? "bg-emerald-50 text-emerald-700" : selectedDetail.copy.status === "sold" ? "bg-zinc-100 text-zinc-700" : "bg-amber-50 text-amber-800"}`}>{selectedDetail.copy.status === "available" ? "Owned" : selectedDetail.copy.status.charAt(0).toUpperCase() + selectedDetail.copy.status.slice(1)}</span></div>
+                      <div className="flex flex-wrap items-center gap-2"><h4 className="text-lg font-black">{copyDisplayLabel(copies, selectedDetail.copy.id)}</h4><span className={`rounded px-2 py-0.5 text-xs font-bold ${selectedExposure?.physical.state === "owned" ? "bg-emerald-50 text-emerald-700" : selectedExposure?.physical.state === "sold" ? "bg-zinc-100 text-zinc-700" : "bg-amber-50 text-amber-800"}`}>{selectedExposure ? physicalCopyStateLabel(selectedExposure) : selectedDetail.copy.status === "available" ? "Owned" : selectedDetail.copy.status === "sold" ? "Sold" : "Unavailable"}</span></div>
                       <p className="mt-1 break-words text-sm font-medium leading-5 text-zinc-500">Ref #{copyShortReference(selectedDetail.copy.id)} · {selectedDetail.printing.setCode || "Unknown code"} · {selectedDetail.printing.setName || "Unknown set"}</p>
                       {selectedDetail.copy.stickerNumber || selectedDetail.copy.location ? <p className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-zinc-700">{selectedDetail.copy.stickerNumber ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">Sticker {selectedDetail.copy.stickerNumber}</span> : null}{selectedDetail.copy.location ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">{selectedDetail.copy.location}</span> : null}</p> : null}
                     </div>
-                    {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end"><EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} printing={selectedDetail.printing} target={target} /><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button></div> : null}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                      {selectedExposure ? <EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} exposure={selectedExposure} printing={selectedDetail.printing} target={target} /> : null}
+                      {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? selectedCopyRemoval.available ? (
+                        <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
+                      ) : (
+                        <div className="grid min-w-0 gap-1 sm:max-w-72">
+                          <button aria-describedby={`remove-copy-reason-${selectedDetail.copy.id}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed" disabled type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy unavailable</button>
+                          <p className="break-words text-xs font-semibold leading-5 text-zinc-600" id={`remove-copy-reason-${selectedDetail.copy.id}`}>{selectedCopyRemoval.reason}</p>
+                        </div>
+                      ) : null}
+                    </div>
                   </header>
+
+                  {selectedExposure ? <EbayCopyExposure exposure={selectedExposure} /> : null}
 
                   <form aria-labelledby={`copy-details-title-${selectedDetail.copy.id}`} className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }}>
                     <div><h5 className="font-black" id={`copy-details-title-${selectedDetail.copy.id}`}>Copy details</h5><p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Record how this Copy looks and where to find it in your physical collection.</p></div>
@@ -1288,6 +1311,7 @@ function InventoryView() {
     const printingsByTarget = new Map<string, CardPrinting[]>();
     const targetIdByPrintingId = new Map<string, string>();
     const copiesByTarget = new Map<string, CardCopy[]>();
+    const exposureByCopyId = new Map(snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
 
     for (const printing of snapshot.printings) {
       targetIdByPrintingId.set(printing.id, printing.targetId);
@@ -1308,16 +1332,25 @@ function InventoryView() {
       const printings = printingsByTarget.get(target.id) ?? [];
       const copies = copiesByTarget.get(target.id) ?? [];
       const ownedCopies = copies.filter((copy) => copy.status === "available");
+      const offersByListingId = new Map<string, EbayOfferExposure>();
+      for (const copy of copies) {
+        for (const offer of exposureByCopyId.get(copy.id)?.offers ?? []) {
+          offersByListingId.set(offer.listingId, offer);
+        }
+      }
+      const offers = [...offersByListingId.values()];
       return {
         copies,
+        endedOfferCount: offers.filter((offer) => offer.listingState === "ended").length,
         hasKnownPurchaseValue: ownedCopies.some((copy) => copy.allocationPence !== null),
         libraryStatus: getLibraryCardStatus(target.desiredQuantity, ownedCopies.length),
+        liveOfferCount: offers.filter((offer) => offer.listingState === "active").length,
         printings,
         purchaseValuePence: ownedCopies.reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0),
         target,
       };
     });
-  }, [snapshot.copies, snapshot.printings, snapshot.targets]);
+  }, [snapshot.copyEbayExposures, snapshot.copies, snapshot.printings, snapshot.targets]);
   const rarityOptions = Array.from(new Set(snapshot.targets.map((target) => target.rarity))).sort();
   const editionOptions = Array.from(new Set(snapshot.targets.map((target) => target.edition))).sort();
   const activeCopyCountByName = useMemo(() => {
@@ -1394,9 +1427,9 @@ function InventoryView() {
             </div>
           </div>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {visibleTargets.map(({ copies, hasKnownPurchaseValue, libraryStatus, printings, purchaseValuePence, target }) => {
+          {visibleTargets.map(({ copies, endedOfferCount, hasKnownPurchaseValue, libraryStatus, liveOfferCount, printings, purchaseValuePence, target }) => {
             return (
-              <Link aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" href={inventoryCardDetailHref(target.id, listState)} key={target.id}>
+              <Link aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}. Wanted ${libraryStatus.wantedQuantity}. Owned ${libraryStatus.ownedQuantity}. ${copies.filter((copy) => copy.status === "sold").length} sold. eBay exposure: ${liveOfferCount} live ${liveOfferCount === 1 ? "offer" : "offers"}, ${endedOfferCount} ended ${endedOfferCount === 1 ? "offer" : "offers"}.`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" href={inventoryCardDetailHref(target.id, listState)} key={target.id}>
                 <span className="grid h-24 w-16 shrink-0 place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100">
                   {target.imageUrl ? (
                     <>
@@ -1413,6 +1446,7 @@ function InventoryView() {
                     <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-bold ${libraryStatus.status === "wishlist" ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{libraryStatus.status === "wishlist" ? "Wishlist" : "Owned"}</span>
                   </span>
                   <span className="mt-1 block text-xs font-semibold text-zinc-500">Wanted {libraryStatus.wantedQuantity} · Owned {libraryStatus.ownedQuantity}{libraryStatus.wishlistRemainingQuantity ? ` · ${libraryStatus.wishlistRemainingQuantity} still wanted` : ""} · {copies.filter((copy) => copy.status === "sold").length} sold</span>
+                  <span className="mt-1 block break-words text-xs font-bold text-zinc-700">eBay exposure · {liveOfferCount} live {liveOfferCount === 1 ? "offer" : "offers"} · {endedOfferCount} ended {endedOfferCount === 1 ? "offer" : "offers"}</span>
                   {libraryStatus.ownedQuantity ? <span className="mt-1 block text-xs font-bold text-emerald-700">Purchase value {hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "unknown"}</span> : null}
                   <span className="mt-2 flex flex-wrap gap-1">
                     {printings.map((printing) => <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px] font-bold text-zinc-600" key={printing.id}>{printing.setCode}</span>)}

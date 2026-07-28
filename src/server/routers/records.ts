@@ -21,6 +21,10 @@ import {
 import { deleteCardInventoryImage } from "@/server/card-inventory-images";
 import { allocatePenceAt } from "@/lib/records/allocation";
 import { compactRecordName, generatedSaleRecordName } from "@/lib/records/record-name";
+import {
+  buildCopyEbayExposureStates,
+} from "@/lib/records/copy-ebay-exposure";
+import type { EbayOfferExposure } from "@/lib/records/types";
 import { cardConditions } from "@/lib/records/types";
 import type {
   PreviewAttentionItem,
@@ -32,6 +36,7 @@ import {
   reconcileEbayListing,
 } from "@/server/ebay-listing-reconciliation";
 import {
+  getEbayListingsForCopiesMembershipFirst,
   hasEbayCompositionSchema,
   isMissingEbayCompositionSchema,
 } from "@/server/ebay-listing-composition";
@@ -504,6 +509,54 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
     });
   }
 
+  const relatedListings = await getEbayListingsForCopiesMembershipFirst(
+    ownerId,
+    copies.map((copy) => copy.id),
+  );
+  const ebayOffers: EbayOfferExposure[] = relatedListings.map((related) => ({
+    cancelledAt: related.listing.cancelledAt?.toISOString() ?? null,
+    copyId: related.copyId,
+    fulfilmentPosition: related.fulfilmentPosition,
+    itemId: related.listing.itemId,
+    kind: related.listing.kind,
+    lastError: related.listing.lastError,
+    lastErrorAt: related.listing.lastErrorAt?.toISOString() ?? null,
+    lastSyncedAt: related.listing.lastSyncedAt?.toISOString() ?? null,
+    listingEndedAt: related.listing.listingEndedAt?.toISOString() ?? null,
+    listingId: related.listing.id,
+    listingStartedAt: related.listing.listingStartedAt?.toISOString() ?? null,
+    listingState: related.listing.listingState,
+    listingUrl: related.listing.listingUrl,
+    memberId: related.memberId,
+    paidAt: related.listing.paidAt?.toISOString() ?? null,
+    paymentPendingAt: related.listing.paymentPendingAt?.toISOString() ?? null,
+    quantitySold: related.listing.quantitySold,
+    relationSource: related.relationSource,
+    saleRecordId: related.listing.saleRecordId,
+    saleState: related.listing.saleState,
+    title: related.listing.title,
+    updatedAt: related.listing.updatedAt.toISOString(),
+  }));
+  const copyEbayExposures = buildCopyEbayExposureStates(
+    copies.map((copy) => ({
+      id: copy.id,
+      printingId: copy.printingId,
+      acquiredRecordId: copy.acquiredRecordId,
+      soldRecordId: copy.soldRecordId,
+      bulkLotId: copy.bulkLotId,
+      allocationIndex: copy.allocationIndex,
+      allocationPence: copy.allocationPence,
+      status: copy.status,
+      condition: copy.condition,
+      location: copy.location,
+      stickerNumber: copy.stickerNumber,
+      privateNote: copy.privateNote,
+      createdAt: copy.createdAt.toISOString(),
+    })),
+    records.map((record) => ({ id: record.id, status: record.status })),
+    ebayOffers,
+  );
+
   return {
     version: 1,
     records: records.map((record) => ({
@@ -556,6 +609,7 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       privateNote: copy.privateNote,
       createdAt: copy.createdAt.toISOString(),
     })),
+    copyEbayExposures,
     sealedUnits: sealed.map((unit) => ({
       id: unit.id,
       name: unit.name,
