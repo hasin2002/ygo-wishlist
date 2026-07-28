@@ -26,7 +26,10 @@ export type CardPhotoManagerImage = {
 };
 
 type SecondaryAction = {
+  controls?: string;
   disabled?: boolean;
+  expanded?: boolean;
+  hasPopup?: "dialog";
   icon?: LucideIcon;
   label: string;
   onClick: () => void;
@@ -296,6 +299,9 @@ export function CardPhotoManager({
           ) : null}
           {secondaryAction ? (
             <button
+              aria-controls={secondaryAction.controls}
+              aria-expanded={secondaryAction.expanded}
+              aria-haspopup={secondaryAction.hasPopup}
               className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 whitespace-normal rounded-md border border-zinc-300 bg-white px-3 text-left text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-50"
               disabled={secondaryAction.disabled || changing || atLimit}
               onClick={secondaryAction.onClick}

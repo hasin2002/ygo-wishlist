@@ -26,6 +26,7 @@ import {
   type EbayListingLanguage,
 } from "@/lib/ebay-listing-options";
 import { resolveEbayListingContext } from "@/lib/records/ebay-listing-context";
+import { ebaySoldListingsUrl } from "@/lib/records/ebay-sold-listings";
 import {
   inventoryCardDetailHref,
   inventoryCopySellHref,
@@ -223,16 +224,6 @@ function listingInput(copy: CardCopy, form: ListingForm) {
     shippingService: form.shippingService,
     title: form.title.trim(),
   };
-}
-
-function soldListingsUrl(target: WishlistTarget, printing: CardPrinting) {
-  const params = new URLSearchParams({
-    _nkw: [target.name, target.rarity, printing.setCode, target.edition].filter(Boolean).join(" "),
-    _sacat: categoryId,
-    LH_Complete: "1",
-    LH_Sold: "1",
-  });
-  return `https://www.ebay.co.uk/sch/i.html?${params}`;
 }
 
 function feeName(value: string | null) {
@@ -463,7 +454,15 @@ function EbayListingWorkspace({
   );
   const draftKey = `ygo-library:ebay-listing-draft:v${draftVersion}:${copy.id}`;
   const catalogueImage = target.imageUrl ?? printing.imageUrl;
-  const soldUrl = useMemo(() => soldListingsUrl(target, printing), [printing, target]);
+  const soldUrl = useMemo(
+    () => ebaySoldListingsUrl({
+      edition: target.edition,
+      name: target.name,
+      rarity: target.rarity,
+      setCode: printing.setCode,
+    }),
+    [printing.setCode, target.edition, target.name, target.rarity],
+  );
   const refreshPricing = trpc.library.refreshPricing.useMutation({
     onSuccess: (pricing) => {
       if (priceEditedRef.current) return;

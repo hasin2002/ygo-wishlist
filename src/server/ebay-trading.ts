@@ -72,15 +72,17 @@ function errorsFromXml(xml: string): EbayTradingErrorDetail[] {
 }
 
 export async function callEbayTradingApi({
+  accessToken: suppliedAccessToken,
   body,
   callName,
   ownerId,
 }: {
+  accessToken?: string;
   body: string;
   callName: string;
   ownerId: string;
 }): Promise<EbayTradingResponse> {
-  const accessToken = await getEbaySellerAccessToken(ownerId);
+  const accessToken = suppliedAccessToken ?? await getEbaySellerAccessToken(ownerId);
   const response = await fetch(tradingApiUrl, {
     body: `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">${body}</${callName}Request>`,
     headers: {

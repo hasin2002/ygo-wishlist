@@ -2,6 +2,7 @@
 
 import {
   LockKeyhole,
+  Layers3,
   Menu,
   PackageOpen,
   Plus,
@@ -19,6 +20,7 @@ const addItems = [
   { description: "Cards, sealed, bulk, and supplies", href: "/records/new/purchase", icon: Plus, label: "Purchase" },
   { description: "Open sealed product and record pulls", href: "/records/new/opening", icon: PackageOpen, label: "Pack opening" },
   { description: "Sell exact physical card copies", href: "/records/new/sale", icon: ReceiptText, label: "Sale" },
+  { description: "Create one eBay offer containing several exact Copies", href: "/records/listings/new-lot", icon: Layers3, label: "Mixed card lot" },
 ] as const;
 
 function GlobalAddMenu() {

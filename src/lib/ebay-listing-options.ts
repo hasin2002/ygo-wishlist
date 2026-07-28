@@ -3,6 +3,12 @@ export const ebayCardCategory = {
   label: "Collectible Card Games — Individual Cards",
 } as const;
 
+/** Confirmed by the #14 Sandbox compatibility check for heterogeneous lots. */
+export const ebayLotCategory = {
+  id: "183455",
+  label: "Collectible Card Games — Card Lots",
+} as const;
+
 export const ebayListingLanguages = ["English", "Japanese", "Korean"] as const;
 
 export const ebayDeliveryServices = [
