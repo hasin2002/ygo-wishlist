@@ -4,6 +4,18 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Records UI and Copy Semantics
+
+- Extend the nearest existing Records form, control, or dialog before introducing a new visual pattern. `src/components/records/entry-form-ui.tsx` and the Inventory filter dialog are the reference implementations for Records forms and dialogs.
+- When a user supplies an in-app UI reference, match its hierarchy, placement, dimensions, and interaction model—not just its colours.
+- A `Copy` is one exact physical instance of a Card Printing. Grouped UI may summarise several Copies, but every selection, photo source, listing member, and fulfilment action must retain the exact Copy ID.
+- Inventory photos belong to physical Copies. When a grouped selection contains several Copies, aggregate the photos from every selected Copy; never decide availability from only the first Copy.
+
+# Dialog Placement and Behaviour
+
+- Render viewport-level dialogs through a React portal to `document.body`. Do not mount them beneath an ancestor using `transform`, `filter`, `perspective`, or a retained transform animation: those properties can capture `position: fixed` descendants and break viewport positioning or z-index.
+- A Records dialog must cover the complete viewport, use a bounded and internally scrollable panel, work with keyboard focus, close with Escape and a backdrop click where appropriate, restore focus to its trigger, and lock background scrolling.
+
 # Multi-Agent Collaboration
 
 - Use sub-agents proactively for independent, bounded work that can run in parallel, especially repository reconnaissance, test investigation, and focused implementation slices. This preserves the primary agent's context for integration and decisions.
@@ -95,6 +107,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - If you start a dev server for testing or any other reason, stop it completely when you are done using it.
 - Before finishing, make sure any server process you started has been killed and is no longer running.
+- Turbopack cannot use a `node_modules` symlink that points outside the project filesystem root. In a worktree, use locally installed dependencies or start Next with `npm run dev -- --webpack`; do not assume a sibling checkout's `node_modules` symlink will work.
 - New worktrees do not automatically include ignored `.env*` files. Before starting the app in a task worktree, confirm that its required local environment configuration is present. If it is missing, copy the existing `.env*` files from a trusted worktree for this same repository without opening, printing, inspecting, or altering their contents. Do not stage, commit, or otherwise expose those files. If no trusted source is available, ask the user before starting the app.
 - Better Auth supports the approved localhost, ngrok, and deployed hosts defined in `src/lib/auth-hosts.ts`. Use the hostname relevant to the flow being verified; `http://localhost:3000` is valid for local checks and does not require a tunnel.
 - Run `ngrok http 3000` only when a test needs the public-tunnel flow. Before testing authentication through the tunnel, verify that it serves `https://armless-backslid-surrogate.ngrok-free.dev`, which must remain in the approved host allowlist.
@@ -106,3 +119,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Do not run database migrations, `npm run db:push`, deployment commands, or production-affecting commands without explicit approval.
 - Do not modify `.env*` files or expose secrets unless directly instructed.
 - Keep changes scoped to the requested task.
+
+# eBay Media Boundaries
+
+- Keep inventory-photo discovery and local listing-photo staging independent of eBay authorization. Require eBay credentials only for eBay operations such as upload, validation, or publication.
+- Preserve and surface the real eBay authorization failure with a reconnect action; do not misreport saved inventory photos as unavailable when the external upload is the failing step.
