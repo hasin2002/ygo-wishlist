@@ -1,11 +1,16 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Clock3, ExternalLink, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, ExternalLink, X, XCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type {
   CopyEbayExposureState,
   EbayOfferExposure,
 } from "@/lib/records/types";
 import { ebayExposurePresentation, ebayExposureSummary } from "@/components/records/ebay-copy-exposure-presentation";
+
+export function ebayOffersDialogEventName(copyId: string) {
+  return `open-ebay-offers-${copyId}`;
+}
 
 function offerLabel(offer: EbayOfferExposure) {
   if (offer.lastError || offer.listingState === "suspended" || offer.listingState === "unknown") return "Status needs attention";
@@ -83,17 +88,44 @@ export function EbayCopyExposure({
   const Heading = `h${headingLevel}` as "h3" | "h4" | "h5" | "h6";
   const presentation = ebayExposurePresentation(exposure.aggregateState, exposure.liveOfferCount);
   const summary = ebayExposureSummary(exposure);
+  const [offersOpen, setOffersOpen] = useState(false);
+  const offersButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogId = `ebay-offers-dialog-${exposure.copyId}`;
+  const dialogTitleId = `${dialogId}-title`;
+  const dialogDescriptionId = `${dialogId}-description`;
+
+  function closeOffers() {
+    setOffersOpen(false);
+    window.requestAnimationFrame(() => offersButtonRef.current?.focus());
+  }
+
+  useEffect(() => {
+    const openOffers = () => setOffersOpen(true);
+    window.addEventListener(ebayOffersDialogEventName(exposure.copyId), openOffers);
+    return () => {
+      window.removeEventListener(ebayOffersDialogEventName(exposure.copyId), openOffers);
+    };
+  }, [exposure.copyId]);
+
+  useEffect(() => {
+    if (!offersOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeOffers();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [offersOpen]);
 
   return (
     <section
       aria-labelledby={`ebay-exposure-${exposure.copyId}`}
-      className="min-w-0 scroll-mt-4 rounded-lg border border-zinc-200 bg-white p-4"
+      className="min-w-0 scroll-mt-4"
       id={`ebay-exposure-panel-${exposure.copyId}`}
     >
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <Heading className="font-black" id={`ebay-exposure-${exposure.copyId}`}>eBay exposure</Heading>
-          <p className="mt-1 break-words text-sm font-medium leading-5 text-zinc-600">{presentation.description}</p>
+          <Heading className="text-sm font-black" id={`ebay-exposure-${exposure.copyId}`}>eBay listings</Heading>
+          <p className="mt-0.5 text-sm font-semibold text-zinc-700">{summary}</p>
         </div>
         <span className={`inline-flex min-h-7 max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-black ${exposureToneClassName(presentation.tone)}`}>
           <ExposureIcon tone={presentation.tone} />
@@ -101,17 +133,29 @@ export function EbayCopyExposure({
         </span>
       </div>
 
-      <p className="mt-3 text-sm font-bold text-zinc-800">{summary}</p>
       {exposure.offers.length ? (
-        <details className="group mt-3 rounded-lg border border-zinc-200 bg-zinc-50">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-bold text-zinc-800 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
-            <span>Related eBay offers</span>
-            <span className="text-xs font-semibold text-zinc-500">Show details</span>
-          </summary>
-          <div className="grid gap-2 border-t border-zinc-200 p-3" role="list">
-            {exposure.offers.map((offer) => <div key={`${offer.listingId}:${offer.memberId ?? offer.copyId}`} role="listitem"><OfferRow offer={offer} /></div>)}
-          </div>
-        </details>
+        <button aria-controls={dialogId} aria-expanded={offersOpen} aria-haspopup="dialog" className="mt-2 inline-flex min-h-11 items-center rounded-md px-3 text-sm font-bold text-[#8a1f2d] transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-inset" onClick={() => setOffersOpen(true)} ref={offersButtonRef} type="button">View {exposure.offers.length} related eBay {exposure.offers.length === 1 ? "offer" : "offers"}</button>
+      ) : null}
+
+      {offersOpen ? (
+        <div aria-describedby={dialogDescriptionId} aria-labelledby={dialogTitleId} aria-modal="true" className="fixed inset-0 z-[60] flex items-end bg-zinc-950/50 px-0 pt-10 backdrop-blur-sm sm:items-center sm:justify-center sm:px-4 sm:py-6" onMouseDown={(event) => { if (event.target === event.currentTarget) closeOffers(); }} role="dialog">
+          <section className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-xl border border-zinc-300 bg-white shadow-xl sm:rounded-xl" id={dialogId}>
+            <header className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">eBay listings</p>
+                <h2 className="mt-1 text-xl font-black" id={dialogTitleId}>Related eBay offers</h2>
+                <p className="mt-1 text-sm font-semibold text-zinc-700">{summary}</p>
+              </div>
+              <button aria-label="Close related eBay offers" autoFocus className="grid min-h-11 min-w-11 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={closeOffers} type="button"><X aria-hidden="true" className="size-4" /></button>
+            </header>
+            <div className="grid gap-3 overflow-auto p-4">
+              <p className="break-words text-sm font-medium leading-5 text-zinc-600" id={dialogDescriptionId}>{presentation.description}</p>
+              <div className="grid gap-2" role="list">
+                {exposure.offers.map((offer) => <div key={`${offer.listingId}:${offer.memberId ?? offer.copyId}`} role="listitem"><OfferRow offer={offer} /></div>)}
+              </div>
+            </div>
+          </section>
+        </div>
       ) : null}
     </section>
   );
