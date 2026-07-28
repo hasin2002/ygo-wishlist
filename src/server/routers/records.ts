@@ -27,7 +27,10 @@ import {
 } from "@/lib/records/copy-ebay-exposure";
 import type { EbayOfferExposure } from "@/lib/records/types";
 import { cardConditions } from "@/lib/records/types";
-import { ebayCopyLinkAttentionDecision } from "@/lib/records/ebay-listing-copy-link-attention";
+import {
+  ebayCopyLinkAttentionDecision,
+  ebayListingStatusAttentionDecision,
+} from "@/lib/records/ebay-listing-copy-link-attention";
 import type {
   PreviewAttentionItem,
   RecordLine,
@@ -490,22 +493,42 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       const copy = copyById.get(listing.copyId);
       const printing = copy ? printingById.get(copy.printingId) : null;
       const target = printing ? targetById.get(printing.targetId) : null;
-      const decision = ebayCopyLinkAttentionDecision({
-        hasExactMember: memberListingIds.has(listing.id),
+      const hasExactMember = memberListingIds.has(listing.id);
+      const copyLinkDecision = ebayCopyLinkAttentionDecision({
+        hasExactMember,
         kind: listing.kind,
         legacyCopyExists: Boolean(copy),
       });
-      if (!decision) continue;
-      attention.push({
-        copyId: listing.copyId,
-        detail: decision.detail,
-        ebayAttentionAction: decision.action,
-        field: "ebay_copy_link",
-        id: `attention-ebay-copy-link-${listing.id}`,
-        label: target?.name ?? listing.title,
-        listingId: listing.id,
-        targetId: target?.id ?? null,
+      if (copyLinkDecision) {
+        attention.push({
+          copyId: listing.copyId,
+          detail: copyLinkDecision.detail,
+          ebayAttentionAction: copyLinkDecision.action,
+          field: "ebay_copy_link",
+          id: `attention-ebay-copy-link-${listing.id}`,
+          label: target?.name ?? listing.title,
+          listingId: listing.id,
+          targetId: target?.id ?? null,
+        });
+        continue;
+      }
+      const statusDecision = ebayListingStatusAttentionDecision({
+        hasExactMember,
+        lastError: listing.lastError,
+        saleState: listing.saleState,
       });
+      if (statusDecision) {
+        attention.push({
+          copyId: listing.copyId,
+          detail: statusDecision.detail,
+          ebayAttentionAction: statusDecision.action,
+          field: "ebay_status",
+          id: `attention-ebay-status-${listing.id}`,
+          label: target?.name ?? listing.title,
+          listingId: listing.id,
+          targetId: target?.id ?? null,
+        });
+      }
     }
   }
   for (const target of targets) {

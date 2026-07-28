@@ -859,18 +859,18 @@ function Overview() {
         <section className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700"><AlertTriangle className="size-5" /></span>
-            <div>
-              <h2 className="font-bold">Needs attention</h2>
-              <p className="mt-0.5 text-sm font-medium text-zinc-500">Items waiting for your review</p>
-            </div>
+              <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700"><AlertTriangle className="size-5" /></span>
+              <div>
+                <h2 className="font-bold">Needs attention</h2>
+                <p className="mt-0.5 text-sm font-medium text-zinc-500">Items waiting for your review</p>
+              </div>
             </div>
             {attentionCount ? <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">{attentionCount} open</span> : null}
           </div>
           <div className="mt-4 grid gap-2">
             {snapshot.attention.length ? snapshot.attention.map((item) => (
               <button className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-[#8a1f2d] hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" key={item.id} onClick={() => {
-                if (item.field === "ebay_copy_link") {
+                if (item.field === "ebay_copy_link" || item.field === "ebay_status") {
                   if (item.ebayAttentionAction === "confirm_copy_link") setEbayCopyLinkAttentionId(item.id);
                   else if (item.targetId && item.copyId) router.push(inventoryCopySellHref(item.targetId, item.copyId, defaultInventoryListState));
                   else setMessage("This eBay listing needs investigation, but its saved physical Copy is no longer available.");
@@ -882,7 +882,7 @@ function Overview() {
                 else setAttentionItemId(item.id);
               }} type="button">
                 <p className="text-sm font-bold text-zinc-800">{item.label}</p>
-                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p><span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">{item.field === "ebay_copy_link" ? item.ebayAttentionAction === "confirm_copy_link" ? "Confirm Copy link" : "Review eBay status" : "Resolve details"} <ChevronRight className="size-3.5" /></span>
+                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p><span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">{item.field === "ebay_copy_link" || item.field === "ebay_status" ? item.ebayAttentionAction === "confirm_copy_link" ? "Confirm Copy link" : "Review eBay status" : "Resolve details"} <ChevronRight className="size-3.5" /></span>
               </button>
             )) : (
               <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm font-bold text-emerald-800">

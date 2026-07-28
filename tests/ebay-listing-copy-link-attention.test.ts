@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ebayCopyLinkAttentionDecision } from "../src/lib/records/ebay-listing-copy-link-attention.ts";
+import {
+  ebayCopyLinkAttentionDecision,
+  ebayListingStatusAttentionDecision,
+} from "../src/lib/records/ebay-listing-copy-link-attention.ts";
 
 test("an individual Listing with its saved legacy Copy is offered for confirmation", () => {
   assert.deepEqual(
@@ -41,4 +44,31 @@ test("ambiguous or incomplete Listing composition stays visible but requires inv
     })?.action,
     "review_ebay_status",
   );
+});
+
+test("a repaired listing stays in attention while its sale state needs review", () => {
+  assert.deepEqual(ebayListingStatusAttentionDecision({
+    hasExactMember: true,
+    lastError: "Listing data needs review: order details conflict.",
+    saleState: "needs_review",
+  }), {
+    action: "review_ebay_status",
+    detail: "Listing data needs review: order details conflict.",
+  });
+});
+
+test("a clean repaired listing leaves the attention queue", () => {
+  assert.equal(ebayListingStatusAttentionDecision({
+    hasExactMember: true,
+    lastError: null,
+    saleState: "paid",
+  }), null);
+});
+
+test("missing members are handled by the Copy-link action without a duplicate status item", () => {
+  assert.equal(ebayListingStatusAttentionDecision({
+    hasExactMember: false,
+    lastError: "Listing data needs review: Copy link missing.",
+    saleState: "needs_review",
+  }), null);
 });

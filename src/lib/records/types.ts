@@ -217,7 +217,7 @@ export type PreviewAttentionItem = {
   printingId?: string | null;
   label: string;
   detail: string;
-  field: "cost" | "edition" | "printing" | "tcgplayer" | "ebay_copy_link";
+  field: "cost" | "edition" | "printing" | "tcgplayer" | "ebay_copy_link" | "ebay_status";
 };
 
 export type RecordsSnapshot = {

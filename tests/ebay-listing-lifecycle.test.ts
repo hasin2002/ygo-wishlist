@@ -171,6 +171,27 @@ test("a later pending observation cannot regress a paid parent lifecycle", () =>
   assert.equal(laterPending.blocksRelisting, true);
 });
 
+test("a matching paid observation can recover a reviewed parent lifecycle", () => {
+  const reviewed = {
+    ...pendingLifecycle(),
+    paidAt: t3,
+    saleState: "needs_review" as const,
+  };
+  const recovered = decideEbayLifecycleTransition(reviewed, {
+    effectiveAt: new Date("2026-07-24T13:00:00.000Z"),
+    kind: "paid",
+    orderId: "order-1",
+    orderLineItemId: "line-1",
+    paidAt: t3,
+    quantitySold: 1,
+  });
+
+  assert.equal(recovered.action, "apply");
+  assert.equal(recovered.next.saleState, "paid");
+  assert.equal(recovered.next.paidAt?.toISOString(), t3.toISOString());
+  assert.equal(recovered.blocksRelisting, true);
+});
+
 test("suspended and unknown observations fail closed", () => {
   const suspended = decideEbayLifecycleTransition(activeLifecycle(), {
     effectiveAt: t2,

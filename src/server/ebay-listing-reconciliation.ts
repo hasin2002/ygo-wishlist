@@ -30,6 +30,10 @@ import {
   type EbayCompositionReviewReason,
 } from "@/lib/records/ebay-listing-reconciliation-reason";
 import {
+  hasEbayOrderLineTerminalRegression,
+  type EbayOrderLinePaymentState,
+} from "@/lib/records/ebay-order-line-reconciliation";
+import {
   getLatestEbayListingForCopyMembershipFirst,
   hasEbayCompositionSchema,
   legacySafeEbayListingSelection,
@@ -243,7 +247,7 @@ function parentObservationWithoutConflictingOrderLine(
 
 function paymentStateForRemoteTransaction(
   transaction: EbayRemoteTransaction,
-): "pending" | "paid" | "cancelled" | "needs_review" {
+): "pending" | "paid" | "cancelled" {
   if (transaction.cancelled) return "cancelled" as const;
   if (transaction.paid) return "paid" as const;
   return "pending" as const;
@@ -296,7 +300,8 @@ async function persistRemoteOrderLines({
         ))
         .limit(2);
       const existing = existingRows[0];
-      let state = paymentStateForRemoteTransaction(transaction);
+      const observedState = paymentStateForRemoteTransaction(transaction);
+      let state: EbayOrderLinePaymentState = observedState;
       const identifiersChanged = Boolean(existing && (
         (existing.orderId && transaction.orderId && existing.orderId !== transaction.orderId)
         || (
@@ -310,19 +315,9 @@ async function persistRemoteOrderLines({
           && existing.transactionId !== transaction.transactionId
         )
       ));
-      const terminalRegression = Boolean(
-        existing
-        && (
-          existing.paymentState === "needs_review"
-          || (
-            existing.paymentState === "cancelled"
-            && state !== "cancelled"
-          )
-          || (
-            (existing.paymentState === "paid" || existing.saleRecordId)
-            && state !== "paid"
-          )
-        ),
+      const terminalRegression = hasEbayOrderLineTerminalRegression(
+        existing,
+        observedState,
       );
       const quantityChanged = Boolean(
         existing && existing.quantityPurchased !== transaction.quantityPurchased,
