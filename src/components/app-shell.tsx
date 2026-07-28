@@ -44,6 +44,7 @@ const navItems = [
 const recordsSubNavItems = [
   { href: "/records/history", label: "History" },
   { href: "/records/inventory", label: "Inventory" },
+  { href: "/records/listings", label: "Listings" },
 ] as const;
 
 const adminNavItems = [

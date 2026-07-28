@@ -1,5 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { ebayListings } from "@/db/schema";
 import {
   ebayCardCategory,
   ebayListingLanguages,
@@ -110,6 +113,21 @@ export const ebayRouter = router({
       return (await reconcileEbayListing({
         listingId: listing.id,
         ownerId: ctx.session.user.id,
+      })).listing;
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
+  refreshListingStatusById: adminProcedure.input(z.object({ listingId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    const [listing] = await db.select({ id: ebayListings.id }).from(ebayListings).where(and(
+      eq(ebayListings.id, input.listingId),
+      eq(ebayListings.ownerId, ctx.collectionOwnerId),
+    )).limit(1);
+    if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "That eBay listing was not found." });
+    try {
+      return (await reconcileEbayListing({
+        listingId: listing.id,
+        ownerId: ctx.collectionOwnerId,
       })).listing;
     } catch (error) {
       throw ebayFailure(error);

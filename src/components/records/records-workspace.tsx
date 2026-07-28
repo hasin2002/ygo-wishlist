@@ -26,6 +26,10 @@ function isEbayListingPath(pathname: string) {
   return /^\/records\/inventory\/cards\/[^/]+\/copies\/[^/]+\/sell$/.test(pathname);
 }
 
+function isListingsWorkspacePath(pathname: string) {
+  return pathname === "/records/listings" || pathname.startsWith("/records/listings/");
+}
+
 export function RecordsWorkspace({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const params = useParams<{ copyId?: string; targetId?: string }>();
@@ -44,13 +48,15 @@ export function RecordsWorkspace({ children }: { children: React.ReactNode }) {
         <AppHeader eyebrow="Private collection records" title="Records" />
         <PreviewBanner />
         <Suspense fallback={<RecordsContentLoading />}>
-          {ebayListing
+          {isListingsWorkspacePath(pathname)
+            ? children
+            : ebayListing
             ? <EbayListingPage copyId={ebayListing.copyId} key={`${ebayListing.targetId}:${ebayListing.copyId}`} targetId={ebayListing.targetId} />
             : inventoryCardDetail
               ? <InventoryCardDetail targetId={inventoryCardDetail.targetId} />
               : <RecordsApp view={viewForPathname(pathname)} />}
         </Suspense>
-        {children}
+        {isListingsWorkspacePath(pathname) ? null : children}
       </div>
     </main>
   );

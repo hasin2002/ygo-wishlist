@@ -45,6 +45,7 @@ import {
   hasEbayCompositionSchema,
   isMissingEbayCompositionSchema,
 } from "@/server/ebay-listing-composition";
+import { listEbayListingsWorkspace } from "@/server/records/ebay-listings-workspace";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -176,6 +177,13 @@ const resolveCardAttentionSchema = z.object({
 });
 const resolveEbayCopyLinkAttentionSchema = z.object({
   listingId: z.string().min(1),
+});
+const ebayListingsWorkspaceSchema = z.object({
+  composition: z.enum(["all", "individual", "quantity", "bundle"]),
+  lifecycle: z.enum(["all", "live", "pending", "paid", "ended", "cancelled", "needs_attention"]),
+  listingId: z.string().min(1).optional(),
+  page: z.number().int().positive().max(1_000_000),
+  query: z.string().trim().max(160),
 });
 const replaceRecordCardsSchema = recordMutationIdentitySchema.extend({
   cards: z.array(cardInputSchema),
@@ -709,6 +717,9 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
 
 export const recordsRouter = router({
   snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
+
+  listEbayListings: authenticatedProcedure.input(ebayListingsWorkspaceSchema).query(({ ctx, input }) =>
+    listEbayListingsWorkspace(ctx.collectionOwnerId, input)),
 
   resolveEbayCopyLinkAttention: authenticatedProcedure.input(resolveEbayCopyLinkAttentionSchema).mutation(async ({ ctx, input }) => {
     if (!await hasEbayCompositionSchema()) {
