@@ -113,6 +113,7 @@ test("eBay data-safety failures do not misleadingly suggest reconnecting", () =>
   assert.match(listingStatusSource, /This is a data-safety check, not a connection problem/);
   assert.match(listingStatusSource, /Sale data needs review/);
   assert.match(listingStatusSource, /isEbayListingDataReviewMessage/);
+  assert.match(listingActionSource, /await utils\.records\.snapshot\.invalidate\(\)/);
 });
 
 test("the overview keeps missing eBay Copy links in the central attention queue", () => {
@@ -122,5 +123,6 @@ test("the overview keeps missing eBay Copy links in the central attention queue"
   assert.match(recordsAppSource, /Open this Copy in Inventory/);
   assert.match(recordsAppSource, /inventoryCardDetailHref\(target\.id, defaultInventoryListState, copy\.id\)/);
   assert.match(recordsAppSource, /const attentionCount = snapshot\.attention\.length/);
+  assert.match(recordsAppSource, /item\.field === "ebay_copy_link" \|\| item\.field === "ebay_status"/);
   assert.match(recordsAppSource, /snapshot\.attention\.map/);
 });

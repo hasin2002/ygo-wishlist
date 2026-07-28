@@ -346,8 +346,14 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
     [copyId, source.snapshot, targetId],
   );
   const liveAdmin = source.mode === "live" && session?.user.role === "admin";
+  const utils = trpc.useUtils();
   const status = trpc.ebay.status.useQuery(undefined, { enabled: liveAdmin });
   const eligibility = trpc.ebay.eligibility.useQuery({ copyId }, { enabled: liveAdmin });
+
+  async function refreshEbayStatus() {
+    await eligibility.refetch();
+    await utils.records.snapshot.invalidate();
+  }
 
   if (source.status === "loading" || sessionPending) {
     return <div className="grid min-h-72 place-items-center rounded-xl border border-zinc-300 bg-white font-bold" role="status">Preparing listing workspace…</div>;
@@ -371,7 +377,7 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
     return <div className="grid min-h-72 place-items-center rounded-xl border border-zinc-300 bg-white font-bold" role="status">Checking eBay readiness…</div>;
   }
   if (eligibility.isError || status.isError) {
-    return <StatusCard title="eBay readiness could not be checked"><p>Check your connection and try again.</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => { void eligibility.refetch(); void status.refetch(); }} type="button">Try again</button></StatusCard>;
+    return <StatusCard title="eBay readiness could not be checked"><p>Check your connection and try again.</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => { void refreshEbayStatus(); void status.refetch(); }} type="button">Try again</button></StatusCard>;
   }
   const eligibilityResult = eligibility.data;
   if (!eligibilityResult?.eligible) {
@@ -393,7 +399,7 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
           onReconnect={eligibilityResult.reconnectRequired
             ? () => window.location.assign("/ebay")
             : undefined}
-          onRefresh={() => { void eligibility.refetch(); }}
+          onRefresh={() => { void refreshEbayStatus(); }}
           onReview={() => window.location.assign(backHref)}
           paidAt={toEbayListingTimestamp(listing.paidAt)}
           requiresReconnect={eligibilityResult.reconnectRequired}
