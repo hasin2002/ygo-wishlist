@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import {
   archiveAndImportEbayImage,
   archiveAndImportInventoryImage,
+  archiveInventoryImageDraft,
   archiveAndUploadEbayImage,
   EbayListingError,
   getEbayListingImageDraft,
   removeEbayListingImageDraft,
+  uploadArchivedEbayImage,
 } from "@/server/ebay-listing";
 import { EbayAuthorizationError } from "@/server/ebay-seller";
 import { getSessionFromHeaders } from "@/server/session";
@@ -66,26 +68,71 @@ export async function POST(request: Request) {
   }
 
   let image: File | null = null;
+  let archiveKey = "";
   let sourceUrl = "";
   let inventoryKey = "";
+  let inventoryCopyId = "";
+  let stageOnly = false;
   let copyId = "";
   try {
     const form = await request.formData();
     const candidate = form.get("image");
     image = candidate instanceof File ? candidate : null;
+    const preparedImage = form.get("archiveKey");
+    archiveKey = typeof preparedImage === "string"
+      ? preparedImage.trim()
+      : "";
     const source = form.get("sourceUrl");
     sourceUrl = typeof source === "string" ? source.trim() : "";
     const savedImage = form.get("inventoryKey");
     inventoryKey = typeof savedImage === "string" ? savedImage.trim() : "";
+    const inventoryCopy = form.get("inventoryCopyId");
+    inventoryCopyId = typeof inventoryCopy === "string" ? inventoryCopy.trim() : "";
+    stageOnly = form.get("stageOnly") === "true";
     const copy = form.get("copyId");
     copyId = typeof copy === "string" ? copy.trim() : "";
   } catch {
     return NextResponse.json({ message: "Choose an image file to upload." }, { status: 400 });
   }
   if (!copyId) return NextResponse.json({ message: "Choose the physical card copy for this listing." }, { status: 400 });
+  if (archiveKey) {
+    try {
+      const result = await uploadArchivedEbayImage(
+        session.user.id,
+        copyId,
+        archiveKey,
+      );
+      return NextResponse.json({
+        ...result,
+        previewUrl: previewUrl(copyId, result.archiveKey),
+      });
+    } catch (error) {
+      if (error instanceof EbayAuthorizationError) {
+        return NextResponse.json({
+          message: "Reconnect eBay before preparing the lot photos.",
+        }, { status: 401 });
+      }
+      const message = error instanceof EbayListingError
+        ? error.message
+        : "The prepared photo could not be uploaded to eBay.";
+      return NextResponse.json({ message }, { status: 502 });
+    }
+  }
   if (inventoryKey) {
     try {
-      const result = await archiveAndImportInventoryImage(session.user.id, copyId, inventoryKey);
+      const result = stageOnly
+        ? await archiveInventoryImageDraft(
+            session.user.id,
+            copyId,
+            inventoryKey,
+            inventoryCopyId || copyId,
+          )
+        : await archiveAndImportInventoryImage(
+            session.user.id,
+            copyId,
+            inventoryKey,
+            inventoryCopyId || copyId,
+          );
       return NextResponse.json({ ...result, previewUrl: previewUrl(copyId, result.archiveKey) });
     } catch (error) {
       if (error instanceof EbayAuthorizationError) {

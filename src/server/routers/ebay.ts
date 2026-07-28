@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { ebayListings } from "@/db/schema";
 import {
   ebayCardCategory,
+  ebayLotCategory,
   ebayListingLanguages,
 } from "@/lib/ebay-listing-options";
 import {
@@ -17,7 +18,9 @@ import { isListingImageArchiveConfigured } from "@/server/ebay-listing-images";
 import {
   EbayListingError,
   getEbayListingEligibility,
+  publishEbayLotListing,
   publishEbayListing,
+  verifyEbayLotListing,
   verifyEbayListing,
 } from "@/server/ebay-listing";
 import {
@@ -66,6 +69,12 @@ const listingSchema = z.object({
     "UK_RoyalMailSpecialDeliveryNextDay",
   ]),
   title: z.string().trim().min(1).max(80),
+});
+
+const lotListingSchema = listingSchema.omit({ copyId: true, categoryId: true }).extend({
+  categoryId: z.literal(ebayLotCategory.id),
+  copyIds: z.array(z.string().min(1)).min(2).max(100),
+  imageDraftCopyId: z.string().min(1),
 });
 
 function ebayFailure(error: unknown) {
@@ -150,6 +159,20 @@ export const ebayRouter = router({
   publish: adminProcedure.input(listingSchema).mutation(async ({ ctx, input }) => {
     try {
       return await publishEbayListing(ctx.session.user.id, input);
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
+  validateLot: adminProcedure.input(lotListingSchema).mutation(async ({ ctx, input }) => {
+    try {
+      return await verifyEbayLotListing(ctx.collectionOwnerId, input);
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
+  publishLot: adminProcedure.input(lotListingSchema).mutation(async ({ ctx, input }) => {
+    try {
+      return await publishEbayLotListing(ctx.collectionOwnerId, input);
     } catch (error) {
       throw ebayFailure(error);
     }

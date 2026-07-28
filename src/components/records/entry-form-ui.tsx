@@ -142,31 +142,37 @@ export function StepPanel({ children, step }: { children: ReactNode; step: numbe
 }
 
 export function WizardActions({
+  confirmDisabled = false,
   finalLabel,
   nextDisabled = false,
   onBack,
   onConfirm,
   onNext,
   pending = false,
+  pendingLabel = "Saving…",
+  sticky = true,
   step,
   totalSteps,
 }: {
+  confirmDisabled?: boolean;
   finalLabel: string;
   nextDisabled?: boolean;
   onBack: () => void;
   onConfirm?: () => void;
   onNext: () => void;
   pending?: boolean;
+  pendingLabel?: string;
+  sticky?: boolean;
   step: number;
   totalSteps: number;
 }) {
   return (
-    <div className="z-20 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 rounded-lg border border-zinc-300 bg-white/95 p-3 shadow-lg backdrop-blur sm:sticky sm:bottom-3 sm:flex sm:items-center sm:justify-between">
+    <div className={`z-20 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 rounded-lg border border-zinc-300 bg-white p-3 sm:flex sm:items-center sm:justify-between ${sticky ? "shadow-lg sm:sticky sm:bottom-3" : ""}`}>
       <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 hover:border-zinc-950 disabled:opacity-40 sm:w-auto sm:px-4" disabled={step === 1 || pending} onClick={onBack} type="button"><ArrowLeft className="size-4" /> Back</button>
       {step < totalSteps ? (
         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5" disabled={nextDisabled || pending} onClick={onNext} type="button">Continue <ArrowRight className="size-4" /></button>
       ) : (
-        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? "Saving…" : finalLabel}</button>
+        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={confirmDisabled || pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? pendingLabel : finalLabel}</button>
       )}
     </div>
   );

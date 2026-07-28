@@ -58,10 +58,26 @@ export async function GET(request: Request) {
   if (copyIds.length) {
     const owned = await db.select({ id: cardCopies.id }).from(cardCopies).where(and(eq(cardCopies.ownerId, auth.session.user.id), inArray(cardCopies.id, copyIds)));
     if (owned.length !== copyIds.length) return NextResponse.json({ message: "One or more physical card Copies were not found." }, { status: 404 });
-    if (!isCardInventoryImageArchiveConfigured()) return NextResponse.json({ configured: false, summaries: {} });
+    if (!isCardInventoryImageArchiveConfigured()) {
+      return NextResponse.json({
+        configured: false,
+        imagesByCopy: {},
+        summaries: {},
+      });
+    }
     const images = await db.select().from(cardCopyImages).where(and(eq(cardCopyImages.ownerId, auth.session.user.id), inArray(cardCopyImages.copyId, copyIds))).orderBy(asc(cardCopyImages.position));
     const summaries = Object.fromEntries(copyIds.map((id) => { const copyImages = images.filter((image) => image.copyId === id); return [id, { count: copyImages.length, primary: copyImages[0] ? { key: copyImages[0].objectKey, previewUrl: previewUrl(id, copyImages[0].objectKey) } : null }]; }));
-    return NextResponse.json({ configured: true, summaries });
+    const imagesByCopy = Object.fromEntries(copyIds.map((id) => [
+      id,
+      images
+        .filter((image) => image.copyId === id)
+        .map((image) => ({
+          key: image.objectKey,
+          position: image.position,
+          previewUrl: previewUrl(id, image.objectKey),
+        })),
+    ]));
+    return NextResponse.json({ configured: true, imagesByCopy, summaries });
   }
   if (!copyId) return NextResponse.json({ message: "Choose a physical card Copy." }, { status: 400 });
   if (!(await ownedCopy(auth.session.user.id, copyId))) return NextResponse.json({ message: "That physical card Copy was not found." }, { status: 404 });
