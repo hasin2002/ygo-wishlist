@@ -46,6 +46,7 @@ import { ebayOffersDialogEventName } from "@/components/records/ebay-copy-exposu
 import {
   EbayListingStatusPanel,
 } from "@/components/records/ebay-listing-status";
+import { toEbayListingTimestamp } from "@/components/records/ebay-listing-timestamp";
 import { trpc } from "@/trpc/client";
 
 type ListingPhoto = { archiveKey: string; ebayUrl: string; previewUrl: string };
@@ -380,21 +381,21 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
         <EbayListingStatusPanel
           copyState={context.copy.status}
           ebayUrl={listing.listingUrl}
-          endedAt={listing.listingEndedAt?.toISOString()}
+          endedAt={toEbayListingTimestamp(listing.listingEndedAt)}
           errorMessage={eligibilityResult.status === "sync_unavailable"
             ? listing.lastError || "eBay could not confirm the current listing status."
             : listing.lastError}
           headingLevel={2}
-          lastSyncedAt={listing.lastSyncedAt?.toISOString()}
-          listedAt={listing.listingStartedAt?.toISOString()}
+          lastSyncedAt={toEbayListingTimestamp(listing.lastSyncedAt)}
+          listedAt={toEbayListingTimestamp(listing.listingStartedAt)}
           listingState={listing.listingState}
-          listingUpdatedAt={listing.updatedAt.toISOString()}
+          listingUpdatedAt={toEbayListingTimestamp(listing.updatedAt)}
           onReconnect={eligibilityResult.reconnectRequired
             ? () => window.location.assign("/ebay")
             : undefined}
           onRefresh={() => { void eligibility.refetch(); }}
           onReview={() => window.location.assign(backHref)}
-          paidAt={listing.paidAt?.toISOString()}
+          paidAt={toEbayListingTimestamp(listing.paidAt)}
           requiresReconnect={eligibilityResult.reconnectRequired}
           saleRecordId={listing.saleRecordId}
           saleState={listing.saleState}

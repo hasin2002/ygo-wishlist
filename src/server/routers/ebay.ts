@@ -6,6 +6,7 @@ import {
 } from "@/lib/ebay-listing-options";
 import {
   EbayAuthorizationError,
+  EbayTemporaryError,
   getEbayConnectionStatus,
   isEbayOAuthConfigured,
 } from "@/server/ebay-seller";
@@ -67,7 +68,7 @@ const listingSchema = z.object({
 function ebayFailure(error: unknown) {
   return new TRPCError({
     code: "BAD_REQUEST",
-    message: error instanceof EbayAuthorizationError
+    message: error instanceof EbayAuthorizationError || error instanceof EbayTemporaryError
       ? error.message
       : error instanceof EbayListingReconciliationError
         ? error.message

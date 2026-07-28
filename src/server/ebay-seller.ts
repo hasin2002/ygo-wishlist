@@ -15,6 +15,11 @@ import {
   ebayBaseScope,
   ebaySellerScopeList,
 } from "@/lib/records/ebay-oauth-scopes";
+import { createExpiringSingleFlightCache } from "@/lib/expiring-single-flight-cache";
+import {
+  ebayTokenFailureKind,
+  type EbayTokenRequestKind,
+} from "@/lib/ebay-token-failure";
 
 export { ebaySellerScopeList } from "@/lib/records/ebay-oauth-scopes";
 const ebaySellerScopes = ebaySellerScopeList.join(" ");
@@ -24,6 +29,8 @@ let applicationTokenCache: {
   expiresAt: number;
   scopes: string;
 } | null = null;
+const sellerTokenRefreshSkewMs = 60_000;
+const sellerAccessTokenCache = createExpiringSingleFlightCache<string>();
 
 type EbayTokenResponse = {
   access_token: string;
@@ -47,6 +54,7 @@ type OAuthState = {
 
 export class EbayConfigurationError extends Error {}
 export class EbayAuthorizationError extends Error {}
+export class EbayTemporaryError extends Error {}
 
 function requiredEnvironment(name: string) {
   const value = process.env[name]?.trim();
@@ -64,6 +72,14 @@ function encryptionKey() {
     .update(requiredEnvironment("BETTER_AUTH_SECRET"))
     .update("\0ebay-seller-token-encryption-v1")
     .digest();
+}
+
+function sellerDiagnosticOwner(ownerId: string) {
+  return createHash("sha256")
+    .update(ownerId)
+    .update("\0ebay-seller-diagnostic-v1")
+    .digest("hex")
+    .slice(0, 12);
 }
 
 function stateSigningKey() {
@@ -160,21 +176,37 @@ function decryptSecret(value: StoredSecret) {
   ]).toString("utf8");
 }
 
-async function ebayTokenRequest(body: URLSearchParams) {
-  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-    body,
-    headers: {
-      Authorization: credentialsHeader(),
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    throw new EbayAuthorizationError(`eBay token request failed (${response.status}).`);
+async function ebayTokenRequest(body: URLSearchParams, requestKind: EbayTokenRequestKind) {
+  let response: Response;
+  try {
+    response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+      body,
+      headers: {
+        Authorization: credentialsHeader(),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      method: "POST",
+    });
+  } catch {
+    throw new EbayTemporaryError("eBay could not be reached. Try again shortly.");
   }
 
-  return response.json() as Promise<EbayTokenResponse>;
+  if (!response.ok) {
+    const failureKind = ebayTokenFailureKind(response.status, requestKind);
+    if (failureKind === "authorization") {
+      throw new EbayAuthorizationError("eBay rejected the saved seller connection. Reconnect eBay and try again.");
+    }
+    if (failureKind === "configuration") {
+      throw new EbayConfigurationError("eBay rejected the app connection settings.");
+    }
+    throw new EbayTemporaryError("eBay could not refresh access right now. Try again shortly.");
+  }
+
+  try {
+    return await response.json() as EbayTokenResponse;
+  } catch {
+    throw new EbayTemporaryError("eBay returned an invalid token response. Try again shortly.");
+  }
 }
 
 export async function exchangeEbayAuthorizationCode(code: string) {
@@ -183,7 +215,7 @@ export async function exchangeEbayAuthorizationCode(code: string) {
     grant_type: "authorization_code",
     redirect_uri: oauthRuName(),
   });
-  const token = await ebayTokenRequest(body);
+  const token = await ebayTokenRequest(body, "authorization_code");
   if (!token.refresh_token || !token.refresh_token_expires_in) {
     throw new EbayAuthorizationError("eBay did not return a renewable seller connection.");
   }
@@ -204,7 +236,7 @@ export async function getEbayApplicationAccessToken(
   const token = await ebayTokenRequest(new URLSearchParams({
     grant_type: "client_credentials",
     scope: scopeValue,
-  }));
+  }), "application");
   applicationTokenCache = {
     accessToken: token.access_token,
     expiresAt: Date.now() + token.expires_in * 1_000,
@@ -251,6 +283,11 @@ export async function saveEbayConnection({
       },
       target: ebayConnections.ownerId,
     });
+  sellerAccessTokenCache.invalidate(ownerId);
+  console.info("[ebay] seller connection stored", {
+    owner: sellerDiagnosticOwner(ownerId),
+    scopeCount: (scopes?.trim() || ebaySellerScopes).split(/\s+/).filter(Boolean).length,
+  });
 }
 
 export async function getEbayConnectionStatus(ownerId: string) {
@@ -275,6 +312,7 @@ export async function getEbayConnectionStatus(ownerId: string) {
 
 export async function deleteEbayConnection(ownerId: string) {
   await db.delete(ebayConnections).where(eq(ebayConnections.ownerId, ownerId));
+  sellerAccessTokenCache.invalidate(ownerId);
 }
 
 /**
@@ -295,18 +333,44 @@ export async function getEbaySellerAccessToken(ownerId: string) {
     throw new EbayAuthorizationError("The eBay connection has expired. Connect eBay again.");
   }
 
-  const refreshToken = decryptSecret({
-    ciphertext: connection.refreshTokenCiphertext,
-    iv: connection.refreshTokenIv,
-    tag: connection.refreshTokenTag,
-  });
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    scope: connection.scopes,
-  });
-  const token = await ebayTokenRequest(body);
-  return token.access_token;
+  try {
+    return await sellerAccessTokenCache.get(ownerId, async () => {
+      let refreshToken: string;
+      try {
+        refreshToken = decryptSecret({
+          ciphertext: connection.refreshTokenCiphertext,
+          iv: connection.refreshTokenIv,
+          tag: connection.refreshTokenTag,
+        });
+      } catch {
+        throw new EbayAuthorizationError("The saved eBay connection could not be used. Reconnect eBay and try again.");
+      }
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        scope: connection.scopes,
+      });
+      const token = await ebayTokenRequest(body, "seller_refresh");
+      if (!token.access_token || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
+        throw new EbayTemporaryError("eBay returned an incomplete access token. Try again shortly.");
+      }
+      return {
+        expiresAt: Date.now() + token.expires_in * 1_000 - sellerTokenRefreshSkewMs,
+        value: token.access_token,
+      };
+    });
+  } catch (error) {
+    const failure = error instanceof EbayAuthorizationError
+      ? "authorization"
+      : error instanceof EbayConfigurationError
+        ? "configuration"
+        : "temporary";
+    console.warn("[ebay] seller access token refresh failed", {
+      failure,
+      owner: sellerDiagnosticOwner(ownerId),
+    });
+    throw error;
+  }
 }
 
 export function isEbayOAuthConfigured() {

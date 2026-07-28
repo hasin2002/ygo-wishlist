@@ -29,7 +29,7 @@ import {
   hasEbayCompositionSchema,
   legacySafeEbayListingSelection,
 } from "@/server/ebay-listing-composition";
-import { EbayAuthorizationError } from "@/server/ebay-seller";
+import { EbayAuthorizationError, EbayTemporaryError } from "@/server/ebay-seller";
 import {
   EbayTradingError,
   getEbayRemoteListing,
@@ -167,6 +167,11 @@ function reconciliationError(error: unknown) {
     return new EbayListingReconciliationError(
       "Reconnect eBay to refresh this listing status.",
       true,
+    );
+  }
+  if (error instanceof EbayTemporaryError) {
+    return new EbayListingReconciliationError(
+      "eBay could not be reached to refresh this listing status. Try again shortly.",
     );
   }
   if (error instanceof EbayTradingError) {
