@@ -236,6 +236,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     createSale: (input) => withSnapshot((current) => applySale(current, input)),
     updateRecordDetails: (recordId, update) => withSnapshot((current) => updateRecordDetails(current, recordId, update)),
     resolveCardAttention: (update: CardAttentionUpdate) => withSnapshot((current) => resolveCardAttention(current, update)),
+    resolveEbayCopyLinkAttention: async () => ({ ok: false, message: "eBay Copy-link repairs are available in your live Records." }),
     replaceRecordCards: (recordId, cards) => withSnapshot((current) => replaceRecordCards(current, recordId, cards)),
     replaceSaleCopies: (recordId, copyIds) => withSnapshot((current) => replaceSaleCopies(current, recordId, copyIds)),
     updateCardCopy: (copyId, update: CardCopyUpdate) => withSnapshot((current) => updateCardCopy(current, copyId, update)),
@@ -280,6 +281,7 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
   const createSale = trpc.records.createSale.useMutation();
   const updateDetails = trpc.records.updateRecordDetails.useMutation();
   const resolveAttention = trpc.records.resolveCardAttention.useMutation();
+  const resolveEbayCopyLinkAttention = trpc.records.resolveEbayCopyLinkAttention.useMutation();
   const replaceCards = trpc.records.replaceRecordCards.useMutation();
   const replaceCopies = trpc.records.replaceSaleCopies.useMutation();
   const updateCopy = trpc.records.updateCardCopy.useMutation();
@@ -351,6 +353,15 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
         return errorResult(error);
       }
     },
+    resolveEbayCopyLinkAttention: async (listingId) => {
+      try {
+        const result = await resolveEbayCopyLinkAttention.mutateAsync({ listingId });
+        await utils.records.snapshot.invalidate();
+        return { ok: true, id: result.id };
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
     replaceRecordCards: (recordId, cards) => withRevision(
       recordId,
       (expectedRevision) => replaceCards.mutateAsync({ recordId, expectedRevision, cards }),
@@ -412,6 +423,7 @@ const loadingValue: RecordsDataSource = {
   createSale: async () => ({ ok: false, message: "Records are still loading." }),
   updateRecordDetails: async () => ({ ok: false, message: "Records are still loading." }),
   resolveCardAttention: async () => ({ ok: false, message: "Records are still loading." }),
+  resolveEbayCopyLinkAttention: async () => ({ ok: false, message: "Records are still loading." }),
   replaceRecordCards: async () => ({ ok: false, message: "Records are still loading." }),
   replaceSaleCopies: async () => ({ ok: false, message: "Records are still loading." }),
   updateCardCopy: async () => ({ ok: false, message: "Records are still loading." }),

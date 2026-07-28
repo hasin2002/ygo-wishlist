@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/records/copy-ebay-exposure";
 import type { EbayOfferExposure } from "@/lib/records/types";
 import { cardConditions } from "@/lib/records/types";
+import { ebayCopyLinkAttentionDecision } from "@/lib/records/ebay-listing-copy-link-attention";
 import type {
   PreviewAttentionItem,
   RecordLine,
@@ -168,6 +170,9 @@ const resolveCardAttentionSchema = z.object({
   setName: z.string().trim().min(1).max(160),
   setCode: z.string().trim().max(80),
   imageUrl: z.string().url().nullable(),
+});
+const resolveEbayCopyLinkAttentionSchema = z.object({
+  listingId: z.string().min(1),
 });
 const replaceRecordCardsSchema = recordMutationIdentitySchema.extend({
   cards: z.array(cardInputSchema),
@@ -465,6 +470,44 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
 
   const attention: PreviewAttentionItem[] = [];
   const targetById = new Map(targets.map((target) => [target.id, target]));
+  const printingById = new Map(printings.map((printing) => [printing.id, printing]));
+  const copyById = new Map(copies.map((copy) => [copy.id, copy]));
+  if (await hasEbayCompositionSchema()) {
+    const protectedListings = await db.select().from(ebayListings).where(
+      eq(ebayListings.ownerId, ownerId),
+    );
+    const listingIds = protectedListings.map((listing) => listing.id);
+    const members = listingIds.length
+      ? await db.select({ listingId: ebayListingMembers.listingId })
+        .from(ebayListingMembers)
+        .where(and(
+          eq(ebayListingMembers.ownerId, ownerId),
+          inArray(ebayListingMembers.listingId, listingIds),
+        ))
+      : [];
+    const memberListingIds = new Set(members.map((member) => member.listingId));
+    for (const listing of protectedListings) {
+      const copy = copyById.get(listing.copyId);
+      const printing = copy ? printingById.get(copy.printingId) : null;
+      const target = printing ? targetById.get(printing.targetId) : null;
+      const decision = ebayCopyLinkAttentionDecision({
+        hasExactMember: memberListingIds.has(listing.id),
+        kind: listing.kind,
+        legacyCopyExists: Boolean(copy),
+      });
+      if (!decision) continue;
+      attention.push({
+        copyId: listing.copyId,
+        detail: decision.detail,
+        ebayAttentionAction: decision.action,
+        field: "ebay_copy_link",
+        id: `attention-ebay-copy-link-${listing.id}`,
+        label: target?.name ?? listing.title,
+        listingId: listing.id,
+        targetId: target?.id ?? null,
+      });
+    }
+  }
   for (const target of targets) {
     if (normalizeEdition(target.edition) === "unknown edition") {
       attention.push({
@@ -643,6 +686,48 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
 
 export const recordsRouter = router({
   snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
+
+  resolveEbayCopyLinkAttention: authenticatedProcedure.input(resolveEbayCopyLinkAttentionSchema).mutation(async ({ ctx, input }) => {
+    if (!await hasEbayCompositionSchema()) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "eBay Copy links are not ready yet. Refresh and try again." });
+    }
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      const [listing] = await tx.select().from(ebayListings).where(and(
+        eq(ebayListings.id, input.listingId),
+        eq(ebayListings.ownerId, ctx.collectionOwnerId),
+      )).for("update").limit(1);
+      if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "That eBay listing was not found." });
+      if (
+        listing.kind !== "individual"
+      ) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This listing needs investigation and cannot be repaired automatically." });
+      }
+      const members = await tx.select().from(ebayListingMembers).where(and(
+        eq(ebayListingMembers.ownerId, ctx.collectionOwnerId),
+        eq(ebayListingMembers.listingId, listing.id),
+      )).for("update");
+      if (members.length > 0) {
+        throw new TRPCError({ code: "CONFLICT", message: "This listing already has a physical Copy link. Refresh and review its latest status." });
+      }
+      const [copy] = await tx.select().from(cardCopies).where(and(
+        eq(cardCopies.id, listing.copyId),
+        eq(cardCopies.ownerId, ctx.collectionOwnerId),
+      )).for("update").limit(1);
+      if (!copy) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The saved physical Copy no longer exists, so this link needs investigation." });
+      const memberId = `ebay-member-${randomUUID()}`;
+      await tx.insert(ebayListingMembers).values({
+        copyId: copy.id,
+        createdAt: now,
+        fulfilmentPosition: 0,
+        id: memberId,
+        listingId: listing.id,
+        ownerId: ctx.collectionOwnerId,
+        updatedAt: now,
+      });
+      return { id: listing.id };
+    });
+  }),
 
   updateCardCopy: authenticatedProcedure.input(updateCardCopySchema).mutation(async ({ ctx, input }) => {
     const now = new Date();

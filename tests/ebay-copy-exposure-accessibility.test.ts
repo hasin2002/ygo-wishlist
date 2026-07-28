@@ -114,3 +114,10 @@ test("eBay data-safety failures do not misleadingly suggest reconnecting", () =>
   assert.match(listingStatusSource, /Sale data needs review/);
   assert.match(listingStatusSource, /isEbayListingDataReviewMessage/);
 });
+
+test("the overview keeps missing eBay Copy links in the central attention queue", () => {
+  assert.match(recordsAppSource, /Confirm Copy link/);
+  assert.match(recordsAppSource, /Review eBay status/);
+  assert.match(recordsAppSource, /Confirm physical Copy/);
+  assert.match(recordsAppSource, /snapshot\.attention\.map/);
+});
