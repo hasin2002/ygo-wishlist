@@ -119,5 +119,8 @@ test("the overview keeps missing eBay Copy links in the central attention queue"
   assert.match(recordsAppSource, /Confirm Copy link/);
   assert.match(recordsAppSource, /Review eBay status/);
   assert.match(recordsAppSource, /Confirm physical Copy/);
+  assert.match(recordsAppSource, /Open this Copy in Inventory/);
+  assert.match(recordsAppSource, /inventoryCardDetailHref\(target\.id, defaultInventoryListState, copy\.id\)/);
+  assert.match(recordsAppSource, /const attentionCount = snapshot\.attention\.length/);
   assert.match(recordsAppSource, /snapshot\.attention\.map/);
 });

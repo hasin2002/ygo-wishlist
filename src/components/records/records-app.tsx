@@ -727,6 +727,11 @@ function EbayCopyLinkAttentionDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = item.copyId ? source.snapshot.copies.find((value) => value.id === item.copyId) : null;
+  const target = item.targetId ? source.snapshot.targets.find((value) => value.id === item.targetId) : null;
+  const printing = copy ? source.snapshot.printings.find((value) => value.id === copy.printingId) : null;
+  const inventoryHref = copy && target
+    ? inventoryCardDetailHref(target.id, defaultInventoryListState, copy.id)
+    : null;
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -754,7 +759,20 @@ function EbayCopyLinkAttentionDialog({
         </header>
         <div className="grid gap-4 p-4 sm:p-6">
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">{item.label}</strong><p className="mt-1">{item.detail}</p></div>
-          <div className="rounded-lg border border-zinc-300 bg-white px-3 py-3 text-sm text-zinc-700"><p className="text-xs font-bold uppercase tracking-[0.1em] text-zinc-500">Saved physical Copy</p><p className="mt-1 font-bold">{copy ? `${copyDisplayLabel(source.snapshot.copies.filter((value) => value.printingId === copy.printingId), copy.id)} · Ref #${copyShortReference(copy.id)}` : "The Copy saved on this historical listing"}</p>{copy ? <p className="mt-1 text-sm font-medium text-zinc-500">{copy.condition}</p> : null}</div>
+          <section className="rounded-lg border border-zinc-300 bg-white px-3 py-3 text-sm text-zinc-700" aria-labelledby="saved-copy-title">
+            <p className="text-xs font-bold uppercase tracking-[0.1em] text-zinc-500" id="saved-copy-title">Saved physical Copy</p>
+            {copy ? <>
+              <p className="mt-1 font-bold">{copyDisplayLabel(source.snapshot.copies.filter((value) => value.printingId === copy.printingId), copy.id)} · Ref #{copyShortReference(copy.id)}</p>
+              <dl className="mt-3 grid gap-2 border-t border-zinc-200 pt-3 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">Condition</dt><dd className="mt-0.5 font-semibold text-zinc-700">{copy.condition}</dd></div>
+                {printing ? <div><dt className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">Printing</dt><dd className="mt-0.5 font-semibold text-zinc-700">{printing.setCode}{target ? ` · ${target.rarity}` : ""}</dd></div> : null}
+                {printing?.setName ? <div className="sm:col-span-2"><dt className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">Set</dt><dd className="mt-0.5 font-semibold text-zinc-700">{printing.setName}{target ? ` · ${target.edition}` : ""}</dd></div> : null}
+              </dl>
+              {inventoryHref ? <Link className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-bold text-[#8a1f2d] transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryHref}>
+                Open this Copy in Inventory <ArrowUpRight aria-hidden="true" className="size-4" />
+              </Link> : null}
+            </> : <p className="mt-1 font-bold">The Copy saved on this historical listing is no longer available.</p>}
+          </section>
           {error ? <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</p> : null}
         </div>
         <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={() => void confirm()} type="button">{saving ? "Confirming…" : "Confirm Copy link"}</button></footer>
@@ -787,6 +805,7 @@ function Overview() {
     .filter((record) => record.type === "sale")
     .reduce((sum, record) => sum + record.amountPence, 0);
   const availableCopies = snapshot.copies.filter((copy) => copy.status === "available").length;
+  const attentionCount = snapshot.attention.length;
   const wishlistTargetCount = snapshot.targets.filter((target) => {
     const printingIds = snapshot.printings.filter((printing) => printing.targetId === target.id).map((printing) => printing.id);
     const ownedQuantity = snapshot.copies.filter((copy) => printingIds.includes(copy.printingId) && copy.status === "available").length;
@@ -838,12 +857,15 @@ function Overview() {
         </section>
 
         <section className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
-          <div className="flex items-start gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700"><AlertTriangle className="size-5" /></span>
             <div>
               <h2 className="font-bold">Needs attention</h2>
               <p className="mt-0.5 text-sm font-medium text-zinc-500">Items waiting for your review</p>
             </div>
+            </div>
+            {attentionCount ? <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">{attentionCount} open</span> : null}
           </div>
           <div className="mt-4 grid gap-2">
             {snapshot.attention.length ? snapshot.attention.map((item) => (
