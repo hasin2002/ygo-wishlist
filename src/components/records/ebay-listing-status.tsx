@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useId } from "react";
+import { isEbayListingDataReviewMessage } from "@/lib/records/ebay-listing-reconciliation-reason";
 
 export type EbayPersistedListingState = "none" | "active" | "ended" | "suspended" | "unknown";
 export type EbayPersistedSaleState = "none" | "pending" | "paid" | "cancelled" | "needs_review";
@@ -76,6 +77,14 @@ export function ebayListingStatusPresentation({
       description: "Reconnect eBay to check or manage this listing.",
       Icon: Unplug,
       label: "Reconnect eBay",
+    };
+  }
+  if (isEbayListingDataReviewMessage(errorMessage)) {
+    return {
+      badgeClassName: "border-amber-300 bg-amber-50 text-amber-950",
+      description: "eBay shows sale activity, but the app cannot safely match it to one physical Copy yet.",
+      Icon: AlertTriangle,
+      label: "Sale data needs review",
     };
   }
   if (errorMessage) {
@@ -285,6 +294,7 @@ export function EbayListingStatusPanel({
     syncing,
   });
   const hasRecordedSale = saleRecorded || Boolean(saleRecordId);
+  const dataReviewRequired = isEbayListingDataReviewMessage(errorMessage);
   const canRelist = copyState === "available"
     && listingState === "ended"
     && (saleState === "none" || saleState === "cancelled");
@@ -351,6 +361,8 @@ export function EbayListingStatusPanel({
                 <p className="mt-1 font-medium leading-5">
                   {requiresReconnect
                     ? "Reconnect the seller account, then refresh the status."
+                    : dataReviewRequired
+                      ? "This is a data-safety check, not a connection problem. Do not record a Sale until the exact Copy link has been repaired or reviewed."
                     : "Check the connection and try refreshing the status."}
                 </p>
               </div>
@@ -394,7 +406,7 @@ export function EbayListingStatusPanel({
           </button>
         ) : null}
         {onReview && canReview ? (
-          <button className={requiresReview && !requiresReconnect && !errorMessage ? primaryActionClassName : secondaryActionClassName} disabled={syncing} onClick={onReview} type="button">
+          <button className={requiresReview && !requiresReconnect && (!errorMessage || dataReviewRequired) ? primaryActionClassName : secondaryActionClassName} disabled={syncing} onClick={onReview} type="button">
             <Search aria-hidden="true" className="size-4 shrink-0" />
             {reviewLabel}
           </button>

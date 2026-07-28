@@ -8,6 +8,7 @@ const listingActionSource = readFileSync(new URL("../src/components/records/ebay
 const recordsAppSource = readFileSync(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8");
 const cardImagesSource = readFileSync(new URL("../src/components/records/card-inventory-images.tsx", import.meta.url), "utf8");
 const photoManagerSource = readFileSync(new URL("../src/components/records/card-photo-manager.tsx", import.meta.url), "utf8");
+const listingStatusSource = readFileSync(new URL("../src/components/records/ebay-listing-status.tsx", import.meta.url), "utf8");
 
 test("Sale Copy selectors expose physical and eBay status in visible and accessible text", () => {
   assert.match(saleFormSource, /Physical · \{item\.exposure \? physicalCopyStateLabel/);
@@ -106,4 +107,10 @@ test("needs-takedown review opens the related eBay-offers dialog instead of the 
   assert.match(exposureSource, /ebayOffersDialogEventName/);
   assert.match(listingActionSource, /window\.dispatchEvent\(new Event\(ebayOffersDialogEventName\(copy\.id\)\)\)/);
   assert.match(listingActionSource, /Review live offers/);
+});
+
+test("eBay data-safety failures do not misleadingly suggest reconnecting", () => {
+  assert.match(listingStatusSource, /This is a data-safety check, not a connection problem/);
+  assert.match(listingStatusSource, /Sale data needs review/);
+  assert.match(listingStatusSource, /isEbayListingDataReviewMessage/);
 });

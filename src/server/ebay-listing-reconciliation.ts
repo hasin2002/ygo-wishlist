@@ -25,6 +25,11 @@ import {
   type EbayListingLifecycle,
 } from "@/lib/records/ebay-listing-lifecycle";
 import {
+  ebayListingReviewMessage,
+  preferredEbayCompositionReviewReason,
+  type EbayCompositionReviewReason,
+} from "@/lib/records/ebay-listing-reconciliation-reason";
+import {
   getLatestEbayListingForCopyMembershipFirst,
   hasEbayCompositionSchema,
   legacySafeEbayListingSelection,
@@ -259,8 +264,8 @@ async function persistRemoteOrderLines({
   timestamp: Date;
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0];
 }) {
-  if (!enabled) return { failClosed: false };
-  let failClosed = false;
+  if (!enabled) return { failureReasons: [] as EbayCompositionReviewReason[] };
+  const failureReasons = new Set<EbayCompositionReviewReason>();
   const members = await tx
       .select()
       .from(ebayListingMembers)
@@ -330,7 +335,15 @@ async function persistRemoteOrderLines({
         || quantityChanged
       ) {
         state = "needs_review";
-        failClosed = true;
+        if (
+          existingRows.length > 1
+          || existing?.listingId !== undefined && existing.listingId !== listingId
+          || identifiersChanged
+        ) {
+          failureReasons.add("order_line_identity_conflict");
+        }
+        if (terminalRegression) failureReasons.add("order_line_terminal_regression");
+        if (quantityChanged) failureReasons.add("order_line_quantity_conflict");
       }
       const values = {
         cancelledAt: state === "cancelled"
@@ -384,13 +397,12 @@ async function persistRemoteOrderLines({
 
       // #15 preserves the existing one-Copy behaviour only. Quantity and
       // bundle fulfilment rules are owned by later tickets.
-      if (
-        state === "needs_review"
-        || members.length !== 1
-        || transaction.quantityPurchased !== 1
-      ) {
+      if (state === "needs_review" || members.length !== 1 || transaction.quantityPurchased !== 1) {
+        if (state === "needs_review") failureReasons.add("paid_order_needs_review");
+        if (members.length === 0) failureReasons.add("missing_listing_member");
+        if (members.length > 1) failureReasons.add("multiple_listing_members");
+        if (transaction.quantityPurchased !== 1) failureReasons.add("non_single_order_quantity");
         if (state !== "needs_review") {
-          failClosed = true;
           await tx.update(ebayOrderLines).set({
             needsReviewAt: timestamp,
             paymentState: "needs_review",
@@ -450,7 +462,7 @@ async function persistRemoteOrderLines({
         ),
       );
       if (allocationConflict) {
-        failClosed = true;
+        failureReasons.add("copy_allocation_conflict");
         await tx.update(ebayOrderLines).set({
           needsReviewAt: timestamp,
           paymentState: "needs_review",
@@ -474,7 +486,7 @@ async function persistRemoteOrderLines({
         });
       }
   }
-  return { failClosed };
+  return { failureReasons: [...failureReasons] };
 }
 
 export async function reconcileEbayListing({
@@ -560,7 +572,15 @@ export async function reconcileEbayListing({
       observation,
     );
     const next = decision.next;
-    const normalizedFailClosed = normalized.failClosed;
+    const normalizedFailureReason = preferredEbayCompositionReviewReason(
+      normalized.failureReasons,
+    );
+    const normalizedFailClosed = Boolean(normalizedFailureReason);
+    const listingError = normalizedFailureReason
+      ? ebayListingReviewMessage(normalizedFailureReason)
+      : decision.action === "fail_closed"
+        ? ebayListingReviewMessage(decision.reason)
+        : null;
     const compatibilityStatus = decision.relistAllowed
       || (next.saleRecordId !== null && next.saleState === "paid")
       ? "ended"
@@ -571,9 +591,7 @@ export async function reconcileEbayListing({
       .set({
         cancelledAt: next.cancelledAt,
         endingReason: next.endingReason,
-        lastError: decision.action === "fail_closed" || normalizedFailClosed
-          ? "eBay returned a listing state that needs review."
-          : null,
+        lastError: listingError,
         lastErrorAt: decision.action === "fail_closed" || normalizedFailClosed
           ? attemptedAt
           : null,
