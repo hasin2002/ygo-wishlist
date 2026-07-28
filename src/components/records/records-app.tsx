@@ -69,7 +69,9 @@ import type {
 } from "@/lib/records/types";
 import { copyDisplayLabel, copyShortReference, orderCopies } from "@/lib/records/copy-display";
 import {
+  defaultInventoryListState,
   inventoryCardDetailHref,
+  inventoryCopySellHref,
   inventoryListHref,
   parseInventoryListState,
   type InventoryListState,
@@ -711,14 +713,66 @@ function CardAttentionDialog({
   );
 }
 
+function EbayCopyLinkAttentionDialog({
+  item,
+  onClose,
+  onResolved,
+  source,
+}: {
+  item: NonNullable<RecordsSnapshot["attention"]>[number];
+  onClose: () => void;
+  onResolved: (message: string) => void;
+  source: RecordsDataSource;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const copy = item.copyId ? source.snapshot.copies.find((value) => value.id === item.copyId) : null;
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  async function confirm() {
+    if (!item.listingId) return;
+    setSaving(true);
+    setError(null);
+    const result = await source.resolveEbayCopyLinkAttention(item.listingId);
+    setSaving(false);
+    if (!result.ok) { setError(result.message); return; }
+    onResolved(`Confirmed the physical Copy link for “${item.label}”.`);
+    onClose();
+  }
+
+  return (
+    <div aria-labelledby="ebay-copy-link-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
+      <div className="w-full max-w-lg rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl">
+        <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve eBay link</span><h2 className="mt-1 text-xl font-black" id="ebay-copy-link-title">Confirm physical Copy</h2><p className="mt-1 text-sm font-medium text-zinc-500">This confirms the Copy already saved on the historical listing. It does not record a Sale.</p></div>
+          <button aria-label="Close eBay Copy link resolution" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
+        </header>
+        <div className="grid gap-4 p-4 sm:p-6">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">{item.label}</strong><p className="mt-1">{item.detail}</p></div>
+          <div className="rounded-lg border border-zinc-300 bg-white px-3 py-3 text-sm text-zinc-700"><p className="text-xs font-bold uppercase tracking-[0.1em] text-zinc-500">Saved physical Copy</p><p className="mt-1 font-bold">{copy ? `${copyDisplayLabel(source.snapshot.copies.filter((value) => value.printingId === copy.printingId), copy.id)} · Ref #${copyShortReference(copy.id)}` : "The Copy saved on this historical listing"}</p>{copy ? <p className="mt-1 text-sm font-medium text-zinc-500">{copy.condition}</p> : null}</div>
+          {error ? <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</p> : null}
+        </div>
+        <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={() => void confirm()} type="button">{saving ? "Confirming…" : "Confirm Copy link"}</button></footer>
+      </div>
+    </div>
+  );
+}
+
 function Overview() {
   const source = useRecordsDataSource();
+  const router = useRouter();
   const { snapshot } = source;
   const [period, setPeriod] = useState<OverviewPeriod>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [attentionItemId, setAttentionItemId] = useState<string | null>(null);
   const [attentionRecordId, setAttentionRecordId] = useState<string | null>(null);
+  const [ebayCopyLinkAttentionId, setEbayCopyLinkAttentionId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const range = overviewDateRange(period, customFrom, customTo);
   const activeRecords = snapshot.records.filter((record) => (
@@ -788,19 +842,25 @@ function Overview() {
             <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700"><AlertTriangle className="size-5" /></span>
             <div>
               <h2 className="font-bold">Needs attention</h2>
-              <p className="mt-0.5 text-sm font-medium text-zinc-500">Legacy details to confirm later</p>
+              <p className="mt-0.5 text-sm font-medium text-zinc-500">Items waiting for your review</p>
             </div>
           </div>
           <div className="mt-4 grid gap-2">
-            {snapshot.attention.length ? snapshot.attention.slice(0, 5).map((item) => (
+            {snapshot.attention.length ? snapshot.attention.map((item) => (
               <button className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-[#8a1f2d] hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" key={item.id} onClick={() => {
+                if (item.field === "ebay_copy_link") {
+                  if (item.ebayAttentionAction === "confirm_copy_link") setEbayCopyLinkAttentionId(item.id);
+                  else if (item.targetId && item.copyId) router.push(inventoryCopySellHref(item.targetId, item.copyId, defaultInventoryListState));
+                  else setMessage("This eBay listing needs investigation, but its saved physical Copy is no longer available.");
+                  return;
+                }
                 const recordId = item.field === "cost" ? item.id.replace(/^attention-cost-/, "") : null;
                 const record = recordId ? snapshot.records.find((value) => value.id === recordId) : null;
                 if (record) setAttentionRecordId(record.id);
                 else setAttentionItemId(item.id);
               }} type="button">
                 <p className="text-sm font-bold text-zinc-800">{item.label}</p>
-                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p><span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">Resolve details <ChevronRight className="size-3.5" /></span>
+                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p><span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">{item.field === "ebay_copy_link" ? item.ebayAttentionAction === "confirm_copy_link" ? "Confirm Copy link" : "Review eBay status" : "Resolve details"} <ChevronRight className="size-3.5" /></span>
               </button>
             )) : (
               <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm font-bold text-emerald-800">
@@ -811,6 +871,7 @@ function Overview() {
         </section>
       </div>
       {attentionItemId ? <CardAttentionDialog item={snapshot.attention.find((item) => item.id === attentionItemId)!} onClose={() => setAttentionItemId(null)} onSaved={setMessage} source={source} /> : null}
+      {ebayCopyLinkAttentionId ? <EbayCopyLinkAttentionDialog item={snapshot.attention.find((item) => item.id === ebayCopyLinkAttentionId)!} onClose={() => setEbayCopyLinkAttentionId(null)} onResolved={setMessage} source={source} /> : null}
       {attentionRecordId ? <RecordEditorDialog costOnly key={attentionRecordId} initialPanel="details" onClose={() => setAttentionRecordId(null)} onSaved={setMessage} record={snapshot.records.find((record) => record.id === attentionRecordId)!} source={source} /> : null}
     </div>
   );

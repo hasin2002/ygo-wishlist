@@ -211,10 +211,13 @@ export type SupplyItem = {
 export type PreviewAttentionItem = {
   id: string;
   targetId: string | null;
+  copyId?: string | null;
+  ebayAttentionAction?: "confirm_copy_link" | "review_ebay_status";
+  listingId?: string | null;
   printingId?: string | null;
   label: string;
   detail: string;
-  field: "cost" | "edition" | "printing" | "tcgplayer";
+  field: "cost" | "edition" | "printing" | "tcgplayer" | "ebay_copy_link";
 };
 
 export type RecordsSnapshot = {
@@ -360,6 +363,7 @@ export type RecordsDataSource = {
   createSale: (input: SaleInput) => Promise<DataSourceResult>;
   updateRecordDetails: (recordId: string, update: RecordDetailsUpdate) => Promise<DataSourceResult>;
   resolveCardAttention: (update: CardAttentionUpdate) => Promise<DataSourceResult>;
+  resolveEbayCopyLinkAttention: (listingId: string) => Promise<DataSourceResult>;
   replaceRecordCards: (recordId: string, cards: CardContentsInput[]) => Promise<DataSourceResult>;
   replaceSaleCopies: (recordId: string, copyIds: string[]) => Promise<DataSourceResult>;
   updateCardCopy: (copyId: string, update: CardCopyUpdate) => Promise<DataSourceResult>;
