@@ -22,6 +22,25 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Collection architecture
+
+Library is the card catalogue: it reads and edits Wishlist Targets through the
+`library` API. `Owned` and `Wishlist` are computed from the desired target
+quantity and available physical Copies; no Library action can toggle ownership.
+
+Records is the operational source of truth. A Purchase, Pack Opening, Sale, or
+other Record change creates, sells, voids, or restores exact Copy IDs together
+with their history. Use Records → Purchase when a card selected in the Wheel is
+acquired; the target is prefilled, but the Record still captures the real date,
+source, amount, and printing details.
+
+The legacy `cards` table remains intact solely as migration input. The only
+temporary access is the authenticated, read-only `legacyCards` adapter that
+seeds the resettable Records preview while legacy rows remain. It has deprecation
+logging and must be removed after those rows are migrated; it must never regain
+a writer. A rollback may restore a read-only Library naming adapter, never a
+direct ownership/status write.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

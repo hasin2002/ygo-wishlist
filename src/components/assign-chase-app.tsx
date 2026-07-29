@@ -43,17 +43,17 @@ export function AssignChaseApp() {
   const [assignedIds, setAssignedIds] = useState<string[]>([]);
   const [leaving, setLeaving] = useState(false);
   const utils = trpc.useUtils();
-  const list = trpc.cards.chaseQueue.useQuery(undefined, {
+  const list = trpc.library.chaseQueue.useQuery(undefined, {
     enabled: clientReady,
     staleTime: 30_000,
   });
-  const setChaseLevel = trpc.cards.setChaseLevel.useMutation({
+  const setChaseLevel = trpc.library.setChaseLevel.useMutation({
     onSuccess: () => {
-      void utils.cards.binderList.invalidate();
-      void utils.cards.chaseQueue.invalidate();
-      void utils.cards.list.invalidate();
-      void utils.cards.trackerPage.invalidate();
-      void utils.cards.summary.invalidate();
+      void utils.library.binderList.invalidate();
+      void utils.library.chaseQueue.invalidate();
+      void utils.library.list.invalidate();
+      void utils.library.trackerPage.invalidate();
+      void utils.library.summary.invalidate();
       void utils.wheel.state.invalidate();
     },
   });

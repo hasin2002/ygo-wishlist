@@ -44,10 +44,14 @@ changed.
 
 - Library may be public read-only; Records is owner-only.
 - Library and Records are projections of one owner-scoped collection model.
-  Library creates or edits Wishlist Targets; physical ownership is always
-  derived from the same Copies and Record Entries shown in Records. The legacy
-  `cards` table is migration input only after cutover and is never maintained by
-  permanent dual writes.
+  The `library` API is the only first-party API for Library catalogue reads and
+  Wishlist Target edits. Physical ownership is always derived from the same
+  Copies and Record Entries shown in Records; only Records mutations may create,
+  sell, void, or restore a Copy. The legacy `cards` table is migration input
+  only after cutover and is never maintained by permanent dual writes. A
+  temporary `legacyCards` read adapter may seed the resettable Records preview
+  while legacy rows exist; it must be removed after those rows are migrated and
+  must never gain a mutation.
 - New card identities and sealed-product identities use a required TCGplayer
   product URL as their primary reference. Names, images, printing/set facts, and
   rarity are derived from that reference where possible. Legacy rows with

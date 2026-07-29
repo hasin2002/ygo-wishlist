@@ -15,7 +15,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  type FormEvent,
   type MouseEvent,
   useEffect,
   useMemo,
@@ -64,11 +63,6 @@ type WheelSegment = {
   item?: WheelItem;
   start: number;
 };
-type PurchaseForm = {
-  paidPriceText: string;
-  purchaseMonth: string;
-};
-
 function formatCurrency(value: number | null) {
   if (value === null) {
     return "No estimate";
@@ -133,30 +127,6 @@ function parsePriceFilter(value: string) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function currentMonthKey(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function normalizePaidPrice(value: string) {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return "";
-  }
-
-  const numeric = trimmed
-    .replace(/^paid\s+/i, "")
-    .replace(/^£/, "")
-    .replace(/,/g, "")
-    .trim();
-
-  if (/^\d+(?:\.\d{1,2})?$/.test(numeric)) {
-    return `£${Number(numeric).toFixed(2)}`;
-  }
-
-  return trimmed.replace(/^paid\s+/i, "");
 }
 
 function itemMatchesPriceFilter(
@@ -364,20 +334,6 @@ export function WheelApp() {
     enabled: clientReady,
   });
   const spinWheel = trpc.wheel.spin.useMutation();
-  const markOwned = trpc.cards.markOwned.useMutation({
-    onSuccess: () => {
-      setPurchaseTarget(null);
-      setPurchaseForm({ paidPriceText: "", purchaseMonth: currentMonthKey() });
-      setPurchaseTouched(false);
-      void utils.wheel.state.invalidate();
-      void utils.cards.binderList.invalidate();
-      void utils.cards.chaseQueue.invalidate();
-      void utils.cards.list.invalidate();
-      void utils.cards.summary.invalidate();
-      void utils.cards.trackerPage.invalidate();
-      void utils.spend.currentMonth.invalidate();
-    },
-  });
   const resetWheel = trpc.wheel.reset.useMutation();
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
@@ -392,12 +348,6 @@ export function WheelApp() {
   const [activePage, setActivePage] = useState(1);
   const [pickedPage, setPickedPage] = useState(1);
   const [mobileWheelDetailsOpen, setMobileWheelDetailsOpen] = useState(false);
-  const [purchaseTarget, setPurchaseTarget] = useState<WheelItem | null>(null);
-  const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>({
-    paidPriceText: "",
-    purchaseMonth: currentMonthKey(),
-  });
-  const [purchaseTouched, setPurchaseTouched] = useState(false);
   const [chaseFilters, setChaseFilters] = useState<ChaseFilterValue[]>([]);
   const [minPriceInput, setMinPriceInput] = useState("");
   const [maxPriceInput, setMaxPriceInput] = useState("");
@@ -449,13 +399,10 @@ export function WheelApp() {
     (total, item) => total + (item.priceValue ?? 0),
     0,
   );
-  const purchasePaidPrice = normalizePaidPrice(purchaseForm.paidPriceText);
-  const showPurchasePriceError = purchaseTouched && !purchasePaidPrice;
   const busy =
     wheelQuery.isLoading ||
     spinWheel.isPending ||
-    resetWheel.isPending ||
-    markOwned.isPending;
+    resetWheel.isPending;
 
   useEffect(() => {
     return () => {
@@ -476,21 +423,20 @@ export function WheelApp() {
   }, [resetStatus]);
 
   useEffect(() => {
-    if (!selectedCardModal && !purchaseTarget) {
+    if (!selectedCardModal) {
       return;
     }
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setSelectedCardModal(null);
-        setPurchaseTarget(null);
         setTilt({ x: 0, y: 0 });
       }
     }
 
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [purchaseTarget, selectedCardModal]);
+  }, [selectedCardModal]);
 
   async function spin() {
     if (busy || spinning || !filteredActive.length) {
@@ -568,18 +514,6 @@ export function WheelApp() {
     setTilt({ x: 0, y: 0 });
     window.location.assign(
       `/records/new/purchase?cardName=${encodeURIComponent(item.card.name)}&targetId=${encodeURIComponent(item.card.id)}`,
-    );
-  }
-
-  function submitPurchase(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPurchaseTouched(true);
-
-    if (!purchaseTarget) {
-      return;
-    }
-    window.location.assign(
-      `/records/new/purchase?cardName=${encodeURIComponent(purchaseTarget.card.name)}&targetId=${encodeURIComponent(purchaseTarget.card.id)}`,
     );
   }
 
@@ -1148,165 +1082,6 @@ export function WheelApp() {
         </div>
       ) : null}
 
-      {purchaseTarget ? (
-        <div
-          aria-labelledby="purchase-card-title"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/45 px-0 pt-10 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
-          role="dialog"
-        >
-          <section className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg border border-zinc-300 bg-white shadow-2xl sm:max-w-lg sm:rounded-lg">
-            <div className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
-                  Add to owned
-                </p>
-                <h2
-                  className="mt-1 truncate text-xl font-bold"
-                  id="purchase-card-title"
-                >
-                  {purchaseTarget.card.name}
-                </h2>
-                {purchaseTarget.card.rarity ? (
-                  <p className="mt-1 text-sm font-semibold text-zinc-500">
-                    {purchaseTarget.card.rarity}
-                  </p>
-                ) : null}
-              </div>
-              <button
-                aria-label="Close add to owned form"
-                className="grid size-10 shrink-0 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
-                onClick={() => setPurchaseTarget(null)}
-                type="button"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <form className="space-y-4 overflow-auto p-4" onSubmit={submitPurchase}>
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
-                      Status
-                    </p>
-                    <p className="mt-1 flex items-center gap-1 font-bold text-zinc-950">
-                      <Check className="size-4 text-[#8a1f2d]" />
-                      Owned
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
-                      Estimate
-                    </p>
-                    <p className="mt-1 font-bold text-zinc-950">
-                      {formatCurrency(purchaseTarget.priceValue)}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {purchaseTarget.card.url ? (
-                    <a
-                      className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
-                      href={purchaseTarget.card.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Open saved link
-                      <ExternalLink className="size-4" />
-                    </a>
-                  ) : null}
-                  <a
-                    className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
-                    href={ebaySearchUrl(purchaseTarget)}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Open eBay search
-                    <ExternalLink className="size-4" />
-                  </a>
-                </div>
-              </div>
-
-              <label className="block">
-                <span className="text-sm font-medium text-zinc-700">
-                  Paid price <span className="text-[#8a1f2d]">*</span>
-                </span>
-                <input
-                  autoFocus
-                  aria-describedby={
-                    showPurchasePriceError ? "purchase-paid-error" : undefined
-                  }
-                  aria-invalid={showPurchasePriceError}
-                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition placeholder:text-zinc-400 focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10"
-                  inputMode="decimal"
-                  onBlur={() => setPurchaseTouched(true)}
-                  onChange={(event) =>
-                    setPurchaseForm((current) => ({
-                      ...current,
-                      paidPriceText: event.target.value,
-                    }))
-                  }
-                  placeholder="£12.50 or pulled from pack"
-                  value={purchaseForm.paidPriceText}
-                />
-                {showPurchasePriceError ? (
-                  <p
-                    className="mt-1 text-sm font-semibold text-red-700"
-                    id="purchase-paid-error"
-                    role="alert"
-                  >
-                    Enter what you paid before moving this card to owned.
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs font-medium text-zinc-500">
-                    This is the only required field.
-                  </p>
-                )}
-              </label>
-
-              <label className="block">
-                <span className="text-sm font-medium text-zinc-700">
-                  Bought month
-                </span>
-                <input
-                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10"
-                  onChange={(event) =>
-                    setPurchaseForm((current) => ({
-                      ...current,
-                      purchaseMonth: event.target.value,
-                    }))
-                  }
-                  type="month"
-                  value={purchaseForm.purchaseMonth}
-                />
-              </label>
-
-              {markOwned.error ? (
-                <p
-                  className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-                  role="alert"
-                >
-                  {markOwned.error.message}
-                </p>
-              ) : null}
-
-              <button
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:bg-zinc-300"
-                disabled={markOwned.isPending || !purchasePaidPrice}
-                type="submit"
-              >
-                {markOwned.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <ShoppingBag className="size-4" />
-                )}
-                Move to owned
-              </button>
-            </form>
-          </section>
-        </div>
-      ) : null}
     </main>
   );
 }

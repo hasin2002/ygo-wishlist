@@ -30,7 +30,10 @@ Library and Records are two projections over this same model. Library mutations
 may create or update a Wishlist Target, but any change to physical ownership
 must create or edit the relevant Record Entry and Copy. The legacy `cards` table
 is an import source during migration, not a second live collection, and no
-permanent dual-write path is permitted.
+permanent dual-write path is permitted. The first-party `library` API is the
+Library catalogue boundary; it does not expose ownership toggles. A temporary
+read-only `legacyCards` adapter may feed the resettable Records preview only
+until its legacy rows are migrated, then must be removed.
 
 Purchases store all-in cost and Sales store net proceeds. Optional line
 allocations describe how a total is distributed but never create more cashflow.
@@ -58,4 +61,7 @@ another purchase amount.
   history. Computed Owned/Wishlist presentation states remain valid.
 - One-click ownership toggles bypass acquisition provenance and are therefore
   not part of the new UI.
+- A compatibility API that writes legacy card status, paid price, or ownership
+  would create a second collection writer and is therefore rejected. A rollback
+  may restore a read-only naming adapter, never a direct ownership write.
 - Treating bulk itemization as a new purchase would double-count spend.
