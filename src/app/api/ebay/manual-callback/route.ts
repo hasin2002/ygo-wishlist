@@ -1,5 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import { after, NextRequest, NextResponse } from "next/server";
+import {
+  parseEbayManualCallbackUrl,
+  safeEbayReturnTo,
+} from "@/lib/ebay-connection-state";
+import {
+  clearEbayOAuthStateCookie,
+  ebayOAuthStateCookieName,
+} from "@/lib/ebay-oauth-route-state";
 import { ensureEbayNotificationSubscriptions } from "@/server/ebay-notification-service";
 import {
   EbayAuthorizationError,
@@ -7,17 +15,11 @@ import {
   exchangeEbayAuthorizationCode,
   parseEbayOAuthState,
   saveEbayConnection,
+  EbayTemporaryError,
 } from "@/server/ebay-seller";
 import { getSessionFromHeaders } from "@/server/session";
 
 export const runtime = "nodejs";
-
-const stateCookieName = "ebay-oauth-state";
-const allowedEbayHosts = new Set([
-  "auth2.ebay.com",
-  "signin.ebay.com",
-  "signin.ebay.co.uk",
-]);
 
 function sameValue(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
@@ -25,10 +27,19 @@ function sameValue(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function finish(request: NextRequest, destination: string) {
+function finish(request: NextRequest, destination: string, clearState = true) {
   const response = NextResponse.redirect(new URL(destination, request.url));
-  response.cookies.delete(stateCookieName);
-  return response;
+  return clearState ? clearEbayOAuthStateCookie(response) : response;
+}
+
+function ebaySettingsDestination(
+  params: Record<string, string>,
+  returnTo: string | null | undefined,
+) {
+  const query = new URLSearchParams(params);
+  const safeReturnTo = safeEbayReturnTo(returnTo);
+  if (safeReturnTo) query.set("returnTo", safeReturnTo);
+  return `/ebay?${query}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -47,21 +58,21 @@ export async function POST(request: NextRequest) {
   let resultUrl: URL;
   try {
     const form = await request.formData();
-    resultUrl = new URL(String(form.get("callbackUrl") ?? "").trim());
+    const result = parseEbayManualCallbackUrl(String(form.get("callbackUrl") ?? ""));
+    if (result.kind === "cancelled") {
+      return finish(request, "/ebay?error=cancelled");
+    }
+    if (result.kind === "invalid") {
+      return finish(request, "/ebay?error=local");
+    }
+    resultUrl = new URL(`https://auth2.ebay.com/?state=${encodeURIComponent(result.state)}&code=${encodeURIComponent(result.code)}`);
   } catch {
-    return finish(request, "/ebay?error=local");
-  }
-  if (
-    resultUrl.protocol !== "https:"
-    || !allowedEbayHosts.has(resultUrl.hostname.toLowerCase())
-    || resultUrl.searchParams.get("isAuthSuccessful") !== "true"
-  ) {
     return finish(request, "/ebay?error=local");
   }
 
   const state = resultUrl.searchParams.get("state");
   const code = resultUrl.searchParams.get("code");
-  const expectedState = request.cookies.get(stateCookieName)?.value;
+  const expectedState = request.cookies.get(ebayOAuthStateCookieName)?.value;
   if (!state || !code || !expectedState || !sameValue(state, expectedState)) {
     return finish(request, "/ebay?error=consent");
   }
@@ -70,6 +81,8 @@ export async function POST(request: NextRequest) {
   if (!stateDetails || session.user.id !== stateDetails.ownerId) {
     return finish(request, "/ebay?error=consent");
   }
+
+  const completionDestination = ebaySettingsDestination({ connected: "1" }, stateDetails.returnTo);
 
   try {
     const token = await exchangeEbayAuthorizationCode(code);
@@ -82,13 +95,16 @@ export async function POST(request: NextRequest) {
     after(async () => {
       await ensureEbayNotificationSubscriptions(session.user.id).catch(() => undefined);
     });
-    return finish(request, "/ebay?connected=1");
+    return finish(request, completionDestination);
   } catch (error) {
+    if (error instanceof EbayTemporaryError) {
+      return finish(request, ebaySettingsDestination({ error: "temporary" }, stateDetails.returnTo), false);
+    }
     const reason = error instanceof EbayConfigurationError
       ? "configuration"
       : error instanceof EbayAuthorizationError
         ? "ebay"
         : "unknown";
-    return finish(request, `/ebay?error=${reason}`);
+    return finish(request, ebaySettingsDestination({ error: reason }, stateDetails.returnTo), false);
   }
 }
