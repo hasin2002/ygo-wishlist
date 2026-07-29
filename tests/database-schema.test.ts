@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import {
+  cardPrintings,
   ebayListingMembers,
   ebayListings,
   ebayOrderLineAllocations,
@@ -87,4 +89,15 @@ test("composite foreign-key backing indexes have safe PostgreSQL names", () => {
       `${target.backingName} exceeds PostgreSQL's identifier limit`,
     );
   }
+});
+
+test("exact Printing identities are database-enforced while placeholders remain reviewable", () => {
+  const indexes = getTableConfig(cardPrintings).indexes;
+  const names = indexes.filter((index) => index.config.unique).map((index) => index.config.name);
+  assert.ok(names.includes("card_printings_owner_target_set_identity_unique"));
+  assert.ok(names.includes("card_printings_owner_target_tcgplayer_identity_unique"));
+  assert.match(
+    fs.readFileSync("drizzle/0001_enforce_card_printing_identity.sql", "utf8"),
+    /nullif\(btrim\("card_printings"\."canonical_tcgplayer_url"\), ''\) is not null/,
+  );
 });
