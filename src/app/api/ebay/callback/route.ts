@@ -1,5 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { after, NextRequest, NextResponse } from "next/server";
+import {
+  clearEbayOAuthStateCookie,
+  ebayOAuthStateCookieName,
+} from "@/lib/ebay-oauth-route-state";
 import { ensureEbayNotificationSubscriptions } from "@/server/ebay-notification-service";
 import {
   EbayAuthorizationError,
@@ -12,8 +16,6 @@ import { getSessionFromHeaders } from "@/server/session";
 
 export const runtime = "nodejs";
 
-const stateCookieName = "ebay-oauth-state";
-
 function sameValue(left: string, right: string) {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -22,14 +24,13 @@ function sameValue(left: string, right: string) {
 
 function finish(request: NextRequest, destination: string) {
   const response = NextResponse.redirect(new URL(destination, request.url));
-  response.cookies.delete(stateCookieName);
-  return response;
+  return clearEbayOAuthStateCookie(response);
 }
 
 export async function GET(request: NextRequest) {
   const state = request.nextUrl.searchParams.get("state");
   const code = request.nextUrl.searchParams.get("code");
-  const expectedState = request.cookies.get(stateCookieName)?.value;
+  const expectedState = request.cookies.get(ebayOAuthStateCookieName)?.value;
   if (!state || !code || !expectedState || !sameValue(state, expectedState)) {
     return finish(request, "/ebay?error=consent");
   }

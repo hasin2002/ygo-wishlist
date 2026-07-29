@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ebayConsentUrl, createEbayOAuthState, EbayConfigurationError } from "@/server/ebay-seller";
+import { safeEbayReturnTo } from "@/lib/ebay-connection-state";
+import { ebayOAuthStateCookieName, ebayOAuthStateCookieOptions } from "@/lib/ebay-oauth-route-state";
+import {
+  ebayConsentUrl,
+  createEbayOAuthState,
+  EbayConfigurationError,
+  getEbayConnectionStatus,
+} from "@/server/ebay-seller";
 import { getSessionFromHeaders } from "@/server/session";
 
 export const runtime = "nodejs";
-
-const stateCookieName = "ebay-oauth-state";
 
 export async function GET(request: NextRequest) {
   const session = await getSessionFromHeaders(request.headers);
@@ -16,15 +21,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const state = createEbayOAuthState(session.user.id);
-    const response = NextResponse.redirect(ebayConsentUrl(state));
-    response.cookies.set(stateCookieName, state, {
-      httpOnly: true,
-      maxAge: 10 * 60,
-      path: "/api/ebay",
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+    const returnTo = safeEbayReturnTo(request.nextUrl.searchParams.get("returnTo"));
+    const connection = await getEbayConnectionStatus(session.user.id);
+    const state = createEbayOAuthState(session.user.id, {
+      purpose: connection ? "replacement" : "connect",
+      returnTo: returnTo ?? undefined,
     });
+    const response = NextResponse.redirect(ebayConsentUrl(state));
+    response.cookies.set(ebayOAuthStateCookieName, state, ebayOAuthStateCookieOptions());
     return response;
   } catch (error) {
     const reason = error instanceof EbayConfigurationError ? "configuration" : "unknown";
