@@ -379,6 +379,16 @@ export const cardPrintings = pgTable(
     index("card_printings_owner_target_idx").on(table.ownerId, table.targetId),
     index("card_printings_owner_code_idx").on(table.ownerId, table.normalizedSetCode),
     index("card_printings_owner_tcgplayer_idx").on(table.ownerId, table.canonicalTcgplayerUrl),
+    // A complete set/code identifies one exact Printing within a Target. Legacy
+    // placeholders deliberately remain outside the constraint so they can be
+    // reported for human review rather than silently combined.
+    uniqueIndex("card_printings_owner_target_set_identity_unique")
+      .on(table.ownerId, table.targetId, table.normalizedSetName, table.normalizedSetCode)
+      .where(sql`${table.normalizedSetName} not in ('', 'unknown', 'unknown set')
+        and ${table.normalizedSetCode} not in ('', 'unknown', 'unknown code')`),
+    uniqueIndex("card_printings_owner_target_tcgplayer_identity_unique")
+      .on(table.ownerId, table.targetId, table.canonicalTcgplayerUrl)
+      .where(sql`nullif(btrim(${table.canonicalTcgplayerUrl}), '') is not null`),
   ],
 );
 

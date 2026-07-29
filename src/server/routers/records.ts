@@ -46,6 +46,11 @@ import {
   isMissingEbayCompositionSchema,
 } from "@/server/ebay-listing-composition";
 import { listEbayListingsWorkspace } from "@/server/records/ebay-listings-workspace";
+import {
+  compatiblePrintingIdentity,
+  conflictsWithPrintingIdentity,
+  normalizePrintingValue,
+} from "@/server/printing-identity";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -377,37 +382,44 @@ async function findOrCreatePrinting(
   }
 
   const canonicalUrl = canonicalProductUrl(input.tcgplayerUrl);
-  const normalizedSetName = normalize(input.setName || "Unknown set");
-  const normalizedSetCode = normalize(input.setCode || "Unknown code");
-  let [printing] = await tx.select().from(cardPrintings).where(and(
-    eq(cardPrintings.ownerId, ownerId),
-    eq(cardPrintings.targetId, target.id),
-    eq(cardPrintings.canonicalTcgplayerUrl, canonicalUrl),
-  )).limit(1);
-
-  printing ??= (await tx.select().from(cardPrintings).where(and(
-    eq(cardPrintings.ownerId, ownerId),
-    eq(cardPrintings.targetId, target.id),
-    eq(cardPrintings.normalizedSetName, normalizedSetName),
-    eq(cardPrintings.normalizedSetCode, normalizedSetCode),
-  )).limit(1))[0];
+  const normalizedSetName = normalizePrintingValue(input.setName || "Unknown set");
+  const normalizedSetCode = normalizePrintingValue(input.setCode || "Unknown code");
+  const requestedIdentity = { canonicalTcgplayerUrl: canonicalUrl || null, normalizedSetName, normalizedSetCode };
+  const candidates = await tx.select().from(cardPrintings).where(and(
+    eq(cardPrintings.ownerId, ownerId), eq(cardPrintings.targetId, target.id),
+  ));
+  const compatible = candidates.filter((candidate) => compatiblePrintingIdentity(candidate, requestedIdentity));
+  if (compatible.length > 1) {
+    conflict("This exact Printing has duplicate rows. Run the Printing reconciliation preflight before recording another Copy.");
+  }
+  let [printing] = compatible;
+  const hasConflict = candidates.some((candidate) => conflictsWithPrintingIdentity(candidate, requestedIdentity));
+  if (hasConflict) {
+    conflict("Existing Printing metadata conflicts with this TCGplayer link or set/code. Review it before recording a Copy.");
+  }
 
   if (!printing) {
-    [printing] = await tx.insert(cardPrintings).values({
-      id: id("printing"),
-      ownerId,
-      targetId: target.id,
-      setName: input.setName || "Unknown set",
-      normalizedSetName,
-      setCode: input.setCode || "Unknown code",
-      normalizedSetCode,
-      tcgplayerUrl: input.tcgplayerUrl,
-      canonicalTcgplayerUrl: canonicalUrl,
-      imageUrl: input.imageUrl,
-      metadataNeedsAttention: input.metadataNeedsAttention,
-      createdAt: now,
-      updatedAt: now,
-    }).returning();
+    const values = {
+      id: id("printing"), ownerId, targetId: target.id,
+      setName: input.setName || "Unknown set", normalizedSetName,
+      setCode: input.setCode || "Unknown code", normalizedSetCode,
+      tcgplayerUrl: input.tcgplayerUrl, canonicalTcgplayerUrl: requestedIdentity.canonicalTcgplayerUrl,
+      imageUrl: input.imageUrl, metadataNeedsAttention: input.metadataNeedsAttention,
+      createdAt: now, updatedAt: now,
+    };
+    // The database indexes are the concurrency authority; a losing request
+    // reads the survivor instead of creating a second Printing.
+    [printing] = await tx.insert(cardPrintings).values(values).onConflictDoNothing().returning();
+    if (!printing) {
+      const afterConflict = await tx.select().from(cardPrintings).where(and(
+        eq(cardPrintings.ownerId, ownerId), eq(cardPrintings.targetId, target.id),
+      ));
+      const survivors = afterConflict.filter((candidate) => compatiblePrintingIdentity(candidate, requestedIdentity));
+      if (survivors.length !== 1) {
+        conflict("A conflicting Printing already exists. Review its metadata before recording a Copy.");
+      }
+      [printing] = survivors;
+    }
   }
 
   return { printing, target };
