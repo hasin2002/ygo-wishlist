@@ -27,6 +27,7 @@ import {
 } from "@/lib/ebay-listing-options";
 import { resolveEbayListingContext } from "@/lib/records/ebay-listing-context";
 import { ebaySoldListingsUrl } from "@/lib/records/ebay-sold-listings";
+import { ebaySettingsHref } from "@/lib/ebay-connection-state";
 import {
   inventoryCardDetailHref,
   inventoryCopySellHref,
@@ -388,7 +389,7 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
           listingState={listing.listingState}
           listingUpdatedAt={toEbayListingTimestamp(listing.updatedAt)}
           onReconnect={eligibilityResult.reconnectRequired
-            ? () => window.location.assign("/ebay")
+            ? () => window.location.assign(ebaySettingsHref(backHref))
             : undefined}
           onRefresh={() => { void refreshEbayStatus(); }}
           onReview={() => window.location.assign(backHref)}
@@ -409,7 +410,7 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
     return <StatusCard title="This Copy cannot be listed"><p>{message}</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href={backHref}>Back to inventory</Link></StatusCard>;
   }
   if (!status.data?.configured || !status.data.connection) {
-    return <StatusCard title="Connect eBay to continue"><p>Your listing draft will be created here after the eBay seller connection is ready.</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Link className="inline-flex min-h-11 items-center rounded-md bg-[#8a1f2d] px-4 font-bold text-white" href="/ebay">Open eBay settings</Link><Link className="inline-flex min-h-11 items-center rounded-md border border-zinc-300 px-4 font-bold" href={backHref}>Back to inventory</Link></div></StatusCard>;
+    return <StatusCard title="Connect eBay to continue"><p>Your listing draft will be created here after the eBay seller connection is ready.</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Link className="inline-flex min-h-11 items-center rounded-md bg-[#8a1f2d] px-4 font-bold text-white" href={ebaySettingsHref(backHref)}>Open eBay settings</Link><Link className="inline-flex min-h-11 items-center rounded-md border border-zinc-300 px-4 font-bold" href={backHref}>Back to inventory</Link></div></StatusCard>;
   }
   return (
     <EbayListingWorkspace

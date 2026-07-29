@@ -8,6 +8,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { remoteImageRetriever } from "@/server/remote-images";
 
 const maximumImageBytes = 12 * 1024 * 1024;
 
@@ -109,21 +110,10 @@ export async function storeRemoteListingImageDraft({
   ownerId: string;
   sourceUrl: string;
 }) {
-  const parsed = new URL(sourceUrl);
-  if (parsed.protocol !== "https:") throw new Error("Use an HTTPS catalogue image.");
-
-  const response = await fetch(parsed, {
-    headers: {
-      "user-agent": "Mozilla/5.0 (compatible; CollectionHub/1.0; listing-image-archive)",
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`The catalogue image could not be downloaded (${response.status}).`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const image = await remoteImageRetriever.retrieve(sourceUrl, { abuseKey: `listing:${ownerId}` });
   return storeListingImageDraft({
-    bytes,
-    contentType: response.headers.get("content-type") ?? "",
+    bytes: image.bytes,
+    contentType: image.contentType,
     copyId,
     ownerId,
   });

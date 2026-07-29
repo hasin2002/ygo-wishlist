@@ -4,9 +4,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
-  createHmac,
   randomBytes,
-  timingSafeEqual,
 } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -20,10 +18,15 @@ import {
   ebayTokenFailureKind,
   type EbayTokenRequestKind,
 } from "@/lib/ebay-token-failure";
+import type { EbayConnectionHealth } from "@/lib/ebay-connection-state";
+import {
+  createSignedEbayOAuthState,
+  parseSignedEbayOAuthState,
+  type EbayOAuthState,
+} from "@/lib/ebay-oauth-state";
 
 export { ebaySellerScopeList } from "@/lib/records/ebay-oauth-scopes";
 const ebaySellerScopes = ebaySellerScopeList.join(" ");
-const stateLifetimeMs = 10 * 60 * 1_000;
 let applicationTokenCache: {
   accessToken: string;
   expiresAt: number;
@@ -31,6 +34,8 @@ let applicationTokenCache: {
 } | null = null;
 const sellerTokenRefreshSkewMs = 60_000;
 const sellerAccessTokenCache = createExpiringSingleFlightCache<string>();
+const connectionHealthLifetimeMs = 15 * 60 * 1_000;
+const connectionHealth = new Map<string, { expiresAt: number; value: EbayConnectionHealth }>();
 
 type EbayTokenResponse = {
   access_token: string;
@@ -44,12 +49,6 @@ type StoredSecret = {
   ciphertext: string;
   iv: string;
   tag: string;
-};
-
-type OAuthState = {
-  issuedAt: number;
-  nonce: string;
-  ownerId: string;
 };
 
 export class EbayConfigurationError extends Error {}
@@ -82,13 +81,6 @@ function sellerDiagnosticOwner(ownerId: string) {
     .slice(0, 12);
 }
 
-function stateSigningKey() {
-  return createHash("sha256")
-    .update(requiredEnvironment("BETTER_AUTH_SECRET"))
-    .update("\0ebay-oauth-state-v1")
-    .digest();
-}
-
 function credentialsHeader() {
   const clientId = requiredEnvironment("EBAY_CLIENT_ID");
   const clientSecret = requiredEnvironment("EBAY_CLIENT_SECRET");
@@ -101,49 +93,28 @@ function oauthRuName() {
   return requiredEnvironment("EBAY_OAUTH_RU_NAME");
 }
 
-function encodeStatePayload(value: OAuthState) {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
+export function createEbayOAuthState(
+  ownerId: string,
+  options: { purpose?: EbayOAuthState["purpose"]; returnTo?: string } = {},
+) {
+  return createSignedEbayOAuthState(ownerId, requiredEnvironment("BETTER_AUTH_SECRET"), options);
 }
 
-function signStatePayload(payload: string) {
-  return createHmac("sha256", stateSigningKey()).update(payload).digest("base64url");
+export function parseEbayOAuthState(state: string): EbayOAuthState | null {
+  return parseSignedEbayOAuthState(state, requiredEnvironment("BETTER_AUTH_SECRET"));
 }
 
-export function createEbayOAuthState(ownerId: string) {
-  const payload = encodeStatePayload({
-    issuedAt: Date.now(),
-    nonce: randomBytes(24).toString("base64url"),
-    ownerId,
-  });
-  return `${payload}.${signStatePayload(payload)}`;
+function setEbayConnectionHealth(ownerId: string, value: EbayConnectionHealth) {
+  connectionHealth.set(ownerId, { expiresAt: Date.now() + connectionHealthLifetimeMs, value });
 }
 
-export function parseEbayOAuthState(state: string): OAuthState | null {
-  const [payload, signature, extra] = state.split(".");
-  if (!payload || !signature || extra) return null;
-
-  const expectedSignature = signStatePayload(payload);
-  const actual = Buffer.from(signature);
-  const expected = Buffer.from(expectedSignature);
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-    return null;
+function getEbayConnectionHealth(ownerId: string): EbayConnectionHealth {
+  const current = connectionHealth.get(ownerId);
+  if (!current || current.expiresAt <= Date.now()) {
+    connectionHealth.delete(ownerId);
+    return "stored";
   }
-
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as OAuthState;
-    if (
-      !parsed.ownerId
-      || !parsed.nonce
-      || !Number.isFinite(parsed.issuedAt)
-      || Date.now() - parsed.issuedAt > stateLifetimeMs
-      || parsed.issuedAt > Date.now() + 30_000
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
+  return current.value;
 }
 
 export function ebayConsentUrl(state: string) {
@@ -284,6 +255,7 @@ export async function saveEbayConnection({
       target: ebayConnections.ownerId,
     });
   sellerAccessTokenCache.invalidate(ownerId);
+  setEbayConnectionHealth(ownerId, "recently_verified");
   console.info("[ebay] seller connection stored", {
     owner: sellerDiagnosticOwner(ownerId),
     scopeCount: (scopes?.trim() || ebaySellerScopes).split(/\s+/).filter(Boolean).length,
@@ -305,6 +277,9 @@ export async function getEbayConnectionStatus(ownerId: string) {
   const missingScopes = ebaySellerScopeList.filter((scope) => !grantedScopes.has(scope));
   return {
     ...connection,
+    health: connection.refreshTokenExpiresAt <= new Date()
+      ? "reconnect_required"
+      : getEbayConnectionHealth(ownerId),
     missingScopes,
     notificationReady: missingScopes.length === 0,
   };
@@ -313,6 +288,7 @@ export async function getEbayConnectionStatus(ownerId: string) {
 export async function deleteEbayConnection(ownerId: string) {
   await db.delete(ebayConnections).where(eq(ebayConnections.ownerId, ownerId));
   sellerAccessTokenCache.invalidate(ownerId);
+  connectionHealth.delete(ownerId);
 }
 
 /**
@@ -330,6 +306,7 @@ export async function getEbaySellerAccessToken(ownerId: string) {
     throw new EbayAuthorizationError("No eBay seller account is connected.");
   }
   if (connection.refreshTokenExpiresAt <= new Date()) {
+    setEbayConnectionHealth(ownerId, "reconnect_required");
     throw new EbayAuthorizationError("The eBay connection has expired. Connect eBay again.");
   }
 
@@ -343,6 +320,7 @@ export async function getEbaySellerAccessToken(ownerId: string) {
           tag: connection.refreshTokenTag,
         });
       } catch {
+        setEbayConnectionHealth(ownerId, "reconnect_required");
         throw new EbayAuthorizationError("The saved eBay connection could not be used. Reconnect eBay and try again.");
       }
       const body = new URLSearchParams({
@@ -354,6 +332,7 @@ export async function getEbaySellerAccessToken(ownerId: string) {
       if (!token.access_token || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
         throw new EbayTemporaryError("eBay returned an incomplete access token. Try again shortly.");
       }
+      setEbayConnectionHealth(ownerId, "recently_verified");
       return {
         expiresAt: Date.now() + token.expires_in * 1_000 - sellerTokenRefreshSkewMs,
         value: token.access_token,
@@ -365,6 +344,11 @@ export async function getEbaySellerAccessToken(ownerId: string) {
       : error instanceof EbayConfigurationError
         ? "configuration"
         : "temporary";
+    if (failure === "authorization") {
+      setEbayConnectionHealth(ownerId, "reconnect_required");
+    } else if (failure === "temporary") {
+      setEbayConnectionHealth(ownerId, "temporarily_unavailable");
+    }
     console.warn("[ebay] seller access token refresh failed", {
       failure,
       owner: sellerDiagnosticOwner(ownerId),

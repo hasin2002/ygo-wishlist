@@ -101,7 +101,13 @@ To enable the connection:
    Its Accept URL must be `https://<your-production-domain>/api/ebay/callback`.
    For local HTTP testing, create a second RuName that uses eBay's standard
    success page and set it as `EBAY_OAUTH_LOCAL_RU_NAME`. After consent, paste
-   that page's full URL into the development-only completion form.
+   that page's full URL into the development-only completion form. To replace
+   a local connection, select **Replace eBay connection** first, then return
+   to the focused **Complete replacement connection URL** field. The form says
+   which local database it updates; a cancelled, expired, malformed, or
+   temporarily unavailable attempt leaves the existing encrypted credential in
+   place. Production continues to use its normal callback and does not use the
+   local paste form.
 2. Add its RuName value to `EBAY_OAUTH_RU_NAME`, alongside the existing
    `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET`, in the production environment.
 3. Preview the eBay composite-key repair with
