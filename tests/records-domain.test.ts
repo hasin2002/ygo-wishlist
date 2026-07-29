@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { allocatePence, allocatePenceAt } from "../src/lib/records/allocation.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
@@ -70,6 +71,10 @@ function twoCopyPurchase(): RecordsSnapshot {
     supplies: [],
     attention: [],
   };
+}
+
+function sourceFile(path: string) {
+  return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
 test("bulk allocation uses the full lot quantity, not only identified cards", () => {
@@ -243,6 +248,43 @@ test("Library status is computed from wanted and available Copy quantities", () 
     wantedQuantity: 2,
     wishlistRemainingQuantity: 0,
   });
+});
+
+test("only Records may write physical Copy ownership or legacy card state", () => {
+  const root = sourceFile("src/server/root.ts");
+  const legacyCards = sourceFile("src/server/routers/cards.ts");
+  const library = sourceFile("src/server/routers/library.ts");
+  const wheel = sourceFile("src/components/wheel-app.tsx");
+  const nonRecordsRouters = readdirSync(
+    new URL("../src/server/routers/", import.meta.url),
+  ).filter((file) => file.endsWith(".ts") && file !== "records.ts")
+    .map((file) => ({ file, source: sourceFile(`src/server/routers/${file}`) }));
+  const libraryClients = [
+    "src/components/assign-chase-app.tsx",
+    "src/components/binder-v2-app.tsx",
+    "src/components/spend-app.tsx",
+    "src/components/wishlist-app.tsx",
+  ].map(sourceFile);
+
+  assert.doesNotMatch(root, /\bcards:\s*libraryRouter/);
+  assert.match(root, /\blegacyCards:\s*legacyCardsReadRouter/);
+  assert.match(legacyCards, /read-only migration adapter/);
+  assert.doesNotMatch(legacyCards, /\.(?:insert|update|delete)\(cards\)/);
+  assert.doesNotMatch(legacyCards, /\b(?:markOwned|setStatus|setPaidPrice)\b/);
+  assert.doesNotMatch(library, /\bmarkOwned\b/);
+  assert.doesNotMatch(library, /\.(?:insert|update|delete)\(cardCopies\)/);
+  for (const router of nonRecordsRouters) {
+    assert.doesNotMatch(
+      router.source,
+      /\.(?:insert|update|delete)\(cardCopies\)/,
+      `${router.file} must not become a second Copy ownership writer`,
+    );
+  }
+  assert.doesNotMatch(wheel, /\b(?:trpc|utils)\.cards\b|\bmarkOwned\b/);
+  for (const client of libraryClients) {
+    assert.doesNotMatch(client, /\b(?:trpc|utils)\.cards\b/);
+    assert.match(client, /\b(?:trpc|utils)\.library\b/);
+  }
 });
 
 test("pack-opening records use the opened product image instead of pulled card images", () => {

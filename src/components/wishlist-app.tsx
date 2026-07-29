@@ -64,7 +64,7 @@ type CardTypeFilter =
   | "spell"
   | "trap"
   | "token";
-type Card = inferRouterOutputs<AppRouter>["cards"]["trackerPage"]["items"][number];
+type Card = inferRouterOutputs<AppRouter>["library"]["trackerPage"]["items"][number];
 type CardStatus = "wishlist" | "owned";
 type CardForm = {
   name: string;
@@ -1539,11 +1539,11 @@ export function WishlistApp() {
   }, [pricingRun?.running]);
 
   function invalidateCardsAndSpend() {
-    void utils.cards.binderList.invalidate();
-    void utils.cards.chaseQueue.invalidate();
-    void utils.cards.list.invalidate();
-    void utils.cards.summary.invalidate();
-    void utils.cards.trackerPage.invalidate();
+    void utils.library.binderList.invalidate();
+    void utils.library.chaseQueue.invalidate();
+    void utils.library.list.invalidate();
+    void utils.library.summary.invalidate();
+    void utils.library.trackerPage.invalidate();
     void utils.binder.layout.invalidate();
     void utils.spend.currentMonth.invalidate();
     void utils.spend.monthlyFavourites.invalidate();
@@ -1577,32 +1577,32 @@ export function WishlistApp() {
       typeFilters,
     ],
   );
-  const list = trpc.cards.trackerPage.useQuery(trackerInput, {
+  const list = trpc.library.trackerPage.useQuery(trackerInput, {
     enabled: clientReady,
     placeholderData: (previousData) => previousData,
     staleTime: 30_000,
   });
-  const lastPricingRefresh = trpc.cards.lastPricingRefresh.useQuery(undefined, {
+  const lastPricingRefresh = trpc.library.lastPricingRefresh.useQuery(undefined, {
     enabled: clientReady,
     staleTime: 30_000,
   });
-  const create = trpc.cards.create.useMutation({
+  const create = trpc.library.create.useMutation({
     onSuccess: () => {
       setForm(emptyForm());
       setAddFormOpen(false);
       invalidateCardsAndSpend();
     },
   });
-  const refreshPricing = trpc.cards.refreshPricing.useMutation();
-  const recordPricingRefresh = trpc.cards.recordPricingRefresh.useMutation({
+  const refreshPricing = trpc.library.refreshPricing.useMutation();
+  const recordPricingRefresh = trpc.library.recordPricingRefresh.useMutation({
     onSuccess: () => {
-      void utils.cards.lastPricingRefresh.invalidate();
+      void utils.library.lastPricingRefresh.invalidate();
     },
   });
-  const deleteCard = trpc.cards.delete.useMutation({
+  const deleteCard = trpc.library.delete.useMutation({
     onSuccess: invalidateCardsAndSpend,
   });
-  const updateCard = trpc.cards.update.useMutation({
+  const updateCard = trpc.library.update.useMutation({
     onSuccess: () => {
       setEditForm(null);
       invalidateCardsAndSpend();
@@ -1682,7 +1682,7 @@ export function WishlistApp() {
     if (pricingRun?.running) return;
     setPricingError(null);
     try {
-      const candidates = await utils.cards.pricingCandidates.fetch();
+      const candidates = await utils.library.pricingCandidates.fetch();
       const initial: PricingRun = {
         completed: 0,
         estimated: 0,
@@ -1745,7 +1745,7 @@ export function WishlistApp() {
     if (pricingRun?.running) return;
     setPricingCandidateCount(null);
     setPricingRefreshDialogOpen(true);
-    void utils.cards.pricingCandidates.fetch()
+    void utils.library.pricingCandidates.fetch()
       .then((candidates) => setPricingCandidateCount(candidates.length))
       .catch(() => setPricingCandidateCount(-1));
   }

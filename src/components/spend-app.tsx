@@ -22,7 +22,7 @@ import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 import { useClientReady } from "@/lib/use-client-ready";
 
-type Card = inferRouterOutputs<AppRouter>["cards"]["list"][number];
+type Card = inferRouterOutputs<AppRouter>["library"]["list"][number];
 type MonthlyFavourite =
   inferRouterOutputs<AppRouter>["spend"]["monthlyFavourites"][number];
 type Scope = "month" | "year" | "all" | "unassigned";
@@ -558,7 +558,7 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
   const [purchaseType, setPurchaseType] = useState("all");
   const [purchaseSort, setPurchaseSort] = useState<SortOption>("month-desc");
   const [purchasePage, setPurchasePage] = useState(1);
-  const list = trpc.cards.list.useQuery(
+  const list = trpc.library.list.useQuery(
     { status: "owned", query: "" },
     {
       enabled: clientReady,

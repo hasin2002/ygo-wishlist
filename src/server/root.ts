@@ -10,13 +10,12 @@ import { router } from "@/server/trpc";
 
 export const appRouter = router({
   binder: binderRouter,
-  // `cards` remains the compatibility namespace used by the existing Library
-  // screens; Records uses the explicit `library` namespace for Target-only
-  // operations such as deleting an unowned Wishlist Target.
-  cards: libraryRouter,
   ebay: ebayRouter,
   featureIdeas: featureIdeasRouter,
   library: libraryRouter,
+  // This temporary migration reader is deliberately separate from Library.
+  // It exposes legacy rows only to seed the local Records preview and must not
+  // regain mutations or become a Library compatibility namespace.
   legacyCards: legacyCardsReadRouter,
   records: recordsRouter,
   spend: spendRouter,

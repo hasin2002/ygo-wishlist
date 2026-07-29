@@ -422,17 +422,6 @@ export const libraryRouter = router({
     return (await loadLibraryCards(ctx.collectionOwnerId)).find((card) => card.id === updated.id)!;
   }),
 
-  markOwned: authenticatedProcedure.input(z.object({
-    id: z.string().min(1),
-    paidPriceText: z.string().trim().optional(),
-    purchaseMonth: z.string().trim().optional(),
-  })).mutation(() => {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Ownership cannot be changed directly. Use Record acquisition so the Copy and its history are created together.",
-    });
-  }),
-
   refreshMetadata: authenticatedProcedure.input(z.object({ id: z.string().min(1) })).mutation(async ({ ctx, input }) => {
     const cards = await loadLibraryCards(ctx.collectionOwnerId);
     const card = cards.find((item) => item.id === input.id);

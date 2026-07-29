@@ -34,7 +34,7 @@ import { useClientReady } from "@/lib/use-client-ready";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
-type Card = inferRouterOutputs<AppRouter>["cards"]["binderList"][number];
+type Card = inferRouterOutputs<AppRouter>["library"]["binderList"][number];
 type CardTypeFilter =
   | "monster"
   | "normal"
@@ -359,7 +359,7 @@ export function BinderV2App() {
   const initialAuth = useInitialAuth();
   const canEdit = Boolean(session) || initialAuth.isAuthenticated;
   const utils = trpc.useUtils();
-  const cardsQuery = trpc.cards.binderList.useQuery(undefined, {
+  const cardsQuery = trpc.library.binderList.useQuery(undefined, {
     enabled: clientReady,
     staleTime: 30_000,
   });
