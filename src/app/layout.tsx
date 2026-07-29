@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { Providers } from "./providers";
 import "./globals.css";
-import { getCurrentSession } from "@/server/session";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -38,7 +37,9 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await getCurrentSession();
+  const session = process.env.RECORDS_BROWSER_TEST === "1"
+    ? null
+    : await (await import("@/server/session")).getCurrentSession();
 
   return (
     <html
@@ -52,7 +53,7 @@ export default async function RootLayout({
           id="theme-initializer"
           strategy="beforeInteractive"
         />
-        {process.env.NODE_ENV === "development" ? (
+        {process.env.NODE_ENV === "development" && process.env.RECORDS_BROWSER_TEST !== "1" ? (
           <Script
             crossOrigin="anonymous"
             src="//unpkg.com/react-grab/dist/index.global.js"

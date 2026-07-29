@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:browser": "playwright test",
     "test:auth": "node --experimental-strip-types --test tests/auth-hosts.test.ts",
+    "test:transactions": "node scripts/test-records-transactions.mjs",
+    "check": "npm run test:auth && npm run test:records && npm run test:ebay-sandbox && npm run test:transactions && npm run lint && tsc --noEmit --incremental false && npm run build -- --webpack && npm run test:browser",
     "test:records": "node --experimental-strip-types --test tests/records-domain.test.ts tests/inventory-route-state.test.ts tests/ebay-listings-route-state.test.ts tests/ebay-listings-workspace-query.test.ts tests/ebay-listing-context.test.ts tests/copy-ebay-exposure.test.ts tests/ebay-copy-exposure-presentation.test.ts tests/inventory-ebay-listing-summary-presentation.test.ts tests/ebay-copy-exposure-accessibility.test.ts tests/ebay-copy-listing-eligibility.test.ts tests/ebay-listing-lifecycle.test.ts tests/ebay-listing-backfill.test.ts tests/ebay-lot.test.ts tests/ebay-notification-api.test.ts tests/ebay-notification-event.test.ts tests/ebay-notification-status.test.ts tests/ebay-oauth-scopes.test.ts tests/database-error.test.ts tests/database-schema.test.ts tests/query-cache-persistence.test.ts tests/ebay-listing-timestamp.test.ts tests/expiring-single-flight-cache.test.ts tests/ebay-token-failure.test.ts tests/ebay-listing-reconciliation-reason.test.ts tests/ebay-listing-copy-link-attention.test.ts tests/ebay-order-line-reconciliation.test.ts",
     "test:ebay-sandbox": "node --test tests/ebay-sandbox-compatibility.test.mjs",
     "ebay:sandbox": "node scripts/ebay-sandbox-compatibility.mjs",
@@ -56,6 +59,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.0",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
