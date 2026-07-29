@@ -1,0 +1,3 @@
+CREATE UNIQUE INDEX "card_printings_owner_target_set_identity_unique" ON "card_printings" USING btree ("owner_id","target_id","normalized_set_name","normalized_set_code") WHERE "card_printings"."normalized_set_name" not in ('', 'unknown', 'unknown set')
+        and "card_printings"."normalized_set_code" not in ('', 'unknown', 'unknown code');--> statement-breakpoint
+CREATE UNIQUE INDEX "card_printings_owner_target_tcgplayer_identity_unique" ON "card_printings" USING btree ("owner_id","target_id","canonical_tcgplayer_url") WHERE nullif(btrim("card_printings"."canonical_tcgplayer_url"), '') is not null;
