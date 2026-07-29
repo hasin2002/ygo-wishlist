@@ -25,6 +25,7 @@ import {
   storeListingImageDraft,
   storeRemoteListingImageDraft,
 } from "@/server/ebay-listing-images";
+import { parseApprovedRemoteImageUrl } from "@/server/remote-images";
 import { readCardInventoryImage } from "@/server/card-inventory-images";
 import { getEbaySellerAccessToken } from "@/server/ebay-seller";
 import {
@@ -558,9 +559,10 @@ export async function uploadEbayImage(ownerId: string, file: File) {
 }
 
 export async function importEbayImage(ownerId: string, sourceUrl: string) {
-  const parsed = new URL(sourceUrl);
-  if (parsed.protocol !== "https:") {
-    throw new EbayListingError("Use an HTTPS catalogue image.");
+  try {
+    parseApprovedRemoteImageUrl(sourceUrl);
+  } catch {
+    throw new EbayListingError("Use an approved HTTPS catalogue image.");
   }
   const accessToken = await getEbaySellerAccessToken(ownerId);
   const response = await fetch(
