@@ -5,6 +5,7 @@ export const allowedAuthHosts = [
   localhostAuthHost,
   ngrokAuthHost,
   "ygo-wishlist.vercel.app",
+  ...(process.env.RECORDS_BROWSER_TEST === "1" ? ["127.0.0.1:3105"] : []),
 ] as const;
 
 export const dynamicAuthBaseURL = {

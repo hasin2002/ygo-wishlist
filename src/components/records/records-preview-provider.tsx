@@ -177,15 +177,9 @@ function searchLibraryCards(snapshot: RecordsSnapshot, query: string): LibraryCa
 const RecordsDataSourceContext = createContext<RecordsDataSource | null>(null);
 
 function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
-  const { data: session, isPending: sessionPending } = useSession();
   const [hydrated, setHydrated] = useState(false);
   const [previewSnapshot, setSnapshot] = useState<RecordsSnapshot | null>(null);
   const [drafts, setDrafts] = useState<RecordsDrafts>({});
-  const legacyCards = trpc.legacyCards.list.useQuery(
-    { query: "", status: "all" },
-    { enabled: Boolean(session), staleTime: 30_000 },
-  );
-
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       const stored = readJson<StoredPreview>(recordsPreviewStorageKey);
@@ -198,10 +192,12 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timeoutId);
   }, []);
 
-  const seededSnapshot = useMemo(() => {
-    if (!hydrated || sessionPending || (session && legacyCards.isPending)) return null;
-    return createPreviewSnapshot((legacyCards.data ?? []) as LegacyCard[]);
-  }, [hydrated, legacyCards.data, legacyCards.isPending, session, sessionPending]);
+  // Preview is intentionally self-contained: it must remain usable for UI
+  // review and browser tests even when no database or authentication service is
+  // available. Live Records continues to load the authenticated Library below.
+  const seededSnapshot = useMemo(() => (
+    hydrated ? createPreviewSnapshot([] as LegacyCard[]) : null
+  ), [hydrated]);
   const snapshot = previewSnapshot ?? seededSnapshot;
 
   useEffect(() => {
@@ -221,12 +217,8 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
 
   const value: RecordsDataSource = {
     mode: "preview",
-    status: !snapshot || sessionPending || (Boolean(session) && legacyCards.isPending)
-      ? "loading"
-      : legacyCards.error ? "error" : "ready",
-    errorMessage: legacyCards.error
-      ? "Existing Library cards could not be read. The sample preview is still available."
-      : null,
+    status: !snapshot ? "loading" : "ready",
+    errorMessage: null,
     snapshot: snapshot ?? emptySnapshot,
     drafts,
     resolveTcgplayerProduct,
@@ -260,7 +252,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     resetPreview: () => {
       window.sessionStorage.removeItem(recordsPreviewStorageKey);
       setDrafts({});
-      setSnapshot(createPreviewSnapshot((legacyCards.data ?? []) as LegacyCard[]));
+      setSnapshot(createPreviewSnapshot([]));
     },
   };
 
@@ -436,7 +428,7 @@ const loadingValue: RecordsDataSource = {
   clearDraft: () => undefined,
 };
 
-export function RecordsDataProvider({
+function RecordsLiveDataProvider({
   children,
   initiallyAuthenticated = false,
 }: {
@@ -444,12 +436,23 @@ export function RecordsDataProvider({
   initiallyAuthenticated?: boolean;
 }) {
   const { data: session, isPending } = useSession();
-  const previewReview = process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
-  if (previewReview) return <RecordsPreviewStateProvider>{children}</RecordsPreviewStateProvider>;
   if ((!initiallyAuthenticated && isPending) || (!initiallyAuthenticated && !session)) {
     return <RecordsDataSourceContext.Provider value={loadingValue}>{children}</RecordsDataSourceContext.Provider>;
   }
   return <RecordsLiveStateProvider>{children}</RecordsLiveStateProvider>;
+}
+
+export function RecordsDataProvider({
+  children,
+  initiallyAuthenticated = false,
+}: {
+  children: ReactNode;
+  initiallyAuthenticated?: boolean;
+}) {
+  if (process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1") {
+    return <RecordsPreviewStateProvider>{children}</RecordsPreviewStateProvider>;
+  }
+  return <RecordsLiveDataProvider initiallyAuthenticated={initiallyAuthenticated}>{children}</RecordsLiveDataProvider>;
 }
 
 // Kept as a compatibility export while call sites move to the source-neutral name.
