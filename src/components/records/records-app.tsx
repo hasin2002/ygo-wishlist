@@ -49,6 +49,7 @@ import { parsePoundsToPence } from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
+import { parseSaleReviewIntent } from "@/lib/navigation-intent";
 import {
   recordImagePreviewsFor,
   type RecordImagePreview,
@@ -920,6 +921,7 @@ function Overview() {
 
 function HistoryView() {
   const source = useRecordsDataSource();
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | RecordEntryType>("all");
   const [includeVoid, setIncludeVoid] = useState(true);
@@ -927,6 +929,10 @@ function HistoryView() {
   const [message, setMessage] = useState<string | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [changingRecordId, setChangingRecordId] = useState<string | null>(null);
+  const handledReviewId = useRef<string | null>(null);
+  const requestedReviewValue = searchParams.get("record");
+  const requestedReviewIntent = parseSaleReviewIntent(requestedReviewValue);
+  const requestedReviewId = requestedReviewIntent?.recordId ?? null;
   const records = source.snapshot.records.filter((record) => {
     if (type !== "all" && record.type !== type) return false;
     if (!includeVoid && record.status === "void") return false;
@@ -938,6 +944,32 @@ function HistoryView() {
   const currentPage = Math.min(page, pageCount);
   const visibleRecords = records.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const editingRecord = source.snapshot.records.find((record) => record.id === editingRecordId) ?? null;
+
+  useEffect(() => {
+    if (!requestedReviewValue || handledReviewId.current === requestedReviewValue) return;
+    handledReviewId.current = requestedReviewValue;
+    const timeoutId = window.setTimeout(() => {
+      if (!requestedReviewId) {
+        setMessage("That Sale is no longer available in this collection.");
+        return;
+      }
+      const requestedRecord = source.snapshot.records.find((record) => record.id === requestedReviewId);
+      if (!requestedRecord || requestedRecord.type !== "sale") {
+        setMessage("That Sale is no longer available in this collection.");
+        return;
+      }
+
+      // A linked sale is authoritative over the transient History controls. It
+      // may be outside the current page or excluded by an in-progress filter.
+      const recordIndex = source.snapshot.records.findIndex((record) => record.id === requestedRecord.id);
+      setQuery("");
+      setType("all");
+      setIncludeVoid(true);
+      setPage(Math.floor(Math.max(recordIndex, 0) / 15) + 1);
+      setEditingRecordId(requestedRecord.id);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [requestedReviewId, requestedReviewValue, source.snapshot.records]);
 
   async function toggleRecordStatus(record: RecordEntry) {
     setChangingRecordId(record.id);

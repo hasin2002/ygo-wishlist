@@ -14,6 +14,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { useInitialAuth } from "@/app/providers";
 import { useAppShell } from "@/components/app-shell";
 import { useSession } from "@/lib/auth-client";
+import { addTaskHref, currentNavigationHref } from "@/lib/navigation-intent";
 import { trpc } from "@/trpc/client";
 
 const addItems = [
@@ -32,6 +33,7 @@ function GlobalAddMenu() {
   const [open, setOpen] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState(0);
   const { data: session } = useSession();
+  const [origin, setOrigin] = useState<ReturnType<typeof currentNavigationHref>>(null);
   const ebayStatus = trpc.ebay.status.useQuery(undefined, {
     enabled: Boolean(session),
     staleTime: 30_000,
@@ -58,6 +60,13 @@ function GlobalAddMenu() {
   }
 
   function openMenu(focusIndex?: number) {
+    // Starting another task from inside an unfinished task must not turn that
+    // task into its own return destination. #52 remains responsible for the
+    // resulting draft conflict; workspace launches carry an origin instead.
+    const currentPathname = window.location.pathname;
+    setOrigin(currentPathname.startsWith("/records/new/") || currentPathname === "/wishlist/new"
+      ? null
+      : currentNavigationHref(currentPathname, new URLSearchParams(window.location.search)));
     setOpen(true);
     setActiveItemIndex(0);
     if (focusIndex !== undefined) focusMenuItem(focusIndex);
@@ -132,7 +141,8 @@ function GlobalAddMenu() {
                   : "Seller permission is required to create an eBay mixed lot.";
           const itemIndex = menuItemIndex++;
           const retryIndex = unavailable && ebayStatus.isError ? menuItemIndex++ : null;
-          return unavailable ? <div className="grid gap-1" key={item.href}><button aria-disabled="true" className="flex min-h-14 cursor-not-allowed items-center gap-3 rounded-md px-2 py-2 text-left opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" onClick={(event) => event.preventDefault()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-500"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-700">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500" role={ebayStatus.isError ? "alert" : "status"}>{reason}</span></span></button>{retryIndex !== null ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-xs font-bold text-rose-900" onClick={() => void ebayStatus.refetch()} ref={(element) => { menuItemRefs.current[retryIndex] = element; }} role="menuitem" tabIndex={retryIndex === activeItemIndex ? 0 : -1} type="button">Retry eBay check</button> : null}</div> : <Link className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50" href={item.href} key={item.href} onClick={() => closeMenu()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1}><span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-950">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span></span></Link>;
+          const href = addTaskHref(item.href, origin);
+          return unavailable ? <div className="grid gap-1" key={item.href}><button aria-disabled="true" className="flex min-h-14 cursor-not-allowed items-center gap-3 rounded-md px-2 py-2 text-left opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" onClick={(event) => event.preventDefault()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-500"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-700">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500" role={ebayStatus.isError ? "alert" : "status"}>{reason}</span></span></button>{retryIndex !== null ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-xs font-bold text-rose-900" onClick={() => void ebayStatus.refetch()} ref={(element) => { menuItemRefs.current[retryIndex] = element; }} role="menuitem" tabIndex={retryIndex === activeItemIndex ? 0 : -1} type="button">Retry eBay check</button> : null}</div> : <Link className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50" href={href} key={item.href} onClick={() => closeMenu()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1}><span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-950">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span></span></Link>;
           });
         })()}
       </div> : null}

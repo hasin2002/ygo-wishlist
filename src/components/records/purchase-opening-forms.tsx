@@ -44,6 +44,7 @@ import {
   type ProductIdentityDraft,
 } from "@/components/records/product-identity-editor";
 import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
+import { taskReturnHref } from "@/lib/navigation-intent";
 import {
   hasFields,
   isCardContentsDraft,
@@ -261,6 +262,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
   const source = useRecordsDataSource();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const returnHref = taskReturnHref(searchParams.get("origin"));
   const prefilledName = searchParams.get("cardName") ?? "";
   const prefilledTargetId = searchParams.get("targetId");
   const prefilledTarget = prefilledTargetId
@@ -395,7 +397,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
     <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
-      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.back()} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.replace(returnHref)} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
       <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
         if (!window.confirm("Discard this Purchase draft and start again?")) return;
         lifecycle.discard();
@@ -490,6 +492,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?:
   const source = useRecordsDataSource();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const returnHref = taskReturnHref(searchParams.get("origin"));
   const requested = searchParams.get("sealedId");
   const requestedUnit = source.snapshot.sealedUnits.find((unit) => unit.id === requested && unit.status === "sealed");
   const initialDraft = useMemo<OpeningDraft>(() => ({
@@ -626,7 +629,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?:
     <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
-      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.back()} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.replace(returnHref)} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
       <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
         if (!window.confirm("Discard this Pack Opening draft and start again?")) return;
         lifecycle.discard();

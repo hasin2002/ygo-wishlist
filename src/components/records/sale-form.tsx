@@ -42,6 +42,7 @@ import {
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { generatedSaleRecordName } from "@/lib/records/record-name";
 import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
+import { taskReturnHref } from "@/lib/navigation-intent";
 import { hasFields, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
 import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
 import type {
@@ -168,6 +169,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   const source = useRecordsDataSource();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const returnHref = taskReturnHref(searchParams.get("origin"));
   const requestedCopyId = searchParams.get("copyId");
   const initialDraft = useMemo(() => newSaleDraft(requestedCopyId), [requestedCopyId]);
   const launchIntent = useMemo(() => ({
@@ -375,7 +377,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
     <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
-      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.back()} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.replace(returnHref)} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
       <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
         if (!window.confirm("Discard this Sale draft and start again?")) return;
         lifecycle.discard();
