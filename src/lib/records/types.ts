@@ -322,7 +322,7 @@ export type RecordDetailsUpdate = {
   amountPence: number;
   amountKnown?: boolean;
   notes: string;
-  /** Confirms replacing reviewed unequal sealed-unit costs with an even split. */
+  /** Confirms a pre-opening replacement of reviewed unequal sealed-unit costs. */
   sealedAllocationOverrideConfirmed?: boolean;
 };
 export type CardAttentionUpdate = {

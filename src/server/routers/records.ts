@@ -374,7 +374,7 @@ async function syncSealedPurchaseAccounting(
   if (hasOverrides && overrideConfirmed === false) {
     const unchanged = amountKnown && currentTotal === amountPence;
     if (!unchanged) {
-      conflict("This Purchase has reviewed unequal unit costs. Confirm resetting them to an even split before changing the total.");
+      conflict("This Purchase has reviewed unequal unit costs. Confirm the new cost before any sealed unit opens.");
     }
   }
   if (hasOverrides && amountKnown && units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0) === amountPence && !overrideConfirmed) {
@@ -2046,16 +2046,17 @@ export const recordsRouter = router({
         const units = await tx.select().from(sealedUnits).where(and(
           eq(sealedUnits.ownerId, ownerId), eq(sealedUnits.acquiredLineId, line.id),
         )).for("update");
-        if (!units.length) conflict("The sealed item data is incomplete.");
+        if (
+          !units.length
+          || units.length !== line.quantity
+          || units.some((unit) => unit.acquiredRecordId !== record.id)
+        ) conflict("The sealed item data is incomplete.");
         const identityChanged = input.update.name !== line.name
           || Boolean(input.update.edition && units.some((unit) => unit.edition !== input.update.edition));
         if (units.some((unit) => unit.openedRecordId) && (
           identityChanged || input.update.quantity !== units.length
         )) {
           conflict(`“${line.name}” has already been opened, so its identity or quantity cannot change.`);
-        }
-        if (input.update.quantity !== units.length && units.some((unit) => unit.allocationMode === "override")) {
-          conflict("This Purchase has reviewed unequal unit costs. Confirm an even reallocation from Record details before changing its quantity.");
         }
         if (input.update.quantity < units.length) {
           const removeCount = units.length - input.update.quantity;

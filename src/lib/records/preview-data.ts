@@ -1096,6 +1096,7 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
   const nextAmountKnown = update.amountKnown ?? record.amountKnown !== false;
   if (record.type === "purchase" && !bulkLot) {
     const cardLines = record.lines.filter((line) => line.kind === "card");
+    const sealedLines = record.lines.filter((line) => line.kind === "sealed");
     if (cardLines.length) {
       const [line] = cardLines;
       const copies = next.copies.filter((copy) => copy.acquiredRecordId === record.id);
@@ -1108,6 +1109,36 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
         || copies.some((copy) => !line.entityIds.includes(copy.id))
       ) {
         return { next: snapshot, result: { ok: false, message: "Ordinary card Purchases need one complete card line before their cost can be changed." } satisfies DataSourceResult };
+      }
+    } else if (sealedLines.length) {
+      const [line] = sealedLines;
+      const unitIds = new Set(line?.entityIds);
+      const units = next.sealedUnits
+        .filter((unit) => unit.acquiredRecordId === record.id)
+        .sort((left, right) => left.id.localeCompare(right.id));
+      if (
+        record.lines.length !== 1
+        || sealedLines.length !== 1
+        || !line
+        || line.quantity < 1
+        || unitIds.size !== line.quantity
+        || units.length !== line.quantity
+        || units.some((unit) => !unitIds.has(unit.id))
+      ) {
+        return { next: snapshot, result: { ok: false, message: "This sealed Purchase needs one complete sealed source line before its cost can be changed." } satisfies DataSourceResult };
+      }
+      const currentKnown = units.every((unit) => unit.allocationPence !== null && unit.allocationPence !== undefined);
+      const currentTotal = units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0);
+      if (units.some((unit) => unit.openedRecordId) && (
+        currentKnown !== nextAmountKnown || (nextAmountKnown && currentTotal !== update.amountPence)
+      )) {
+        return { next: snapshot, result: { ok: false, message: "This Purchase has an opened sealed unit, so its exact historical allocation cannot be changed." } satisfies DataSourceResult };
+      }
+      const hasOverrides = units.some((unit) => unit.allocationMode === "override");
+      if (hasOverrides && !update.sealedAllocationOverrideConfirmed && (
+        !nextAmountKnown || currentTotal !== update.amountPence
+      )) {
+        return { next: snapshot, result: { ok: false, message: "This Purchase has reviewed unequal unit costs. Confirm the new cost before any sealed unit opens." } satisfies DataSourceResult };
       }
     } else if (record.lines.length !== 1) {
       return { next: snapshot, result: { ok: false, message: "A Purchase must have one allocation source before its cost can be changed." } satisfies DataSourceResult };
@@ -1159,21 +1190,15 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
     } else if (record.lines.length === 1 && record.lines[0]?.kind === "sealed") {
       const line = record.lines[0];
       const units = next.sealedUnits
-        .filter((unit) => line.entityIds.includes(unit.id))
+        .filter((unit) => unit.acquiredRecordId === record.id)
         .sort((left, right) => left.id.localeCompare(right.id));
       const hasOverrides = units.some((unit) => unit.allocationMode === "override");
       const currentTotal = units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0);
       const currentKnown = units.every((unit) => unit.allocationPence !== null && unit.allocationPence !== undefined);
-      if (units.some((unit) => unit.openedRecordId) && (
-        currentKnown !== (record.amountKnown !== false)
-        || (record.amountKnown !== false && currentTotal !== record.amountPence)
-      )) {
-        return { next: snapshot, result: { ok: false, message: "This Purchase has an opened sealed unit, so its exact historical allocation cannot be changed." } satisfies DataSourceResult };
-      }
       if (hasOverrides && !update.sealedAllocationOverrideConfirmed && (
         record.amountKnown === false || currentTotal !== record.amountPence
       )) {
-        return { next: snapshot, result: { ok: false, message: "This Purchase has reviewed unequal unit costs. Confirm resetting them to an even split before changing the total." } satisfies DataSourceResult };
+        return { next: snapshot, result: { ok: false, message: "This Purchase has reviewed unequal unit costs. Confirm the new cost before any sealed unit opens." } satisfies DataSourceResult };
       }
       if (!(hasOverrides && !update.sealedAllocationOverrideConfirmed && currentTotal === record.amountPence)) {
         const { allocations } = sealedPurchaseUnitAllocations({
@@ -1509,13 +1534,21 @@ export function updateRecordLine(snapshot: RecordsSnapshot, recordId: string, li
     return { next: snapshot, result: { ok: false, message: "Add an item name and a quantity of at least one." } satisfies DataSourceResult };
   }
   if (line.kind === "sealed") {
-    const units = next.sealedUnits.filter((unit) => line.entityIds.includes(unit.id));
+    const unitIds = new Set(line.entityIds);
+    const units = next.sealedUnits.filter((unit) => unit.acquiredRecordId === record.id && unitIds.has(unit.id));
+    if (
+      unitIds.size !== line.quantity
+      || units.length !== line.quantity
+      || units.some((unit) => !unitIds.has(unit.id))
+    ) {
+      return { next: snapshot, result: { ok: false, message: "The sealed item data is incomplete." } satisfies DataSourceResult };
+    }
     if (units.some((unit) => unit.openedRecordId) && (
       update.name.trim() !== line.name
-      || update.quantity < line.quantity
+      || update.quantity !== line.quantity
       || Boolean(update.edition && units.some((unit) => unit.edition !== update.edition))
     )) {
-      return { next: snapshot, result: { ok: false, message: `“${line.name}” has already been opened, so its identity or quantity cannot be reduced.` } satisfies DataSourceResult };
+      return { next: snapshot, result: { ok: false, message: `“${line.name}” has already been opened, so its identity or quantity cannot change.` } satisfies DataSourceResult };
     }
     let ids = [...line.entityIds];
     if (update.quantity < ids.length) {
@@ -1538,6 +1571,21 @@ export function updateRecordLine(snapshot: RecordsSnapshot, recordId: string, li
       if (update.edition) unit.edition = update.edition;
     }
     line.entityIds = ids;
+    if (update.quantity !== line.quantity) {
+      const allUnits = next.sealedUnits
+        .filter((unit) => unit.acquiredRecordId === record.id && ids.includes(unit.id))
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const { allocations } = sealedPurchaseUnitAllocations({
+        amountKnown: record.amountKnown !== false,
+        amountPence: record.amountPence,
+        unitCount: allUnits.length,
+      });
+      for (const [index, unit] of allUnits.entries()) {
+        unit.allocationPence = allocations[index]!;
+        unit.allocationMode = "equal";
+      }
+      line.allocationPence = record.amountKnown === false ? null : record.amountPence;
+    }
   } else if (line.kind === "supply") {
     const supplies = next.supplies.filter((item) => line.entityIds.includes(item.id));
     for (const supply of supplies) {

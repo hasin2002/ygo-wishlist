@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import pg from "pg";
+import { reviewedSealedAllocation } from "./lib/sealed-unit-cost-allocation-reconciliation.mjs";
 
 const apply = process.argv.includes("--apply");
 const confirmation = process.argv.includes("--confirm-reviewed-sealed-unit-plan");
@@ -17,6 +18,13 @@ try {
   } else {
     const plan = JSON.parse(fs.readFileSync(planArgument.slice("--reviewed-plan=".length), "utf8"));
     if (!Array.isArray(plan.allocations)) throw new Error("Reviewed plan must contain an allocations array.");
+    const plannedPurchases = new Set();
+    for (const item of plan.allocations) {
+      if (!item || typeof item !== "object" || typeof item.ownerId !== "string" || typeof item.recordId !== "string") continue;
+      const key = `${item.ownerId}\u0000${item.recordId}`;
+      if (plannedPurchases.has(key)) throw new Error(`Reviewed plan names Purchase ${item.recordId} more than once.`);
+      plannedPurchases.add(key);
+    }
     let applied = 0;
     await pool.query("begin");
     try {
@@ -25,30 +33,21 @@ try {
           throw new Error("Every reviewed plan entry needs ownerId, recordId, and units.");
         }
         const { rows: recordRows } = await pool.query(
-          "select amount_known, amount_pence from record_entries where id = $1 and owner_id = $2 for update",
+          "select type, amount_known, amount_pence from record_entries where id = $1 and owner_id = $2 for update",
           [item.recordId, item.ownerId],
         );
         if (recordRows.length !== 1) throw new Error(`Purchase ${item.recordId} was not found.`);
-        const { rows: units } = await pool.query(
-          "select id, acquired_line_id, opened_record_id, allocation_index, allocation_pence, allocation_mode from sealed_units where acquired_record_id = $1 and owner_id = $2 order by id for update",
+        const { rows: lines } = await pool.query(
+          "select id, owner_id, record_id, kind, quantity from record_lines where record_id = $1 and owner_id = $2 order by position for update",
           [item.recordId, item.ownerId],
         );
-        const supplied = new Map(item.units.map((unit) => [unit.id, unit]));
-        if (supplied.size !== units.length || units.some((unit) => !supplied.has(unit.id))) {
-          throw new Error(`Reviewed plan for ${item.recordId} must name every exact sealed unit.`);
-        }
-        const known = recordRows[0].amount_known;
-        const total = known ? recordRows[0].amount_pence : 0;
-        const values = units.map((unit, index) => {
-          const suppliedUnit = supplied.get(unit.id);
-          const allocationPence = suppliedUnit?.allocationPence;
-          if (known && (!Number.isInteger(allocationPence) || allocationPence < 0)) throw new Error(`Known Purchase ${item.recordId} needs a non-negative whole-pence cost for ${unit.id}.`);
-          if (!known && allocationPence !== null) throw new Error(`Unknown Purchase ${item.recordId} must keep ${unit.id} unknown.`);
-          return { id: unit.id, index, allocationPence: known ? allocationPence : null };
+        const { rows: units } = await pool.query(
+          "select id, owner_id, acquired_record_id, acquired_line_id, opened_record_id, allocation_index, allocation_pence, allocation_mode from sealed_units where acquired_record_id = $1 and owner_id = $2 order by id for update",
+          [item.recordId, item.ownerId],
+        );
+        const { sourceLineId, known, total, values } = reviewedSealedAllocation({
+          item, record: recordRows[0], lines, units,
         });
-        if (known && values.reduce((sum, value) => sum + value.allocationPence, 0) !== total) {
-          throw new Error(`Reviewed allocations for ${item.recordId} do not equal its Purchase total.`);
-        }
         for (const value of values) {
           await pool.query(
             "update sealed_units set allocation_index = $1, allocation_pence = $2, allocation_mode = 'override', updated_at = now() where id = $3 and owner_id = $4 and (allocation_index is distinct from $1 or allocation_pence is distinct from $2 or allocation_mode is distinct from 'override')",
@@ -56,8 +55,8 @@ try {
           );
         }
         await pool.query(
-          "update record_lines set allocation_pence = $1, updated_at = now() where id = (select acquired_line_id from sealed_units where id = $2) and owner_id = $3",
-          [known ? total : null, units[0]?.id, item.ownerId],
+          "update record_lines set allocation_pence = $1, updated_at = now() where id = $2 and record_id = $3 and owner_id = $4 and kind = 'sealed'",
+          [known ? total : null, sourceLineId, item.recordId, item.ownerId],
         );
         applied += 1;
       }
