@@ -16,11 +16,13 @@ import {
 } from "lucide-react";
 import {
   type MouseEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { AppHeader } from "@/components/app-header";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
@@ -28,6 +30,7 @@ import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 import { useClientReady } from "@/lib/use-client-ready";
+import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import {
   collectionRefreshFailureMessage,
   useCollectionChange,
@@ -306,7 +309,7 @@ function Pager({
     <div className="mt-3 flex items-center justify-between border-t border-zinc-200 pt-3">
       <button
         aria-label={`Previous ${label} page`}
-        className="inline-flex size-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
+        className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
         disabled={currentPage === 1}
         onClick={() => onChange(Math.max(1, currentPage - 1))}
         title={`Previous ${label} page`}
@@ -319,7 +322,7 @@ function Pager({
       </p>
       <button
         aria-label={`Next ${label} page`}
-        className="inline-flex size-8 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
+        className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
         disabled={currentPage === pageCount}
         onClick={() => onChange(Math.min(pageCount, currentPage + 1))}
         title={`Next ${label} page`}
@@ -433,21 +436,23 @@ export function WheelApp() {
     return () => window.clearTimeout(timeoutId);
   }, [resetStatus]);
 
-  useEffect(() => {
-    if (!selectedCardModal) {
-      return;
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setSelectedCardModal(null);
-        setTilt({ x: 0, y: 0 });
-      }
-    }
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedCardModal]);
+  const closeResetDialog = useCallback(() => {
+    if (resetting) return;
+    setResetError(null);
+    setResetOpen(false);
+  }, [resetting]);
+  const closeSelectedCardDialog = useCallback(() => {
+    setSelectedCardModal(null);
+    setTilt({ x: 0, y: 0 });
+  }, []);
+  const resetDialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: resetOpen,
+    onClose: closeResetDialog,
+  });
+  const selectedCardDialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: Boolean(selectedCardModal),
+    onClose: closeSelectedCardDialog,
+  });
 
   async function spin() {
     if (spinActionRef.current || resetActionRef.current || busy || !filteredActive.length) {
@@ -598,7 +603,7 @@ export function WheelApp() {
             <div className="flex items-center gap-2">
               <button
                 aria-label="Reset wheel"
-                className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
                 disabled={busy}
                 onClick={() => {
                   setResetError(null);
@@ -990,15 +995,19 @@ export function WheelApp() {
         </section>
       </div>
 
-      {resetOpen ? (
+      {resetOpen && typeof document !== "undefined" ? createPortal(
         <div
           aria-busy={resetting}
+          aria-describedby="reset-wheel-description"
           aria-labelledby="reset-wheel-title"
           aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeResetDialog();
+          }}
           role="alertdialog"
         >
-          <div className="w-full max-w-sm rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl" ref={resetDialogRef} tabIndex={-1}>
             <p
               className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]"
               id="reset-wheel-title"
@@ -1008,7 +1017,7 @@ export function WheelApp() {
             <h2 className="mt-2 text-2xl font-bold tracking-normal">
               Put every wishlist card back?
             </h2>
-            <p className="mt-2 text-sm font-medium leading-6 text-zinc-600">
+            <p className="mt-2 text-sm font-medium leading-6 text-zinc-600" id="reset-wheel-description">
               This clears the picked history and rebuilds the wheel from your
               current wishlist cards.
             </p>
@@ -1024,10 +1033,7 @@ export function WheelApp() {
               <button
                 className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-60"
                 disabled={resetting}
-                onClick={() => {
-                  setResetError(null);
-                  setResetOpen(false);
-                }}
+                onClick={closeResetDialog}
                 type="button"
               >
                 Cancel
@@ -1050,23 +1056,25 @@ export function WheelApp() {
             </div>
           </div>
         </div>
-      ) : null}
+      , document.body) : null}
 
-      {selectedCardModal ? (
+      {selectedCardModal && typeof document !== "undefined" ? createPortal(
         <div
+          aria-describedby="selected-card-description"
           aria-labelledby="selected-card-title"
           aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/70 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeSelectedCardDialog();
+          }}
           role="dialog"
         >
-          <div className="relative w-full max-w-md text-center">
+          <div className="relative max-h-[88dvh] w-full max-w-md overflow-y-auto text-center" ref={selectedCardDialogRef} tabIndex={-1}>
+            <p className="sr-only" id="selected-card-description">Review the selected wheel card or continue to buy it.</p>
             <button
               aria-label="Close selected card"
-              className="absolute right-0 top-0 z-10 grid size-9 translate-x-3 -translate-y-3 place-items-center rounded-md border border-zinc-700 bg-zinc-950/80 text-zinc-300 shadow-sm transition hover:border-white hover:text-white"
-              onClick={() => {
-                setSelectedCardModal(null);
-                setTilt({ x: 0, y: 0 });
-              }}
+              className="absolute right-0 top-0 z-10 grid size-11 translate-x-3 -translate-y-3 place-items-center rounded-md border border-zinc-700 bg-zinc-950/80 text-zinc-300 shadow-sm transition hover:border-white hover:text-white"
+              onClick={closeSelectedCardDialog}
               title="Close selected card"
               type="button"
             >
@@ -1124,7 +1132,7 @@ export function WheelApp() {
             </div>
           </div>
         </div>
-      ) : null}
+      , document.body) : null}
 
     </main>
   );

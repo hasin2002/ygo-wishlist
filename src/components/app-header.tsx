@@ -31,6 +31,8 @@ function GlobalAddMenu() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState(0);
+  const [retryingEbayCheck, setRetryingEbayCheck] = useState(false);
+  const retryingEbayCheckRef = useRef(false);
   const { data: session } = useSession();
   const ebayStatus = trpc.ebay.status.useQuery(undefined, {
     enabled: Boolean(session),
@@ -39,7 +41,19 @@ function GlobalAddMenu() {
   const ebayCapability = ebayStatus.data?.capability;
   const recordsPreview = process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
   function menuItems() {
-    return menuItemRefs.current.filter((item): item is HTMLElement => item !== null);
+    return menuItemRefs.current.filter((item): item is HTMLElement => item !== null && !item.matches(":disabled"));
+  }
+
+  async function retryEbayCheck() {
+    if (retryingEbayCheckRef.current) return;
+    retryingEbayCheckRef.current = true;
+    setRetryingEbayCheck(true);
+    try {
+      await ebayStatus.refetch();
+    } finally {
+      retryingEbayCheckRef.current = false;
+      setRetryingEbayCheck(false);
+    }
   }
 
   function focusMenuItem(index: number) {
@@ -112,7 +126,7 @@ function GlobalAddMenu() {
   }, [open]);
   return (
     <div className="relative" ref={wrapperRef}>
-      <button aria-controls={menuId} aria-expanded={open} aria-haspopup="menu" className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826]" onClick={() => open ? closeMenu() : openMenu()} onKeyDown={onTriggerKeyDown} ref={triggerRef} type="button"><Plus aria-hidden className="size-4" /><span className="sr-only">Add</span><span aria-hidden className="hidden sm:inline">Add</span></button>
+      <button aria-controls={menuId} aria-expanded={open} aria-haspopup="menu" className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 active:scale-[0.98]" onClick={() => open ? closeMenu() : openMenu()} onKeyDown={onTriggerKeyDown} ref={triggerRef} type="button"><Plus aria-hidden className="size-4" /><span className="sr-only">Add</span><span aria-hidden className="hidden sm:inline">Add</span></button>
       {open ? <div aria-label="Add an activity" className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-zinc-300 bg-white p-2 text-left shadow-xl" id={menuId} onKeyDown={onMenuKeyDown} role="menu">
         <p className="px-2 pb-2 pt-1 text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">What happened?</p>
         {(() => {
@@ -132,7 +146,7 @@ function GlobalAddMenu() {
                   : "Seller permission is required to create an eBay mixed lot.";
           const itemIndex = menuItemIndex++;
           const retryIndex = unavailable && ebayStatus.isError ? menuItemIndex++ : null;
-          return unavailable ? <div className="grid gap-1" key={item.href}><button aria-disabled="true" className="flex min-h-14 cursor-not-allowed items-center gap-3 rounded-md px-2 py-2 text-left opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" onClick={(event) => event.preventDefault()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-500"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-700">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500" role={ebayStatus.isError ? "alert" : "status"}>{reason}</span></span></button>{retryIndex !== null ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-xs font-bold text-rose-900" onClick={() => void ebayStatus.refetch()} ref={(element) => { menuItemRefs.current[retryIndex] = element; }} role="menuitem" tabIndex={retryIndex === activeItemIndex ? 0 : -1} type="button">Retry eBay check</button> : null}</div> : <Link className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50" href={item.href} key={item.href} onClick={() => closeMenu()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1}><span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-950">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span></span></Link>;
+          return unavailable ? <div className="grid gap-1" key={item.href}><button aria-disabled="true" className="flex min-h-14 cursor-not-allowed items-center gap-3 rounded-md px-2 py-2 text-left opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" onClick={(event) => event.preventDefault()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-500"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-700">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500" role={ebayStatus.isError ? "alert" : "status"}>{reason}</span></span></button>{retryIndex !== null ? <button aria-busy={retryingEbayCheck} className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-xs font-bold text-rose-900 transition hover:border-rose-900 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={retryingEbayCheck} onClick={() => void retryEbayCheck()} ref={(element) => { menuItemRefs.current[retryIndex] = element; }} role="menuitem" tabIndex={retryIndex === activeItemIndex ? 0 : -1} type="button">{retryingEbayCheck ? "Checking eBay…" : "Retry eBay check"}</button> : null}</div> : <Link className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 active:scale-[0.99]" href={item.href} key={item.href} onClick={() => closeMenu()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1}><span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-950">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span></span></Link>;
           });
         })()}
       </div> : null}

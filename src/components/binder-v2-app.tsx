@@ -15,17 +15,20 @@ import {
   type DragEvent,
   type FormEvent,
   type MouseEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { PageFlip } from "page-flip";
 import { AppHeader } from "@/components/app-header";
 import { useInitialAuth } from "@/app/providers";
 import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
+import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import {
   rarityAbbreviation,
 } from "@/lib/rarity-abbreviations";
@@ -485,6 +488,22 @@ export function BinderV2App() {
     clearCard.isPending ||
     clearAll.isPending ||
     swapPages.isPending;
+  const closeSwapDialog = useCallback(() => {
+    if (swapPages.isPending) return;
+    setSwapModalOpen(false);
+  }, [swapPages.isPending]);
+  const closeResetDialog = useCallback(() => {
+    if (clearAll.isPending) return;
+    setResetModalOpen(false);
+  }, [clearAll.isPending]);
+  const swapDialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: swapModalOpen,
+    onClose: closeSwapDialog,
+  });
+  const resetDialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: resetModalOpen,
+    onClose: closeResetDialog,
+  });
 
   useEffect(() => {
     function updateViewportMode() {
@@ -937,7 +956,7 @@ export function BinderV2App() {
             <div className="flex items-center gap-2">
               <button
                 aria-label="Clear binder"
-                className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-50"
                 disabled={binderBusy}
                 onClick={() => setResetModalOpen(true)}
                 title="Clear binder"
@@ -959,7 +978,7 @@ export function BinderV2App() {
             <div className="mb-3 flex items-center justify-between gap-3">
               <button
                 aria-label={currentPage <= 0 ? "Close binder" : "Previous pages"}
-                className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
                 disabled={closed}
                 onClick={previousPage}
                 title={currentPage <= 0 ? "Close binder" : "Previous pages"}
@@ -1018,7 +1037,7 @@ export function BinderV2App() {
               </div>
               <button
                 aria-label={closed ? "Open binder" : "Next pages"}
-                className="inline-flex size-10 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
                 disabled={!closed && currentPage >= pageCount - 1}
                 onClick={nextPage}
                 title={closed ? "Open binder" : "Next pages"}
@@ -1340,7 +1359,7 @@ export function BinderV2App() {
             <div className="mt-3 flex items-center justify-between border-t border-zinc-200 pt-3">
               <button
                 aria-label="Previous staging page"
-                className="inline-flex size-9 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
                 disabled={currentStagingPage === 1}
                 onClick={() =>
                   setStagingPage((current) => Math.max(1, current - 1))
@@ -1355,7 +1374,7 @@ export function BinderV2App() {
               </p>
               <button
                 aria-label="Next staging page"
-                className="inline-flex size-9 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
+                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40"
                 disabled={currentStagingPage === stagingPageCount}
                 onClick={() =>
                   setStagingPage((current) =>
@@ -1373,14 +1392,18 @@ export function BinderV2App() {
         </section>
       </div>
 
-      {swapModalOpen ? (
+      {swapModalOpen && typeof document !== "undefined" ? createPortal(
         <div
+          aria-describedby="swap-pages-description"
           aria-labelledby="swap-pages-title"
           aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeSwapDialog();
+          }}
           role="dialog"
         >
-          <div className="w-full max-w-xl rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl">
+          <div className="max-h-[88dvh] w-full max-w-xl overflow-y-auto rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl" ref={swapDialogRef} tabIndex={-1}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
@@ -1392,14 +1415,14 @@ export function BinderV2App() {
                 >
                   Swap whole pages
                 </h2>
-                <p className="mt-1 text-sm font-medium leading-6 text-zinc-600">
+                <p className="mt-1 text-sm font-medium leading-6 text-zinc-600" id="swap-pages-description">
                   Exchange every card between two binder pages.
                 </p>
               </div>
               <button
                 aria-label="Close page swap"
                 className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
-                onClick={() => setSwapModalOpen(false)}
+                onClick={closeSwapDialog}
                 type="button"
               >
                 <X className="size-4" />
@@ -1478,7 +1501,7 @@ export function BinderV2App() {
               <div className="flex justify-end gap-2 border-t border-zinc-200 pt-4">
                 <button
                   className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-                  onClick={() => setSwapModalOpen(false)}
+                  onClick={closeSwapDialog}
                   type="button"
                 >
                   Cancel
@@ -1495,16 +1518,20 @@ export function BinderV2App() {
             </form>
           </div>
         </div>
-      ) : null}
+      , document.body) : null}
 
-      {resetModalOpen ? (
+      {resetModalOpen && typeof document !== "undefined" ? createPortal(
         <div
+          aria-describedby="reset-binder-description"
           aria-labelledby="reset-binder-title"
           aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeResetDialog();
+          }}
           role="alertdialog"
         >
-          <div className="w-full max-w-sm rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl">
+          <div className="max-h-[88dvh] w-full max-w-sm overflow-y-auto rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl" ref={resetDialogRef} tabIndex={-1}>
             <p
               className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]"
               id="reset-binder-title"
@@ -1514,14 +1541,14 @@ export function BinderV2App() {
             <h2 className="mt-2 text-2xl font-bold tracking-normal">
               Clear all slots?
             </h2>
-            <p className="mt-2 text-sm font-medium leading-6 text-zinc-600">
+            <p className="mt-2 text-sm font-medium leading-6 text-zinc-600" id="reset-binder-description">
               This removes every card from the binder layout. Your tracked cards
               stay in the wishlist and owned lists.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-                onClick={() => setResetModalOpen(false)}
+                onClick={closeResetDialog}
                 type="button"
               >
                 Cancel
@@ -1537,7 +1564,7 @@ export function BinderV2App() {
             </div>
           </div>
         </div>
-      ) : null}
+      , document.body) : null}
     </main>
   );
 }

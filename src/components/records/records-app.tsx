@@ -15,7 +15,6 @@ import {
   CircleDollarSign,
   Clock3,
   History,
-  Info,
   PackageCheck,
   PackageOpen,
   Pencil,
@@ -33,6 +32,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   CardContentsEditor,
   type CardContentsDraft,
@@ -47,6 +47,8 @@ import { EbayListingAction } from "@/components/records/ebay-listing-action";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
 import { parsePoundsToPence } from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
+import { UnavailableAction } from "@/components/unavailable-action";
+import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import {
@@ -1383,13 +1385,7 @@ function InventoryCardDetailContent({
                       {selectedExposure ? <EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} exposure={selectedExposure} printing={selectedDetail.printing} target={target} /> : null}
                       {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? selectedCopyRemoval.available ? (
                         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 sm:w-auto" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
-                      ) : (
-                        <div className="group relative min-w-0 w-full sm:w-auto">
-                          <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 pr-10 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
-                          <button aria-describedby={`remove-copy-reason-${selectedDetail.copy.id}`} aria-label="Why Remove Copy is unavailable" className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-700 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" type="button"><Info aria-hidden="true" className="size-3.5" /></button>
-                          <span className="pointer-events-none absolute right-0 top-full z-20 mt-2 w-72 rounded-md border border-zinc-300 bg-zinc-950 px-3 py-2 text-xs font-semibold leading-5 text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100" id={`remove-copy-reason-${selectedDetail.copy.id}`} role="tooltip">{selectedCopyRemoval.reason}</span>
-                        </div>
-                      ) : null}
+                      ) : <UnavailableAction icon={Trash2} label="Remove Copy" reason={selectedCopyRemoval.reason ?? "This Copy cannot be removed."} /> : null}
                     </div>
                   </header>
 
@@ -1457,6 +1453,10 @@ function InventoryFilterModal({
   onUpdate: (update: Partial<InventoryListState>) => void;
   rarityOptions: string[];
 }) {
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const [raritySearch, setRaritySearch] = useState("");
   const visibleRarities = useMemo(() => {
     const search = raritySearch.trim().toLocaleLowerCase("en-GB");
@@ -1473,16 +1473,18 @@ function InventoryFilterModal({
     });
   }
 
-  return (
-    <div aria-labelledby="inventory-filter-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6" role="dialog">
-      <section className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-xl">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="inventory-filter-description" aria-labelledby="inventory-filter-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <section className="flex max-h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-xl" ref={dialogRef} tabIndex={-1}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">Filters</p>
             <h2 className="mt-1 text-xl font-bold" id="inventory-filter-title">Refine inventory</h2>
-            <p className="mt-1 text-sm font-medium text-zinc-500">{activeFilterCount ? `${activeFilterCount} active` : "No filters active"} <span className="text-zinc-400">· narrow down your collection</span></p>
+            <p className="mt-1 text-sm font-medium text-zinc-500" id="inventory-filter-description">{activeFilterCount ? `${activeFilterCount} active` : "No filters active"} <span className="text-zinc-400">· narrow down your collection</span></p>
           </div>
-          <button aria-label="Close filters" className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={onClose} type="button"><X className="size-4" /></button>
+          <button aria-label="Close filters" className="grid size-11 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={onClose} type="button"><X className="size-4" /></button>
         </div>
 
         <div className="grid gap-4 overflow-auto p-4">
@@ -1520,9 +1522,10 @@ function InventoryFilterModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-white p-4"><button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40" disabled={!activeFilterCount} onClick={onClear} type="button">Clear filters</button><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800" onClick={onClose} type="button">Done</button></div>
+        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-white p-4"><button className="min-h-11 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40" disabled={!activeFilterCount} onClick={onClear} type="button">Clear filters</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800" onClick={onClose} type="button">Done</button></div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
