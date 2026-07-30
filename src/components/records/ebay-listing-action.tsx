@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -27,6 +27,9 @@ import {
 } from "@/lib/ebay-listing-options";
 import { resolveEbayListingContext } from "@/lib/records/ebay-listing-context";
 import { ebaySoldListingsUrl } from "@/lib/records/ebay-sold-listings";
+import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
+import { hasFields, isOneOf, isRecord, isString, isStringRecord } from "@/lib/records/form-draft-validators";
+import { individualListingDraftResumeHref } from "@/lib/records/individual-listing-draft";
 import { ebaySettingsHref } from "@/lib/ebay-connection-state";
 import {
   inventoryCardDetailHref,
@@ -43,6 +46,7 @@ import {
 } from "@/lib/records/types";
 import { copyShortReference } from "@/lib/records/copy-display";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { DraftConflictDialog } from "@/components/records/form-draft-ui";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
 import { ebayOffersDialogEventName } from "@/components/records/ebay-copy-exposure";
 import {
@@ -50,6 +54,10 @@ import {
 } from "@/components/records/ebay-listing-status";
 import { toEbayListingTimestamp } from "@/components/records/ebay-listing-timestamp";
 import { trpc } from "@/trpc/client";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
 
 type ListingPhoto = { archiveKey: string; ebayUrl: string; previewUrl: string };
 type InventoryPhoto = { key: string; previewUrl: string };
@@ -88,7 +96,6 @@ type EbayVerification = {
 
 const categoryId = ebayCardCategory.id;
 const defaultDeliveryService = ebayDeliveryServices[0];
-const draftVersion = 1;
 const fieldIds: Record<FieldKey, string> = {
   title: "ebay-title",
   price: "ebay-price",
@@ -188,6 +195,36 @@ function initialForm(target: WishlistTarget, printing: CardPrinting, copy: CardC
   };
 }
 
+function isListingPhoto(value: unknown): value is ListingPhoto {
+  return isRecord(value)
+    && isString(value.archiveKey)
+    && isString(value.ebayUrl)
+    && isString(value.previewUrl);
+}
+
+function isListingForm(value: unknown): value is ListingForm {
+  if (!isRecord(value) || !hasFields(value, [
+    "categoryId", "cardConditionDescriptorValueId", "description", "dispatchTimeMax", "images", "itemSpecifics",
+    "language", "location", "postalCode", "price", "shippingCost", "shippingService", "title",
+  ])) return false;
+  const specifics = value.itemSpecifics;
+  return value.categoryId === categoryId
+    && isOneOf(value.cardConditionDescriptorValueId, ["400010", "400015", "400016", "400017"] as const)
+    && isString(value.description)
+    && isString(value.dispatchTimeMax)
+    && Array.isArray(value.images)
+    && value.images.every(isListingPhoto)
+    && isStringRecord(specifics)
+    && ["cardNumber", "cardSize", "features", "game", "manufacturer", "rarity", "setName"].every((field) => field in specifics)
+    && isOneOf(value.language, ebayListingLanguages)
+    && isString(value.location)
+    && isString(value.postalCode)
+    && isString(value.price)
+    && isString(value.shippingCost)
+    && isOneOf(value.shippingService, ebayDeliveryServices.map((service) => service.code))
+    && isString(value.title);
+}
+
 function validateForm(form: ListingForm): FieldErrors {
   const errors: FieldErrors = {};
   const price = pence(form.price);
@@ -265,6 +302,10 @@ export function EbayListingAction(props: {
   const { copy, enabled = true, exposure, target } = props;
   const { data: session } = useSession();
   const searchParams = useSearchParams();
+  const ebayStatus = trpc.ebay.status.useQuery(undefined, {
+    enabled: enabled && Boolean(session),
+    staleTime: 30_000,
+  });
   if (!enabled) {
     return (
       <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled title="Selling is available from a saved Copy in live records" type="button">
@@ -273,7 +314,31 @@ export function EbayListingAction(props: {
       </button>
     );
   }
-  if (session?.user.role !== "admin") return null;
+  if (ebayStatus.isError) {
+    return (
+      <div className="grid min-w-0 w-full gap-2 sm:w-auto" role="alert">
+        <p className="break-words text-xs font-semibold leading-5 text-rose-800">eBay readiness could not be checked.</p>
+        <button className="inline-flex min-h-11 items-center justify-center rounded-md border border-rose-300 bg-white px-3 text-sm font-bold text-rose-900" onClick={() => void ebayStatus.refetch()} type="button">Retry eBay check</button>
+      </div>
+    );
+  }
+  const capability = ebayStatus.data?.capability;
+  if (!capability?.ebay.allowed) {
+    const reason = ebayStatus.isPending
+      ? "Checking whether eBay selling is available…"
+      : capability
+        ? `${capability.ebay.message} ${capability.ebay.remedy}`
+        : "Sign in with seller permission to manage eBay listings.";
+    return (
+      <div className="grid min-w-0 w-full gap-2 sm:w-auto">
+        <button aria-describedby={`ebay-action-reason-${copy.id}`} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled type="button">
+          <Send aria-hidden="true" className="size-4" />
+          Sell on eBay unavailable
+        </button>
+        <p className="break-words text-xs font-semibold leading-5 text-zinc-600" id={`ebay-action-reason-${copy.id}`} role="status">{reason}</p>
+      </div>
+    );
+  }
   const blocked = exposure.action.disposition === "blocked";
   const reviewing = exposure.action.disposition === "review";
   const needsTakedown = exposure.action.code === "needs_takedown";
@@ -337,21 +402,21 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
     () => resolveEbayListingContext(source.snapshot, targetId, copyId),
     [copyId, source.snapshot, targetId],
   );
-  const liveAdmin = source.mode === "live" && session?.user.role === "admin";
-  const utils = trpc.useUtils();
-  const status = trpc.ebay.status.useQuery(undefined, { enabled: liveAdmin });
-  const eligibility = trpc.ebay.eligibility.useQuery({ copyId }, { enabled: liveAdmin });
+  const canCheckEbayCapability = source.mode === "live" && Boolean(session);
+  const collectionChanged = useCollectionChange();
+  const status = trpc.ebay.status.useQuery(undefined, { enabled: canCheckEbayCapability });
+  const eligibility = trpc.ebay.eligibility.useQuery({ copyId }, { enabled: status.data?.capability.ebay.allowed === true });
 
   async function refreshEbayStatus() {
     await eligibility.refetch();
-    await utils.records.snapshot.invalidate();
+    await collectionChanged("listing");
   }
 
   if (source.status === "loading" || sessionPending) {
     return <div className="grid min-h-72 place-items-center rounded-xl border border-zinc-300 bg-white font-bold" role="status">Preparing listing workspace…</div>;
   }
   if (source.status === "error") {
-    return <StatusCard title="Records could not be loaded"><p>{source.errorMessage || "Refresh and try again."}</p></StatusCard>;
+    return <StatusCard title="Records could not be loaded"><p>{source.errorMessage || "Nothing has been changed. Refresh and try again."}</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => void source.refresh()} type="button">Refresh Records</button></StatusCard>;
   }
   if (!context.ok) {
     return <StatusCard title="This Copy cannot be listed"><p>{context.message}</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href={backHref}>Back to inventory</Link></StatusCard>;
@@ -359,17 +424,27 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
   if (source.mode !== "live") {
     return <StatusCard title="Listing is unavailable in preview mode"><p>Switch to live Records data to create an eBay listing.</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href={backHref}>Back to inventory</Link></StatusCard>;
   }
-  if (session?.user.role !== "admin") {
-    return <StatusCard title="Admin access required"><p>Only an administrator can create an eBay listing.</p></StatusCard>;
+  if (!session) {
+    return <StatusCard title="Sign in to continue"><p>Your signed-in owner session is required before an eBay listing draft can be opened.</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href="/login">Sign in</Link></StatusCard>;
+  }
+  if (status.isPending) {
+    return <div className="grid min-h-72 place-items-center rounded-xl border border-zinc-300 bg-white font-bold" role="status">Checking eBay readiness…</div>;
+  }
+  if (status.isError || !status.data) {
+    return <StatusCard title="eBay readiness could not be checked"><p>Check your connection and try again.</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => void status.refetch()} type="button">Retry eBay check</button></StatusCard>;
+  }
+  if (!status.data?.capability.ebay.allowed) {
+    const capability = status.data?.capability;
+    return <StatusCard title={status.isPending ? "Checking eBay readiness" : "eBay listing unavailable"}><p>{status.isPending ? "Checking whether this account can create an eBay listing…" : capability ? `${capability.ebay.message} ${capability.ebay.remedy}` : "Sign in with seller permission to create an eBay listing."}</p>{capability && ["not_connected", "reconnect_required", "missing_scopes"].includes(capability.ebay.code) ? <Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-[#8a1f2d] px-4 font-bold text-white" href={ebaySettingsHref(backHref)}>Open eBay settings</Link> : null}</StatusCard>;
   }
   if (!isCardCondition(context.copy.condition)) {
     return <StatusCard title="Choose a supported condition"><p>Update this Copy to Near Mint, Lightly Played, Moderately Played, or Heavily Played before listing it.</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href={backHref}>Back to inventory</Link></StatusCard>;
   }
-  if (eligibility.isLoading || status.isLoading) {
+  if (eligibility.isLoading) {
     return <div className="grid min-h-72 place-items-center rounded-xl border border-zinc-300 bg-white font-bold" role="status">Checking eBay readiness…</div>;
   }
-  if (eligibility.isError || status.isError) {
-    return <StatusCard title="eBay readiness could not be checked"><p>Check your connection and try again.</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => { void refreshEbayStatus(); void status.refetch(); }} type="button">Try again</button></StatusCard>;
+  if (eligibility.isError) {
+    return <StatusCard title="eBay eligibility could not be checked"><p>Check your connection and try again.</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => void refreshEbayStatus()} type="button">Retry eligibility check</button></StatusCard>;
   }
   const eligibilityResult = eligibility.data;
   if (!eligibilityResult?.eligible) {
@@ -409,7 +484,7 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
         : "This Copy is not available in your inventory.";
     return <StatusCard title="This Copy cannot be listed"><p>{message}</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href={backHref}>Back to inventory</Link></StatusCard>;
   }
-  if (!status.data?.configured || !status.data.connection) {
+  if (!("connection" in status.data) || !status.data.configured || !status.data.connection) {
     return <StatusCard title="Connect eBay to continue"><p>Your listing draft will be created here after the eBay seller connection is ready.</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Link className="inline-flex min-h-11 items-center rounded-md bg-[#8a1f2d] px-4 font-bold text-white" href={ebaySettingsHref(backHref)}>Open eBay settings</Link><Link className="inline-flex min-h-11 items-center rounded-md border border-zinc-300 px-4 font-bold" href={backHref}>Back to inventory</Link></div></StatusCard>;
   }
   return (
@@ -417,6 +492,7 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
       backHref={backHref}
       copy={context.copy}
       imageArchiveConfigured={status.data.imageArchiveConfigured}
+      ownerScope={session.user.id}
       printing={context.printing}
       target={context.target}
     />
@@ -427,18 +503,33 @@ function EbayListingWorkspace({
   backHref,
   copy,
   imageArchiveConfigured,
+  ownerScope,
   printing,
   target,
 }: {
   backHref: string;
   copy: CardCopy;
   imageArchiveConfigured: boolean;
+  ownerScope: string;
   printing: CardPrinting;
   target: WishlistTarget;
 }) {
+  const source = useRecordsDataSource();
+  const router = useRouter();
+  const collectionChanged = useCollectionChange();
   const defaults = useMemo(() => initialForm(target, printing, copy), [copy, printing, target]);
-  const [form, setForm] = useState(defaults);
-  const [draftReady, setDraftReady] = useState(false);
+  const lifecycle = useFormDraftLifecycle({
+    workflow: "ebay-listing",
+    ownerScope,
+    origin: backHref,
+    identity: copy.id,
+    intent: { kind: "copy", id: copy.id, label: `${target.name} Copy #${copyShortReference(copy.id)}` },
+    initialData: defaults,
+    isValidData: isListingForm,
+  });
+  const form = lifecycle.data;
+  const setForm = lifecycle.setData;
+  const draftReady = lifecycle.hydrated;
   const [errors, setErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState<string | null>(null);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
@@ -450,10 +541,10 @@ function EbayListingWorkspace({
   const importedRef = useRef(false);
   const priceEditedRef = useRef(false);
   const pricingRefreshStartedRef = useRef(false);
+  const publishActionRef = useRef(false);
   const previouslyStoredPrice = pounds(
     target.estimatedPricePence ?? target.marketPricePence,
   );
-  const draftKey = `ygo-library:ebay-listing-draft:v${draftVersion}:${copy.id}`;
   const catalogueImage = target.imageUrl ?? printing.imageUrl;
   const soldUrl = useMemo(
     () => ebaySoldListingsUrl({
@@ -479,42 +570,9 @@ function EbayListingWorkspace({
   const visibleFees = validation?.fees.filter((fee) => Number.isFinite(fee.amount) && fee.amount !== 0) ?? [];
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      try {
-        const saved = window.sessionStorage.getItem(draftKey);
-        if (saved) {
-          const parsed = JSON.parse(saved) as {
-            copyId?: string;
-            form?: ListingForm;
-            priceEdited?: boolean;
-            version?: number;
-          };
-          if (parsed.version === draftVersion && parsed.copyId === copy.id && parsed.form) {
-            priceEditedRef.current = parsed.priceEdited
-              ?? parsed.form.price.trim() !== previouslyStoredPrice;
-            setForm(parsed.form);
-          }
-        }
-      } catch {
-        window.sessionStorage.removeItem(draftKey);
-      } finally {
-        setDraftReady(true);
-      }
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [copy.id, draftKey, previouslyStoredPrice]);
-
-  useEffect(() => {
     if (!draftReady) return;
-    const savedAt = new Date().toISOString();
-    window.sessionStorage.setItem(draftKey, JSON.stringify({
-      copyId: copy.id,
-      form,
-      priceEdited: priceEditedRef.current,
-      savedAt,
-      version: draftVersion,
-    }));
-  }, [copy.id, draftKey, draftReady, form]);
+    priceEditedRef.current = form.price.trim() !== previouslyStoredPrice;
+  }, [draftReady, form.price, previouslyStoredPrice]);
 
   useEffect(() => {
     if (!draftReady || pricingRefreshStartedRef.current) return;
@@ -552,7 +610,7 @@ function EbayListingWorkspace({
     }
     void importSavedPhotos();
     return () => { cancelled = true; };
-  }, [copy.id, draftReady, form.images.length, imageArchiveConfigured]);
+  }, [copy.id, draftReady, form.images.length, imageArchiveConfigured, setForm]);
 
   function clearFieldError(key: FieldKey) {
     setErrors((current) => {
@@ -690,18 +748,38 @@ function EbayListingWorkspace({
   }
 
   async function publishListing() {
+    if (publishActionRef.current) return;
+    publishActionRef.current = true;
+    let result: Awaited<ReturnType<typeof publish.mutateAsync>>;
     try {
-      const result = await publish.mutateAsync(listingInput(copy, form));
-      setPublishedUrl(result.listingUrl);
-      window.sessionStorage.removeItem(draftKey);
+      result = await publish.mutateAsync(listingInput(copy, form));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The listing could not be published.");
+      publishActionRef.current = false;
+      return;
     }
+
+    setPublishedUrl(result.listingUrl);
+    try {
+      await collectionChanged("listing");
+    } catch (error) {
+      setMessage(collectionRefreshFailureMessage(error));
+    }
+    try {
+      lifecycle.discard();
+    } catch {
+      setMessage((current) =>
+        current
+          ? `${current} The listing was published, but its local draft could not be cleared. Do not publish it again.`
+          : "The listing was published, but its local draft could not be cleared. Do not publish it again.",
+      );
+    }
+    publishActionRef.current = false;
   }
 
   function resetDraft() {
     if (!window.confirm("Reset this draft to its original details? Added listing photos will be removed from the draft.")) return;
-    window.sessionStorage.removeItem(draftKey);
+    lifecycle.reset();
     priceEditedRef.current = false;
     setForm({
       ...defaults,
@@ -714,21 +792,53 @@ function EbayListingWorkspace({
     importedRef.current = true;
   }
 
+  function resumeDifferentCopyDraft() {
+    const previousCopyId = lifecycle.conflict?.intent.kind === "copy"
+      ? lifecycle.conflict.intent.id
+      : null;
+    if (!previousCopyId) return;
+    const href = individualListingDraftResumeHref({
+      copies: source.snapshot.copies,
+      listState: parseInventoryListState(new URL(backHref, window.location.origin).searchParams),
+      previousCopyId,
+      printings: source.snapshot.printings,
+      targets: source.snapshot.targets,
+    });
+    if (!href) {
+      router.back();
+      return;
+    }
+    router.push(href);
+  }
+
+  if (!draftReady) {
+    return <div aria-live="polite" className="grid min-h-72 place-items-center rounded-xl border border-zinc-300 bg-white font-bold">Restoring this tab&apos;s listing draft…</div>;
+  }
+
   const inputClass = "min-h-11 w-full min-w-0 max-w-full rounded-md border border-zinc-300 bg-white px-3 font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 aria-[invalid=true]:border-rose-500";
   const errorText = (key: FieldKey) => errors[key] ? <span className="text-xs font-bold text-rose-700">{errors[key]}</span> : null;
 
   return (
     <div className="grid min-w-0 max-w-full gap-5">
-      <nav aria-label="Listing breadcrumb">
+      {lifecycle.conflict ? (
+        <DraftConflictDialog
+          incoming={{ kind: "copy", id: copy.id, label: `${target.name} Copy #${copyShortReference(copy.id)}` }}
+          onCancel={() => router.back()}
+          onResume={lifecycle.conflictIsDifferentIdentity ? resumeDifferentCopyDraft : lifecycle.resumePrevious}
+          onStartNew={lifecycle.startNew}
+          previous={lifecycle.conflict.intent}
+        />
+      ) : null}
+      <nav aria-label="Listing breadcrumb" className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-700 transition hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={backHref}><ArrowLeft className="size-4" />Back to card inventory</Link>
+        <p className="text-xs font-semibold text-zinc-500">Unfinished work is kept in this browser tab.</p>
       </nav>
       <header className="flex min-w-0 max-w-full flex-col gap-4 rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a1f2d]">eBay seller workspace</p>
-          <h1 className="mt-1 text-2xl font-black">Create listing</h1>
+          <h1 className="text-2xl font-black">Create listing</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-zinc-500">
-          <span aria-live="polite">{draftReady ? "Draft saved automatically in this tab" : "Draft starting…"}</span>
+          <span aria-live="polite">{!draftReady ? "Draft starting…" : lifecycle.recoveryMessage ?? (lifecycle.restored ? "Draft restored in this tab" : lifecycle.dirty ? "Draft saved in this tab" : "Draft ready in this tab")}</span>
           <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm text-zinc-700 hover:border-zinc-950" onClick={resetDraft} type="button"><RotateCcw className="size-4" />Reset draft</button>
         </div>
       </header>

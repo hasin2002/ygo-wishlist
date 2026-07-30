@@ -1,6 +1,7 @@
 "use client";
 
 import { TrpcProvider } from "@/trpc/client";
+import { useCollectionChangeListener } from "@/lib/use-collection-change";
 import { AppShell } from "@/components/app-shell";
 import {
   createContext,
@@ -31,9 +32,16 @@ export function Providers({
 }) {
   return (
     <TrpcProvider>
-      <InitialAuthContext.Provider value={initialAuth}>
-        <AppShell>{children}</AppShell>
-      </InitialAuthContext.Provider>
+      <CollectionChangeListener>
+        <InitialAuthContext.Provider value={initialAuth}>
+          <AppShell>{children}</AppShell>
+        </InitialAuthContext.Provider>
+      </CollectionChangeListener>
     </TrpcProvider>
   );
+}
+
+function CollectionChangeListener({ children }: { children: ReactNode }) {
+  useCollectionChangeListener();
+  return children;
 }

@@ -4,6 +4,7 @@ const port = 3105;
 
 export default defineConfig({
   testDir: "./tests/browser",
+  outputDir: ".next/playwright-results",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   reporter: process.env.CI ? "github" : "list",

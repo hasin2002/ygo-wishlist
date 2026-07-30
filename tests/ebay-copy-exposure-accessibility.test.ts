@@ -80,7 +80,7 @@ test("the preview shows where a live Copy's Sell on eBay action will appear", ()
 });
 
 test("the listing workspace keeps navigation above the header and photo actions above the upload area", () => {
-  assert.match(listingActionSource, /<nav aria-label="Listing breadcrumb">/);
+  assert.match(listingActionSource, /<nav aria-label="Listing breadcrumb"[^>]*>/);
   assert.match(listingActionSource, /<\/nav>\s*<header/);
   assert.ok(photoManagerSource.indexOf("secondaryAction ? (") < photoManagerSource.indexOf("onDragEnter"));
 });
@@ -113,7 +113,7 @@ test("eBay data-safety failures do not misleadingly suggest reconnecting", () =>
   assert.match(listingStatusSource, /This is a data-safety check, not a connection problem/);
   assert.match(listingStatusSource, /Sale data needs review/);
   assert.match(listingStatusSource, /isEbayListingDataReviewMessage/);
-  assert.match(listingActionSource, /await utils\.records\.snapshot\.invalidate\(\)/);
+  assert.match(listingActionSource, /await collectionChanged\("listing"\)/);
 });
 
 test("the overview keeps missing eBay Copy links in the central attention queue", () => {

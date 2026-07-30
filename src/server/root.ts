@@ -1,6 +1,5 @@
 import { binderRouter } from "@/server/routers/binder";
 import { legacyCardsReadRouter } from "@/server/routers/cards";
-import { featureIdeasRouter } from "@/server/routers/feature-ideas";
 import { ebayRouter } from "@/server/routers/ebay";
 import { libraryRouter } from "@/server/routers/library";
 import { recordsRouter } from "@/server/routers/records";
@@ -11,7 +10,6 @@ import { router } from "@/server/trpc";
 export const appRouter = router({
   binder: binderRouter,
   ebay: ebayRouter,
-  featureIdeas: featureIdeasRouter,
   library: libraryRouter,
   // This temporary migration reader is deliberately separate from Library.
   // It exposes legacy rows only to seed the local Records preview and must not

@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
+import { isCollectionChangeStorageEvent } from "@/lib/collection-change";
 
 type InventoryImage = { key: string; previewUrl: string; position: number };
 
@@ -18,6 +23,7 @@ export function CardInventoryImages({
   isPreview?: boolean;
   onImagesChange?: (images: InventoryImage[]) => void;
 }) {
+  const collectionChanged = useCollectionChange();
   const [configured, setConfigured] = useState(true);
   const [images, setImages] = useState<InventoryImage[]>([]);
   const [loading, setLoading] = useState(!isPreview);
@@ -26,34 +32,45 @@ export function CardInventoryImages({
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  const loadImages = useCallback(async () => {
+    if (isPreview) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/inventory/card-images?copyId=${encodeURIComponent(copyId)}`);
+      const payload = await response.json() as { configured?: boolean; images?: InventoryImage[]; message?: string };
+      if (!response.ok) throw new Error(payload.message || "Card photos could not be loaded.");
+      setConfigured(payload.configured !== false);
+      setImages(payload.images ?? []);
+      setMessage(null);
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : "Card photos could not be loaded.";
+      setMessage(nextMessage === "That physical card Copy was not found." ? "This Copy is no longer available. Go back to inventory and choose another Copy." : nextMessage);
+    } finally {
+      setLoading(false);
+    }
+  }, [copyId, isPreview]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => { void loadImages(); }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [loadImages]);
+
   useEffect(() => {
     if (isPreview) return;
-    let active = true;
-    void fetch(`/api/inventory/card-images?copyId=${encodeURIComponent(copyId)}`)
-      .then(async (response) => {
-        const payload = await response.json() as {
-          configured?: boolean;
-          images?: InventoryImage[];
-          message?: string;
-        };
-        if (!response.ok) throw new Error(payload.message || "Card photos could not be loaded.");
-        if (!active) return;
-        setConfigured(payload.configured !== false);
-        setImages(payload.images ?? []);
-      })
-      .catch((error) => {
-        if (active) {
-          const nextMessage = error instanceof Error ? error.message : "Card photos could not be loaded.";
-          setMessage(nextMessage === "That physical card Copy was not found." ? "This Copy is no longer available. Go back to inventory and choose another Copy." : nextMessage);
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [copyId, isPreview]);
+    function onStorage(event: StorageEvent) {
+      if (isCollectionChangeStorageEvent(event.key, event.newValue, "photos")) void loadImages();
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [isPreview, loadImages]);
+
+  async function notifyPhotoChange() {
+    try {
+      await collectionChanged("photos");
+    } catch (error) {
+      setMessage(collectionRefreshFailureMessage(error));
+    }
+  }
 
   async function upload(files: File[]) {
     if (!files.length) return;
@@ -76,7 +93,8 @@ export function CardInventoryImages({
     }
     setImages(next);
     onImagesChange?.(next);
-    if (failures.length) setMessage(failures.join(" "));
+    if (next.length !== images.length) await notifyPhotoChange();
+    if (failures.length) setMessage((current) => [current, failures.join(" ")].filter(Boolean).join(" "));
     setUploading(false);
   }
 
@@ -96,6 +114,7 @@ export function CardInventoryImages({
         .map((image, position) => ({ ...image, position }));
       setImages(next);
       onImagesChange?.(next);
+      await notifyPhotoChange();
       return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The card image could not be removed.");
@@ -127,6 +146,7 @@ export function CardInventoryImages({
       if (!response.ok || !payload.images) throw new Error(payload.message || "Photo order could not be saved.");
       setImages(payload.images);
       onImagesChange?.(payload.images);
+      await notifyPhotoChange();
       return true;
     } catch (error) {
       setImages(previousImages);

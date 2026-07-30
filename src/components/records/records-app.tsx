@@ -45,7 +45,8 @@ import {
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { EbayListingAction } from "@/components/records/ebay-listing-action";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
-import { poundsToPence } from "@/components/records/entry-form-ui";
+import { parsePoundsToPence } from "@/components/records/entry-form-ui";
+import { DataLoadError } from "@/components/data-load-error";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import {
@@ -57,6 +58,7 @@ import type {
   CardAttentionUpdate,
   CardCopy,
   CardPrinting,
+  DataSourceResult,
   EbayOfferExposure,
   RecordEntry,
   RecordEntryType,
@@ -67,6 +69,10 @@ import type {
   SupplyCategory,
   WishlistTarget,
 } from "@/lib/records/types";
+
+function dataSourceMessage(result: DataSourceResult, success: string) {
+  return result.ok ? result.warning ?? success : result.message;
+}
 import { copyDisplayLabel, copyShortReference, orderCopies } from "@/lib/records/copy-display";
 import {
   defaultInventoryListState,
@@ -380,7 +386,7 @@ function RecordCardItemsEditor({
     })));
     setSaving(false);
     if (result.ok) {
-      setMessage("Card items saved.");
+      setMessage(result.warning ?? "Card items saved.");
       return;
     }
     setRows(cardDraftsForRecord(record, source.snapshot));
@@ -448,7 +454,7 @@ function SaleCopyItemsEditor({ record, source }: { record: RecordEntry; source: 
     setSaving(true);
     const result = await source.replaceSaleCopies(record.id, selectedIds);
     setSaving(false);
-    setMessage(result.ok ? "Sold Copies saved." : result.message);
+    setMessage(dataSourceMessage(result, "Sold Copies saved."));
   }
 
   return (
@@ -491,8 +497,8 @@ function NonCardLineEditor({ line, record, source }: { line: RecordLine; record:
     setSaving(true);
     const result = await source.updateRecordLine(record.id, line.id, { name, quantity, detail, edition, category, totalQuantity });
     setSaving(false);
-    setMessage(result.ok ? "Item saved." : result.message);
-    if (result.ok) setExpanded(false);
+    setMessage(dataSourceMessage(result, "Item saved."));
+    if (result.ok && !result.warning) setExpanded(false);
   }
 
     return <article className="rounded-lg border border-zinc-300 bg-white p-3">{expanded ? <div className="grid gap-3"><div className="flex items-center justify-between gap-3"><h4 className="font-bold capitalize">Edit {line.kind} item</h4><button className="min-h-11 rounded-md px-3 text-sm font-bold text-zinc-600 hover:bg-zinc-100" disabled={saving} onClick={() => setExpanded(false)} type="button">Cancel</button></div>{message && message !== "Item saved." ? <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-900">{message}</p> : null}<div className="grid gap-3 sm:grid-cols-2"><label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">{line.kind === "sealed" ? "Product name" : "Item name"}</span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setName(event.target.value)} value={name} /></label>{line.kind === "bulk" ? <label><span className="text-sm font-bold text-zinc-700">Total cards in lot</span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" min={bulkLot?.itemizedQuantity ?? 1} onChange={(event) => setTotalQuantity(Number(event.target.value))} type="number" value={totalQuantity} /><span className="mt-1 block text-xs font-medium text-zinc-500">Changing this recalculates the lot&apos;s per-card allocation and is blocked after a card is sold.</span></label> : <label><span className="text-sm font-bold text-zinc-700">Quantity</span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" min="1" onChange={(event) => setQuantity(Number(event.target.value))} type="number" value={quantity} /></label>}{line.kind === "sealed" ? <label><span className="text-sm font-bold text-zinc-700">Product edition</span><select className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setEdition(event.target.value as ProductEdition)} value={edition}><option value="1st Edition">1st Edition</option><option value="Unlimited Edition">Unlimited Edition</option></select></label> : null}{line.kind === "supply" ? <label><span className="text-sm font-bold text-zinc-700">Category</span><select className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setCategory(event.target.value as SupplyCategory)} value={category}><option value="sleeves">Sleeves</option><option value="binder">Binder</option><option value="storage">Storage</option><option value="playmat">Playmat</option><option value="other">Other</option></select></label> : null}{line.kind === "bulk" ? <label><span className="text-sm font-bold text-zinc-700">Lot details</span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDetail(event.target.value)} value={detail} /></label> : null}</div><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60 sm:justify-self-start" disabled={saving} onClick={saveLine} type="button">{saving ? "Saving…" : "Save item"}</button></div> : <div className="flex items-center justify-between gap-3"><div><p className="font-bold">{name}</p><p className="mt-1 text-sm font-medium text-zinc-500">{line.kind === "bulk" ? `${bulkLot?.itemizedQuantity ?? 0} identified of ${totalQuantity} total cards` : `Quantity ${quantity}`}{line.kind === "sealed" ? ` · ${edition}` : line.kind === "supply" ? ` · ${category}` : line.kind === "bulk" ? "" : detail ? ` · ${detail}` : ""}</p>{message === "Item saved." ? <p className="mt-1 text-xs font-bold text-emerald-700">Saved</p> : null}</div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setExpanded(true)} type="button"><Pencil className="size-4" /> Edit</button></div>}</article>;
@@ -522,12 +528,14 @@ function RecordEditorDialog({
   const [recordSource, setRecordSource] = useState(record.source);
   const [listingUrl, setListingUrl] = useState(record.listingUrl ?? "");
   const [amount, setAmount] = useState((record.amountPence / 100).toFixed(2));
+  const [amountKnown, setAmountKnown] = useState(costOnly || record.amountKnown !== false);
   const [notes, setNotes] = useState(record.notes);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [activePanel, setActivePanel] = useState<"details" | "items">(initialPanel);
   const editsCashflow = record.type === "purchase" || record.type === "sale" || record.type === "imported-acquisition";
   const editsListing = record.type === "purchase" || record.type === "imported-acquisition";
+  const canMarkCostUnknown = !costOnly && (record.type === "purchase" || record.type === "imported-acquisition");
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -538,13 +546,21 @@ function RecordEditorDialog({
   }, [onClose]);
 
   async function save() {
+    const parsedAmount = editsCashflow && amountKnown ? parsePoundsToPence(amount) : 0;
+    if (editsCashflow && amountKnown && parsedAmount === null) {
+      setError(record.type === "sale"
+        ? "Enter net proceeds such as 12 or 12.34."
+        : "Enter an amount such as 12 or 12.34, or mark the acquisition cost as unknown.");
+      return;
+    }
     setSaving(true);
     const result = await source.updateRecordDetails(record.id, {
       title,
       date,
       source: recordSource,
       listingUrl: editsListing ? listingUrl : null,
-      amountPence: editsCashflow ? poundsToPence(amount) : record.amountPence,
+      amountPence: editsCashflow ? parsedAmount ?? 0 : record.amountPence,
+      amountKnown: editsCashflow ? amountKnown : record.amountKnown !== false,
       notes,
     });
     setSaving(false);
@@ -552,7 +568,7 @@ function RecordEditorDialog({
       setError(result.message);
       return;
     }
-    onSaved(`Saved changes to “${title.trim()}”.`);
+    onSaved(result.warning ?? `Saved changes to “${title.trim()}”.`);
     onClose();
   }
 
@@ -564,7 +580,7 @@ function RecordEditorDialog({
       setError(result.message);
       return;
     }
-    onSaved(`${record.status === "void" ? "Restored" : "Voided"} “${record.title}”.`);
+    onSaved(result.warning ?? `${record.status === "void" ? "Restored" : "Voided"} “${record.title}”.`);
     onClose();
   }
 
@@ -584,7 +600,7 @@ function RecordEditorDialog({
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label>
             <label><span className="text-sm font-bold text-zinc-700">Date <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDate(event.target.value)} type="date" value={date} /></label>
             <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Buyer or marketplace" : "Seller or source"} <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setRecordSource(event.target.value)} value={recordSource} /></label>
-            {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div></label> : null}
+            {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 disabled:bg-zinc-100" disabled={!amountKnown} inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div>{canMarkCostUnknown ? <span className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-700"><input checked={!amountKnown} onChange={(event) => setAmountKnown(!event.target.checked)} type="checkbox" /> Cost unknown</span> : null}</label> : null}
             {editsListing ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Original listing <span className="font-medium text-zinc-400">(optional)</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="url" onChange={(event) => setListingUrl(event.target.value)} placeholder="https://…" type="url" value={listingUrl} /></label> : null}
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setNotes(event.target.value)} value={notes} /></label>
             </>}
@@ -685,7 +701,7 @@ function CardAttentionDialog({
     const result = await source.resolveCardAttention(update);
     setSaving(false);
     if (!result.ok) { setError(result.message); return; }
-    onSaved(`Resolved attention for “${name.trim()}”.`);
+    onSaved(result.warning ?? `Resolved attention for “${name.trim()}”.`);
     onClose();
   }
 
@@ -746,7 +762,7 @@ function EbayCopyLinkAttentionDialog({
     const result = await source.resolveEbayCopyLinkAttention(item.listingId);
     setSaving(false);
     if (!result.ok) { setError(result.message); return; }
-    onResolved(`Confirmed the physical Copy link for “${item.label}”.`);
+    onResolved(result.warning ?? `Confirmed the physical Copy link for “${item.label}”.`);
     onClose();
   }
 
@@ -801,6 +817,9 @@ function Overview() {
   const cost = activeRecords
     .filter((record) => (record.type === "purchase" || record.type === "imported-acquisition") && record.amountKnown !== false)
     .reduce((sum, record) => sum + record.amountPence, 0);
+  const unknownCostCount = activeRecords.filter((record) => (
+    (record.type === "purchase" || record.type === "imported-acquisition") && record.amountKnown === false
+  )).length;
   const proceeds = activeRecords
     .filter((record) => record.type === "sale")
     .reduce((sum, record) => sum + record.amountPence, 0);
@@ -833,9 +852,9 @@ function Overview() {
         </div>
       </section>
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard detail="All-in acquisition amounts" icon={<ArrowDownLeft className="size-5" />} label="Actual cost" tone="negative" value={formatCurrency(cost)} />
+        <MetricCard detail={unknownCostCount ? `Known amounts only · ${unknownCostCount} cost${unknownCostCount === 1 ? "" : "s"} unknown` : "All-in acquisition amounts"} icon={<ArrowDownLeft className="size-5" />} label="Actual cost" tone="negative" value={formatCurrency(cost)} />
         <MetricCard detail="Net after fees and postage" icon={<ArrowUpRight className="size-5" />} label="Net proceeds" tone="positive" value={formatCurrency(proceeds)} />
-        <MetricCard detail="Proceeds minus actual cost" icon={<CircleDollarSign className="size-5" />} label="Cash position" tone={proceeds - cost >= 0 ? "positive" : "negative"} value={formatCurrency(proceeds - cost)} />
+        <MetricCard detail={unknownCostCount ? "Known costs only — incomplete while acquisition costs are unknown" : "Proceeds minus actual cost"} icon={<CircleDollarSign className="size-5" />} label="Cash position" tone={proceeds - cost >= 0 ? "positive" : "negative"} value={formatCurrency(proceeds - cost)} />
         <MetricCard detail={`${wishlistTargetCount} Wishlist target${wishlistTargetCount === 1 ? "" : "s"}`} icon={<WalletCards className="size-5" />} label="Physical copies" value={String(availableCopies)} />
       </section>
 
@@ -926,9 +945,10 @@ function HistoryView() {
       ? source.restoreRecord(record.id)
       : source.voidRecord(record.id));
     setChangingRecordId(null);
-    setMessage(result.ok
-      ? `${record.status === "void" ? "Restored" : "Voided"} “${record.title}”.`
-      : result.message);
+    setMessage(dataSourceMessage(
+      result,
+      `${record.status === "void" ? "Restored" : "Voided"} “${record.title}”.`,
+    ));
   }
 
   return (
@@ -1034,18 +1054,25 @@ function inventoryCopySourceGroups(
 }
 
 function InventoryCardSummary({
-  hasKnownPurchaseValue,
   libraryStatus,
+  knownPurchaseValueCount,
   purchaseValuePence,
   soldQuantity,
   target,
+  unknownPurchaseValueCount,
 }: {
-  hasKnownPurchaseValue: boolean;
   libraryStatus: LibraryCardStatusSummary;
+  knownPurchaseValueCount: number;
   purchaseValuePence: number;
   soldQuantity: number;
   target: WishlistTarget;
+  unknownPurchaseValueCount: number;
 }) {
+  const purchaseValue = knownPurchaseValueCount === 0
+    ? "Unknown"
+    : unknownPurchaseValueCount > 0
+      ? `Known ${formatCurrency(purchaseValuePence)} · ${unknownPurchaseValueCount} cost${unknownPurchaseValueCount === 1 ? "" : "s"} unknown`
+      : formatCurrency(purchaseValuePence);
   return (
     <section aria-labelledby="inventory-card-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
       <div className="grid gap-4 p-4 sm:grid-cols-[5rem_minmax(0,1fr)_auto] sm:items-center sm:p-5">
@@ -1076,7 +1103,7 @@ function InventoryCardSummary({
         <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-3 sm:px-5">
           <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity</dt><dd className="mt-1 font-bold text-zinc-800">{target.rarity}</dd></div>
           <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition</dt><dd className="mt-1 font-bold text-zinc-800">{target.edition}</dd></div>
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "Unknown"}</dd></div>
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div>
         </dl>
       </details>
     </section>
@@ -1217,7 +1244,8 @@ function InventoryCardDetailContent({
   const ownedCopies = copies.filter((copy) => copy.status === "available");
   const ownedQuantity = ownedCopies.length;
   const soldQuantity = copies.filter((copy) => copy.status === "sold").length;
-  const hasKnownPurchaseValue = ownedCopies.some((copy) => copy.allocationPence !== null);
+  const knownPurchaseValueCount = ownedCopies.filter((copy) => copy.allocationPence !== null).length;
+  const unknownPurchaseValueCount = ownedCopies.length - knownPurchaseValueCount;
   const purchaseValuePence = ownedCopies.reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0);
   const libraryStatus = target
     ? getLibraryCardStatus(target.desiredQuantity, ownedQuantity)
@@ -1259,9 +1287,10 @@ function InventoryCardDetailContent({
 
     setRemovingCopyId(null);
     setPendingRemoval(null);
-    setMessage(result.ok
-      ? "The selected Copy was removed and its source Record was updated."
-      : result.message);
+    setMessage(dataSourceMessage(
+      result,
+      "The selected Copy was removed and its source Record was updated.",
+    ));
   }
 
   async function removeWishlistTarget() {
@@ -1269,6 +1298,11 @@ function InventoryCardDetailContent({
     const result = await source.deleteWishlistTarget(targetId);
     setDeletingTarget(false);
     if (result.ok) {
+      if (result.warning) {
+        setConfirmTargetRemoval(false);
+        setMessage(result.warning);
+        return;
+      }
       router.replace(inventoryListHref(listState));
       return;
     }
@@ -1290,7 +1324,7 @@ function InventoryCardDetailContent({
       privateNote: String(form.get("note") || ""),
     });
     setSavingCopy(false);
-    setMessage(result.ok ? "Copy details saved." : result.message);
+    setMessage(dataSourceMessage(result, "Copy details saved."));
   }
 
   return (
@@ -1299,7 +1333,7 @@ function InventoryCardDetailContent({
         <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft aria-hidden="true" className="size-4" /> Back to inventory</Link>
       </nav>
 
-      <InventoryCardSummary hasKnownPurchaseValue={hasKnownPurchaseValue} libraryStatus={libraryStatus} purchaseValuePence={purchaseValuePence} soldQuantity={soldQuantity} target={target} />
+      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} purchaseValuePence={purchaseValuePence} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
 
       <div aria-describedby="inventory-card-description" className="grid min-w-0 gap-4 sm:gap-5">
           {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
@@ -1400,12 +1434,7 @@ export function InventoryCardDetail({ targetId }: { targetId: string }) {
   }
 
   if (source.status === "error") {
-    return (
-      <div className="rounded-lg border border-rose-300 bg-rose-50 px-5 py-8 text-center text-rose-950" role="alert">
-        <p className="font-black">Card inventory could not be loaded</p>
-        <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6">{source.errorMessage || "Refresh the page and try again."}</p>
-      </div>
-    );
+    return <DataLoadError message={source.errorMessage || "Nothing has been changed. Try loading Records again."} onRetry={source.refresh} title="Card inventory could not be loaded" />;
   }
 
   return <InventoryCardDetailContent source={source} targetId={targetId} />;
@@ -1545,12 +1574,13 @@ function InventoryView() {
       return {
         copies,
         endedOfferCount: offers.filter((offer) => offer.listingState === "ended").length,
-        hasKnownPurchaseValue: ownedCopies.some((copy) => copy.allocationPence !== null),
+        knownPurchaseValueCount: ownedCopies.filter((copy) => copy.allocationPence !== null).length,
         libraryStatus: getLibraryCardStatus(target.desiredQuantity, ownedCopies.length),
         liveOfferCount: offers.filter((offer) => offer.listingState === "active").length,
         printings,
         purchaseValuePence: ownedCopies.reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0),
         target,
+        unknownPurchaseValueCount: ownedCopies.filter((copy) => copy.allocationPence === null).length,
       };
     });
   }, [snapshot.copyEbayExposures, snapshot.copies, snapshot.printings, snapshot.targets]);
@@ -1620,7 +1650,7 @@ function InventoryView() {
             </div>
           </div>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {visibleTargets.map(({ copies, endedOfferCount, hasKnownPurchaseValue, libraryStatus, liveOfferCount, printings, purchaseValuePence, target }) => {
+          {visibleTargets.map(({ copies, endedOfferCount, knownPurchaseValueCount, libraryStatus, liveOfferCount, printings, purchaseValuePence, target, unknownPurchaseValueCount }) => {
             const ebayListings = inventoryEbayListingSummary(liveOfferCount, endedOfferCount);
             return (
               <Link aria-label={`${copies.length ? "View copies and source" : "View Wishlist Target"} for ${target.name}. Wanted ${libraryStatus.wantedQuantity}. Owned ${libraryStatus.ownedQuantity}. ${copies.filter((copy) => copy.status === "sold").length} sold. ${ebayListings.accessibleLabel}`} className="group flex min-w-0 gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#8a1f2d] hover:shadow-md active:translate-y-0 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 motion-reduce:transform-none motion-reduce:transition-none" href={inventoryCardDetailHref(target.id, listState)} key={target.id}>
@@ -1641,7 +1671,7 @@ function InventoryView() {
                   </span>
                   <span className="mt-1 block text-xs font-semibold text-zinc-500">Wanted {libraryStatus.wantedQuantity} · Owned {libraryStatus.ownedQuantity}{libraryStatus.wishlistRemainingQuantity ? ` · ${libraryStatus.wishlistRemainingQuantity} still wanted` : ""} · {copies.filter((copy) => copy.status === "sold").length} sold</span>
                   <span className="mt-2 block text-xs font-bold text-zinc-700"><span className="text-zinc-500">{ebayListings.heading}</span><span aria-hidden="true"> · </span><span>{ebayListings.summary}</span></span>
-                  {libraryStatus.ownedQuantity ? <span className="mt-1 block text-xs font-bold text-emerald-700">Purchase value {hasKnownPurchaseValue ? formatCurrency(purchaseValuePence) : "unknown"}</span> : null}
+                  {libraryStatus.ownedQuantity ? <span className="mt-1 block text-xs font-bold text-emerald-700">Purchase value {knownPurchaseValueCount === 0 ? "unknown" : unknownPurchaseValueCount > 0 ? `known ${formatCurrency(purchaseValuePence)} · ${unknownPurchaseValueCount} cost${unknownPurchaseValueCount === 1 ? "" : "s"} unknown` : formatCurrency(purchaseValuePence)}</span> : null}
                   <span className="mt-2 flex flex-wrap gap-1">
                     {printings.map((printing) => <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px] font-bold text-zinc-600" key={printing.id}>{printing.setCode}</span>)}
                   </span>
@@ -1714,12 +1744,7 @@ export function RecordsApp({ view }: { view: RecordsView }) {
         <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
           <div className="text-center"><Clock3 className="mx-auto size-7 animate-pulse text-[#8a1f2d]" /><p className="mt-3 font-bold">Preparing Records</p></div>
         </div>
-      ) : source.status === "error" ? (
-        <div className="rounded-lg border border-rose-300 bg-rose-50 px-5 py-8 text-center text-rose-950" role="alert">
-          <p className="font-black">Records could not be loaded</p>
-          <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6">{source.errorMessage || "Refresh the page and try again."}</p>
-        </div>
-      ) : view === "overview" ? <Overview /> : view === "history" ? <HistoryView /> : <InventoryView />}
+      ) : source.status === "error" ? <DataLoadError message={source.errorMessage || "Nothing has been changed. Try loading Records again."} onRetry={source.refresh} title="Records could not be loaded" /> : view === "overview" ? <Overview /> : view === "history" ? <HistoryView /> : <InventoryView />}
     </>
   );
 }

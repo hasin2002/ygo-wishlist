@@ -309,6 +309,11 @@ export async function getEbaySellerAccessToken(ownerId: string) {
     setEbayConnectionHealth(ownerId, "reconnect_required");
     throw new EbayAuthorizationError("The eBay connection has expired. Connect eBay again.");
   }
+  const grantedScopes = new Set(connection.scopes.split(/\s+/).filter(Boolean));
+  const missingScopes = ebaySellerScopeList.filter((scope) => !grantedScopes.has(scope));
+  if (missingScopes.length) {
+    throw new EbayAuthorizationError("The eBay connection is missing required seller permissions. Reconnect eBay and approve the requested permissions.");
+  }
 
   try {
     return await sellerAccessTokenCache.get(ownerId, async () => {

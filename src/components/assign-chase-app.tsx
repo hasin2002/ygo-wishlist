@@ -11,6 +11,11 @@ import { AppHeader } from "@/components/app-header";
 import { DataLoadError } from "@/components/data-load-error";
 import { useClientReady } from "@/lib/use-client-ready";
 import { trpc } from "@/trpc/client";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
+import { settleConfirmedChange } from "@/lib/collection-change";
 
 const levels = [
   { value: 5, label: "5", hint: "Want next" },
@@ -42,21 +47,14 @@ export function AssignChaseApp() {
   const clientReady = useClientReady();
   const [assignedIds, setAssignedIds] = useState<string[]>([]);
   const [leaving, setLeaving] = useState(false);
-  const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedDespiteError, setSavedDespiteError] = useState(false);
   const list = trpc.library.chaseQueue.useQuery(undefined, {
     enabled: clientReady,
     staleTime: 30_000,
   });
-  const setChaseLevel = trpc.library.setChaseLevel.useMutation({
-    onSuccess: () => {
-      void utils.library.binderList.invalidate();
-      void utils.library.chaseQueue.invalidate();
-      void utils.library.list.invalidate();
-      void utils.library.trackerPage.invalidate();
-      void utils.library.summary.invalidate();
-      void utils.wheel.state.invalidate();
-    },
-  });
+  const setChaseLevel = trpc.library.setChaseLevel.useMutation();
 
   const cards = useMemo(
     () =>
@@ -75,34 +73,42 @@ export function AssignChaseApp() {
     }
 
     setLeaving(true);
+    setSaveError(null);
+    setSavedDespiteError(false);
     window.setTimeout(async () => {
-      try {
-        await setChaseLevel.mutateAsync({ id: card.id, chaseLevel: level });
+      const outcome = await settleConfirmedChange(
+        () => setChaseLevel.mutateAsync({ id: card.id, chaseLevel: level }),
+        () => collectionChanged("target"),
+      );
+      if (!outcome.ok) {
+        setSaveError(outcome.error instanceof Error ? outcome.error.message : "The chase level was not saved. Nothing changed.");
+      } else {
         setAssignedIds((current) => [...current, card.id]);
-      } catch {
-        // Keep the card in place if the update fails.
-      } finally {
-        setLeaving(false);
+        if (outcome.refreshError) {
+          setSavedDespiteError(true);
+          setSaveError(collectionRefreshFailureMessage(outcome.refreshError));
+        }
       }
+      setLeaving(false);
     }, 180);
   }
 
   return (
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex min-h-[calc(100vh-40px)] w-full max-w-7xl flex-col gap-5">
-        <AppHeader eyebrow="Chase queue" title="Assign chase levels" />
+        <AppHeader title="Assign chase levels" />
 
-        <div className="mx-auto flex w-full max-w-4xl flex-1">
+        <div className="flex w-full flex-1">
         {list.isError ? (
           <DataLoadError
             className="flex-1"
             message={list.error.message}
-            onRetry={() => void list.refetch()}
+            onRetry={() => list.refetch()}
             title="Could not load wishlist cards"
           />
         ) : !clientReady || list.isLoading ? (
-          <section className="grid flex-1 place-items-center rounded-lg border border-zinc-300 bg-white">
-            <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
+          <section className="grid flex-1 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
+            <div className="text-center"><Loader2 aria-hidden="true" className="mx-auto size-6 animate-spin text-[#8a1f2d]" /><p className="mt-3 font-bold">Loading chase cards…</p></div>
           </section>
         ) : !card ? (
           <section className="grid flex-1 place-items-center rounded-lg border border-dashed border-zinc-300 bg-white px-6 text-center">
@@ -123,6 +129,7 @@ export function AssignChaseApp() {
                   : "translate-x-0 rotate-0 opacity-100"
               }`}
             >
+              {saveError ? <p className="mb-4 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900" role="alert">{saveError}{savedDespiteError ? "" : " Choose a level to retry safely."}</p> : null}
               {card.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img

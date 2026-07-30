@@ -45,11 +45,15 @@ const databaseUrl = `postgresql://postgres@127.0.0.1:${port}/${marker}`;
 assertDisposableUrl(databaseUrl);
 const testEnvironment = {
   ...process.env,
+  BETTER_AUTH_SECRET: `${marker}_better_auth_secret_for_isolated_tests`,
   DATABASE_URL: databaseUrl,
+  EBAY_CLIENT_ID: "isolated-client-id",
+  EBAY_CLIENT_SECRET: "isolated-client-secret",
+  EBAY_OAUTH_LOCAL_RU_NAME: "isolated-local-ru-name",
   NODE_ENV: "test",
   PG_POOL_MAX: "1",
 };
-for (const key of ["CI", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "VERCEL_REGION", "NEXT_PUBLIC_VERCEL_URL"]) {
+for (const key of ["AWS_REGION", "CI", "S3_BUCKET_NAME", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "VERCEL_REGION", "NEXT_PUBLIC_VERCEL_URL"]) {
   delete testEnvironment[key];
 }
 

@@ -21,6 +21,7 @@ import { DataLoadError } from "@/components/data-load-error";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 import { useClientReady } from "@/lib/use-client-ready";
+import { useCollectionChange } from "@/lib/use-collection-change";
 
 type Card = inferRouterOutputs<AppRouter>["library"]["list"][number];
 type MonthlyFavourite =
@@ -498,7 +499,8 @@ function PurchaseRow({
 
 function SpendSkeleton() {
   return (
-    <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_392px]">
+    <section aria-busy="true" className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_392px]" role="status">
+      <span className="sr-only">Loading spending data…</span>
       <div className="flex min-w-0 flex-col gap-5">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {["In view", "All time", "Average", "Highest"].map((label) => (
@@ -549,7 +551,8 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
   const clientReady = useClientReady();
   const currentMonth = currentMonthKey();
   const currentYear = Number(currentMonth.slice(0, 4));
-  const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
+  const [favouriteError, setFavouriteError] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>("month");
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [selectedYear, setSelectedYear] = useState(currentYear);
@@ -570,9 +573,7 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
     enabled: clientReady,
     staleTime: 30_000,
   });
-  const setMonthlyFavourite = trpc.spend.setMonthlyFavourite.useMutation({
-    onSuccess: () => void utils.spend.monthlyFavourites.invalidate(),
-  });
+  const setMonthlyFavourite = trpc.spend.setMonthlyFavourite.useMutation();
 
   const allSpendCards = useMemo<SpendCard[]>(
     () =>
@@ -740,11 +741,14 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
     setPurchasePage(1);
   }
 
-  function toggleFavourite(month: string, cardId: string, isFavourite: boolean) {
-    setMonthlyFavourite.mutate({
-      cardId: isFavourite ? null : cardId,
-      month,
-    });
+  async function toggleFavourite(month: string, cardId: string, isFavourite: boolean) {
+    setFavouriteError(null);
+    try {
+      await setMonthlyFavourite.mutateAsync({ cardId: isFavourite ? null : cardId, month });
+      await collectionChanged("favourite");
+    } catch (error) {
+      setFavouriteError(error instanceof Error ? error.message : "The favourite was not saved. Nothing changed; try again.");
+    }
   }
 
   function clearPurchaseFilters() {
@@ -754,18 +758,28 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
     setPurchasePage(1);
   }
 
-  const waitingForInitialCards = list.isLoading && !list.data;
+  const waitingForInitialCards =
+    !clientReady ||
+    (list.isPending && !list.data) ||
+    (favourites.isPending && !favourites.data);
 
   return (
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <AppHeader eyebrow="Spend tracker" title="Card spending" />
+        <AppHeader title="Card spending" />
+        {favouriteError ? <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900" role="alert">{favouriteError}</p> : null}
 
         {list.isError ? (
           <DataLoadError
             message={list.error.message}
-            onRetry={() => void list.refetch()}
+            onRetry={() => list.refetch()}
             title="Could not load spending data"
+          />
+        ) : favourites.isError ? (
+          <DataLoadError
+            message={favourites.error.message}
+            onRetry={() => favourites.refetch()}
+            title="Could not load favourite purchases"
           />
         ) : waitingForInitialCards ? (
           <SpendSkeleton />

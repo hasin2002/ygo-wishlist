@@ -1,47 +1,106 @@
 "use client";
 
 import { Info, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { rarityAbbreviations } from "@/lib/rarity-abbreviations";
 
 export function RarityGuidePopover() {
   const [isOpen, setIsOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+
+  function close() {
+    setIsOpen(false);
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    const trigger = triggerRef.current;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.requestAnimationFrame(() => {
+        (trigger?.isConnected ? trigger : previouslyFocused)?.focus();
+      });
+    };
+  }, [isOpen]);
 
   return (
-    <span className="relative z-30 inline-flex">
+    <>
       <button
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         aria-label="View rarity abbreviation guide"
-        className="inline-flex size-9 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:border-amber-300 hover:bg-amber-100 hover:text-amber-800 focus-visible:bg-amber-100"
+        className="inline-flex size-11 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700 shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:border-amber-300 hover:bg-amber-100 hover:text-amber-800 focus-visible:bg-amber-100"
         onClick={() => setIsOpen((open) => !open)}
+        ref={triggerRef}
         title="Rarity abbreviation guide"
         type="button"
       >
-        <Info aria-hidden="true" className="size-3.5" />
+        <Info aria-hidden="true" className="size-4" />
       </button>
 
-      {isOpen ? (
-        <>
-          <button
-            aria-label="Close rarity guide"
-            className="fixed inset-0 z-40 cursor-default bg-black/20 sm:bg-transparent"
-            onClick={() => setIsOpen(false)}
-            type="button"
-          />
+      {isOpen && typeof document !== "undefined" ? createPortal(
+        <div
+          aria-labelledby={titleId}
+          aria-modal="true"
+          className="fixed inset-0 z-[70] grid place-items-center bg-zinc-950/35 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) close();
+          }}
+          role="dialog"
+        >
           <section
-            aria-label="Rarity abbreviation guide"
-            className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-xl ring-1 ring-black/5 max-sm:fixed max-sm:inset-x-4 max-sm:top-16 max-sm:mt-0 max-sm:w-auto"
-            role="dialog"
+            className="flex max-h-[min(88dvh,34rem)] w-full max-w-80 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-xl ring-1 ring-black/5"
+            ref={dialogRef}
           >
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8a1f2d]">
+              <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8a1f2d]" id={titleId}>
                 Rarity guide
-              </span>
+              </h2>
               <button
                 aria-label="Close rarity guide"
-                className="grid size-8 place-items-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
-                onClick={() => setIsOpen(false)}
+                className="grid size-11 place-items-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+                onClick={close}
+                ref={closeButtonRef}
                 type="button"
               >
                 <X aria-hidden="true" className="size-4" />
@@ -63,8 +122,9 @@ export function RarityGuidePopover() {
               ))}
             </div>
           </section>
-        </>
+        </div>,
+        document.body,
       ) : null}
-    </span>
+    </>
   );
 }

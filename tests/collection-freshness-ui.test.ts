@@ -1,0 +1,89 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+function source(path: string) {
+  return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+}
+
+test("all collection loaders expose visible accessible status text", () => {
+  const loaders = [
+    ["src/components/assign-chase-app.tsx", /role="status"[\s\S]*Loading chase cards/],
+    ["src/components/binder-v2-app.tsx", /role="status"[\s\S]*Loading Binder/],
+    ["src/components/wishlist-app.tsx", /role="status"[\s\S]*Loading Library/],
+    ["src/components/spend-app.tsx", /role="status"[\s\S]*Loading spending data/],
+    ["src/components/wheel-app.tsx", /role="status"[\s\S]*Loading wheel cards/],
+  ] as const;
+  for (const [path, pattern] of loaders) assert.match(source(path), pattern, path);
+});
+
+test("Wheel, reset, and mixed-lot publish stay guarded through projection propagation", () => {
+  const wheel = source("src/components/wheel-app.tsx");
+  assert.match(wheel, /if \(spinActionRef\.current \|\| resetActionRef\.current \|\| busy/);
+  assert.match(wheel, /spinActionRef\.current = true;[\s\S]*await collectionChanged\("wheel"\)[\s\S]*spinActionRef\.current = false/);
+  assert.match(wheel, /resetActionRef\.current = true;[\s\S]*await collectionChanged\("wheel"\)[\s\S]*resetActionRef\.current = false/);
+  assert.match(wheel, /await collectionChanged\("wheel"\)[\s\S]*setResetOpen\(false\)[\s\S]*setResetStatus/);
+  assert.match(wheel, /setResetWarning\(collectionRefreshFailureMessage\(error\)\)/);
+
+  const lot = source("src/components/records/ebay-lot-listing.tsx");
+  assert.match(lot, /if \(!validation\?\.readyToPublish \|\| publishActionRef\.current\) return/);
+  assert.match(lot, /publishActionRef\.current = true;[\s\S]*await collectionChanged\("listing"\)[\s\S]*publishActionRef\.current = false/);
+  assert.match(lot, /publish\.isPending \|\|[\s\S]*publishing/);
+  assert.match(lot, /setPublishedUrl\(result\.listingUrl\)[\s\S]*lifecycle\.discard\(\)/);
+  assert.match(lot, /The listing was published, but its local draft could not be cleared/);
+});
+
+test("Spend distinguishes pending and failed projections from empty or zero values", () => {
+  const spend = source("src/components/spend-app.tsx");
+  const shell = source("src/components/app-shell.tsx");
+  assert.match(spend, /favourites\.isPending && !favourites\.data/);
+  assert.match(spend, /favourites\.isError[\s\S]*onRetry=\{\(\) => favourites\.refetch\(\)\}/);
+  assert.match(spend, /await collectionChanged\("favourite"\)/);
+  assert.match(shell, /currentMonth\.isError \|\| !currentMonth\.data[\s\S]*SpendSummaryState/);
+  assert.match(shell, /Spend unavailable — Retry/);
+});
+
+test("retry controls await caller refetch promises and reject duplicate in-flight retries", () => {
+  const errorSource = source("src/components/data-load-error.tsx");
+  assert.match(errorSource, /if \(retryingRef\.current\) return/);
+  assert.match(errorSource, /await onRetry\(\)/);
+
+  const callers = [
+    ["src/components/assign-chase-app.tsx", /onRetry=\{\(\) => list\.refetch\(\)\}/],
+    ["src/components/wishlist-app.tsx", /onRetry=\{\(\) => list\.refetch\(\)\}/],
+    ["src/components/spend-app.tsx", /onRetry=\{\(\) => list\.refetch\(\)\}/],
+    ["src/components/wheel-app.tsx", /onRetry=\{\(\) => wheelQuery\.refetch\(\)\}/],
+    ["src/components/records/records-app.tsx", /onRetry=\{source\.refresh\}/],
+  ] as const;
+  for (const [path, pattern] of callers) assert.match(source(path), pattern, path);
+  assert.match(
+    source("src/components/binder-v2-app.tsx"),
+    /onRetry=\{\(\) => Promise\.all\(\[cardsQuery\.refetch\(\), layoutQuery\.refetch\(\)\]\)\}/,
+  );
+});
+
+test("Binder writes have an immediate guard and preserve exact interaction state on write failure", () => {
+  const binder = source("src/components/binder-v2-app.tsx");
+  assert.match(binder, /if \(binderActionRef\.current\) return false/);
+  assert.match(binder, /const outcome = await settleConfirmedChange/);
+  assert.match(binder, /if \(!outcome\.ok\) \{[\s\S]*exact selection is still available[\s\S]*return false/);
+  assert.match(binder, /if \(confirmed\) \{[\s\S]*setSelectedCardId\(null\)[\s\S]*setDraggedCardId\(null\)/);
+});
+
+test("photo and listing mutations use their correct freshness event paths", () => {
+  const photos = source("src/components/records/card-inventory-images.tsx");
+  assert.match(photos, /isCollectionChangeStorageEvent\(event\.key, event\.newValue, "photos"\)\) void loadImages\(\)/);
+  assert.match(photos, /await collectionChanged\("photos"\)/);
+  assert.match(source("src/components/records/ebay-lot-listing.tsx"), /await collectionChanged\("listing"\)/);
+  assert.match(source("src/components/records/ebay-listing-action.tsx"), /setPublishedUrl\(result\.listingUrl\)[\s\S]*await collectionChanged\("listing"\)/);
+});
+
+test("saved Records surface refresh warnings without offering a duplicate submission", () => {
+  const provider = source("src/components/records/records-preview-provider.tsx");
+  const entry = source("src/components/records/record-entry-app.tsx");
+  assert.match(provider, /const outcome = await settleConfirmedChange/);
+  assert.match(provider, /outcome\.value\.warning/);
+  assert.match(provider, /outcome\.refreshError \? collectionRefreshFailureMessage\(outcome\.refreshError\) : null/);
+  assert.match(entry, /The Record is saved\. Do not submit it again/);
+  assert.match(entry, /role="alert">\{warning\}/);
+});

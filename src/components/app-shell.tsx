@@ -5,12 +5,12 @@ import {
   CircleDot,
   Store,
   FileClock,
-  Lightbulb,
   ListChecks,
   LogIn,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCcw,
   Sparkles,
   Wallet,
   X,
@@ -49,7 +49,6 @@ const recordsSubNavItems = [
 
 const adminNavItems = [
   { href: "/ebay", icon: Store, label: "eBay selling" },
-  { href: "/feature-ideas", icon: Lightbulb, label: "Feature ideas" },
 ] satisfies Array<{ href: string; icon: LucideIcon; label: string }>;
 
 type AppShellContextValue = {
@@ -79,7 +78,9 @@ function formatCurrency(value: number) {
 }
 
 function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  return href === "/"
+    ? pathname === "/" || pathname.startsWith("/wishlist")
+    : pathname.startsWith(href);
 }
 
 function isPlainNavigation(event: MouseEvent<HTMLAnchorElement>) {
@@ -180,36 +181,75 @@ function RecordsSubNavigation({
 
 function SpendSummaryLink({
   monthlyLabel,
+  monthlyUnknownCount,
   monthlyTotal,
   onSelect,
 }: {
   monthlyLabel: string;
+  monthlyUnknownCount: number;
   monthlyTotal: number;
   onSelect: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
+  const incomplete = monthlyUnknownCount > 0;
+  const completenessLabel = incomplete
+    ? `Known costs only; ${monthlyUnknownCount} cost${monthlyUnknownCount === 1 ? "" : "s"} unknown`
+    : "Actual cost";
   return (
     <Link
       className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 shadow-sm transition duration-200 hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
       href="/records"
       onClick={onSelect}
       prefetch
-      title={`Actual cost for ${monthlyLabel}`}
+      title={`${completenessLabel} for ${monthlyLabel}`}
     >
       <Wallet className="size-4 shrink-0" />
-      <span className="min-w-0 truncate text-zinc-500">{monthlyLabel}</span>
+      <span className="min-w-0 truncate text-zinc-500">{incomplete ? `${monthlyLabel} · ${monthlyUnknownCount} unknown` : monthlyLabel}</span>
       <span className="ml-auto shrink-0 tabular-nums text-zinc-950">{formatCurrency(monthlyTotal)}</span>
     </Link>
   );
 }
 
+function SpendSummaryState({
+  expanded,
+  onRetry,
+  pending,
+}: {
+  expanded: boolean;
+  onRetry: () => Promise<unknown>;
+  pending: boolean;
+}) {
+  if (pending) {
+    return (
+      <div
+        className={`flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-500 shadow-sm ${expanded ? "w-full" : "size-12 justify-center px-0"}`}
+        role="status"
+      >
+        <Wallet aria-hidden="true" className="size-4 shrink-0" />
+        <span className={expanded ? "" : "sr-only"}>Loading spend summary…</span>
+      </div>
+    );
+  }
+  return (
+    <button
+      aria-label={expanded ? undefined : "Spend summary unavailable. Retry"}
+      className={`flex min-h-10 items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm transition hover:border-amber-500 ${expanded ? "w-full" : "size-12 justify-center px-0"}`}
+      onClick={() => void onRetry()}
+      type="button"
+    >
+      <RefreshCcw aria-hidden="true" className="size-4 shrink-0" />
+      <span className={expanded ? "" : "sr-only"}>Spend unavailable — Retry</span>
+    </button>
+  );
+}
+
 function isAppRoute(pathname: string) {
   return pathname === "/"
+    || pathname.startsWith("/wishlist")
     || pathname.startsWith("/records")
     || pathname === "/assign-chase"
     || pathname === "/wheel"
     || pathname === "/binder-v2"
-    || pathname === "/ebay"
-    || pathname === "/feature-ideas";
+    || pathname === "/ebay";
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -239,6 +279,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
   const monthlyTotal = currentMonth.data?.total ?? 0;
   const monthlyLabel = currentMonth.data?.label ?? "This month";
+  const monthlyUnknownCount = currentMonth.data?.unknownCount ?? 0;
+  const showSpendSummary = hasSession && !localPreviewReview;
+  const spendSummaryPending =
+    !clientReady ||
+    (currentMonth.isPending && !currentMonth.data);
 
   async function signOut() {
     await authClient.signOut();
@@ -284,10 +329,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="mt-4 flex shrink-0 flex-col gap-2 border-t border-zinc-200 pt-3">
                 <ThemeToggle expanded={desktopMenuOpen} />
                 {isAuthenticated ? <button className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 ${desktopMenuOpen ? "w-full px-3" : "size-12 justify-center"}`} onClick={() => void signOut()} title="Sign out" type="button"><LogOut className="size-4 shrink-0" />{desktopMenuOpen ? <span>Sign out</span> : <span className="sr-only">Sign out</span>}</button> : sessionPending ? null : <Link aria-label="Owner sign in" className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] ${desktopMenuOpen ? "w-full px-3" : "size-12 justify-center"}`} href="/login" title="Owner sign in"><LogIn className="size-4 shrink-0" />{desktopMenuOpen ? <span>Owner sign in</span> : <span className="sr-only">Owner sign in</span>}</Link>}
-                {isAuthenticated ? desktopMenuOpen ? <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} onSelect={(event) => selectNavigation("/records", event)} /> : <Link aria-label={`Spend for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`} className="mt-3 inline-flex size-12 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]" href="/records" onClick={(event) => selectNavigation("/records", event)} prefetch title={`Actual cost for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}><Wallet className="size-4" /></Link> : null}
+                {showSpendSummary ? currentMonth.isError || !currentMonth.data
+                  ? <SpendSummaryState expanded={desktopMenuOpen} onRetry={() => currentMonth.refetch()} pending={spendSummaryPending} />
+                  : desktopMenuOpen
+                    ? <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} />
+                    : <Link aria-label={`${monthlyUnknownCount ? `Known costs only; ${monthlyUnknownCount} unknown. ` : ""}Spend for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`} className="mt-3 inline-flex size-12 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]" href="/records" onClick={(event) => selectNavigation("/records", event)} prefetch title={`${monthlyUnknownCount ? `Known costs only; ${monthlyUnknownCount} unknown. ` : ""}Actual cost for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}><Wallet className="size-4" /></Link>
+                  : null}
               </div>
             </aside>
-            {mobileMenuOpen ? <div className="fixed inset-x-4 top-4 z-50 rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-xl lg:hidden" id={mobileNavId}><div className="flex items-center justify-between gap-3"><span className="font-black text-zinc-950">Yu-Gi-Oh! Collection hub</span><button aria-label="Close navigation" className="inline-flex size-10 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600" onClick={() => setMobileMenuOpen(false)} type="button"><X className="size-4" /></button></div><nav aria-label="Primary" className="mt-3 grid gap-1">{visibleNavItems.map((item) => { const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`)); const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href); return <div key={item.href}><PrimaryNavLink active={active} item={item} mobile onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" ? <RecordsSubNavigation mobile onSelect={selectNavigation} pathname={activePathname} /> : null}</div>; })}</nav><div className="mt-3 border-t border-zinc-200 pt-3">{isAuthenticated ? <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} onSelect={(event) => selectNavigation("/records", event)} /> : null}<div className={isAuthenticated ? "mt-2" : ""}><ThemeToggle mobile /></div>{isAuthenticated ? <button className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={() => void signOut()} type="button"><LogOut className="size-4" />Sign out</button> : sessionPending ? null : <Link className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" href="/login"><LogIn className="size-4" />Owner sign in</Link>}</div></div> : null}
+            {mobileMenuOpen ? <div className="fixed inset-x-4 top-4 z-50 rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-xl lg:hidden" id={mobileNavId}><div className="flex items-center justify-between gap-3"><span className="font-black text-zinc-950">Yu-Gi-Oh! Collection hub</span><button aria-label="Close navigation" className="inline-flex size-10 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600" onClick={() => setMobileMenuOpen(false)} type="button"><X className="size-4" /></button></div><nav aria-label="Primary" className="mt-3 grid gap-1">{visibleNavItems.map((item) => { const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`)); const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href); return <div key={item.href}><PrimaryNavLink active={active} item={item} mobile onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" ? <RecordsSubNavigation mobile onSelect={selectNavigation} pathname={activePathname} /> : null}</div>; })}</nav><div className="mt-3 border-t border-zinc-200 pt-3">{showSpendSummary ? currentMonth.isError || !currentMonth.data ? <SpendSummaryState expanded onRetry={() => currentMonth.refetch()} pending={spendSummaryPending} /> : <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} /> : null}<div className={isAuthenticated ? "mt-2" : ""}><ThemeToggle mobile /></div>{isAuthenticated ? <button className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={() => void signOut()} type="button"><LogOut className="size-4" />Sign out</button> : sessionPending ? null : <Link className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" href="/login"><LogIn className="size-4" />Owner sign in</Link>}</div></div> : null}
           </>
         ) : null}
         {children}

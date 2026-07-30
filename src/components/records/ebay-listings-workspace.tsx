@@ -21,6 +21,8 @@ import {
 } from "@/lib/records/ebay-listings-route-state";
 import { inventoryCardDetailHref, inventoryCopySellHref } from "@/lib/records/inventory-route-state";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { DataLoadError } from "@/components/data-load-error";
+import { useCollectionChange } from "@/lib/use-collection-change";
 import { trpc } from "@/trpc/client";
 
 const lifecycleOptions = [
@@ -125,7 +127,9 @@ function ListingActions({
   };
 }) {
   const { data: session } = useSession();
-  const utils = trpc.useUtils();
+  const ebayStatus = trpc.ebay.status.useQuery(undefined, { enabled: session?.user.role === "admin", staleTime: 30_000 });
+  const ebayActionsAllowed = ebayStatus.data?.capability.ebay.allowed === true;
+  const collectionChanged = useCollectionChange();
   const refresh = trpc.ebay.refreshListingStatusById.useMutation();
   const [error, setError] = useState<string | null>(null);
   const member = listing.members[0];
@@ -135,8 +139,7 @@ function ListingActions({
     setError(null);
     try {
       await refresh.mutateAsync({ listingId: listing.id });
-      await utils.records.listEbayListings.invalidate();
-      await utils.records.snapshot.invalidate();
+      await collectionChanged("listing");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The listing status could not be refreshed.");
     }
@@ -145,7 +148,7 @@ function ListingActions({
   return (
     <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
       {listing.listingUrl ? <a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]" href={listing.listingUrl} rel="noreferrer" target="_blank"><ExternalLink aria-hidden="true" className="size-4" />Open on eBay<span className="sr-only"> (opens in a new tab)</span></a> : null}
-      {session?.user.role === "admin" ? <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60" disabled={refresh.isPending} onClick={() => void refreshStatus()} type="button"><RefreshCw aria-hidden="true" className={`size-4 ${refresh.isPending ? "animate-spin" : ""}`} />{refresh.isPending ? "Refreshing…" : "Refresh status"}</button> : null}
+      {session?.user.role === "admin" ? <button aria-describedby={!ebayActionsAllowed && ebayStatus.data ? "ebay-actions-paused" : undefined} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-60" disabled={!ebayActionsAllowed || refresh.isPending} onClick={() => void refreshStatus()} type="button"><RefreshCw aria-hidden="true" className={`size-4 ${refresh.isPending ? "animate-spin" : ""}`} />{refresh.isPending ? "Refreshing…" : "Refresh status"}</button> : null}
       {listing.saleRecordId ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]" href={`/records/history?record=${encodeURIComponent(listing.saleRecordId)}`}>Review Sale</Link> : null}
       {canRelist && member ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826]" href={inventoryCopySellHref(member.targetId, member.copyId, { card: "", copyQuantity: "all", edition: "all", kind: "cards", page: 1, rarity: [], status: "all" })}>Relist from Copy</Link> : null}
       {error ? <p className="basis-full text-sm font-semibold text-rose-700" role="alert">{error}</p> : null}
@@ -198,13 +201,14 @@ export function EbayListingsWorkspace({ initialState }: { initialState: EbayList
   }
 
   if (source.status === "loading" || sessionPending) return <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white font-bold" role="status">Loading tracked eBay listings…</div>;
-  if (source.status === "error") return <div className="rounded-lg border border-rose-300 bg-rose-50 p-5 text-rose-950" role="alert"><p className="font-black">Records could not be loaded</p><p className="mt-1 text-sm font-medium">{source.errorMessage || "Refresh the page and try again."}</p></div>;
-  if (source.mode !== "live") return <section className="rounded-lg border border-zinc-300 bg-white p-6 text-center"><PackageSearch aria-hidden="true" className="mx-auto size-7 text-zinc-400" /><h1 className="mt-3 text-xl font-black">Listings are available in live Records</h1><p className="mx-auto mt-2 max-w-lg text-sm font-medium text-zinc-600">This preview does not connect to tracked eBay listings.</p></section>;
-  if (session?.user.role !== "admin") return <section className="rounded-lg border border-amber-300 bg-amber-50 p-6 text-center text-amber-950"><h1 className="font-black">Admin access required</h1><p className="mt-2 text-sm font-medium">Only the collection owner can view and manage tracked eBay listings.</p></section>;
+  if (source.status === "error") return <DataLoadError message={source.errorMessage || "Nothing has been changed. Load Records again to see Listings."} onRetry={source.refresh} title="Records could not be loaded" />;
+  if (source.mode !== "live") return <section className="rounded-lg border border-zinc-300 bg-white p-6 text-center"><PackageSearch aria-hidden="true" className="mx-auto size-7 text-zinc-400" /><h2 className="mt-3 text-xl font-black">Listings are available in live Records</h2><p className="mx-auto mt-2 max-w-lg text-sm font-medium text-zinc-600">This preview does not connect to tracked eBay listings.</p></section>;
+  if (session?.user.role !== "admin") return <section className="rounded-lg border border-amber-300 bg-amber-50 p-6 text-center text-amber-950"><h2 className="font-black">Admin access required</h2><p className="mt-2 text-sm font-medium">Only the collection owner can view and manage tracked eBay listings.</p></section>;
 
-  return <section aria-labelledby="listings-title" className="grid gap-4">
-    <header><p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a1f2d]">Records</p><h1 className="mt-1 text-2xl font-black" id="listings-title">Listings</h1><p className="mt-1 text-sm font-medium text-zinc-600">Find tracked eBay listings, inspect the exact Copies in each offer, and recover safely when a status needs attention.</p></header>
-    {ebayStatus.data && (!ebayStatus.data.configured || !ebayStatus.data.connection) ? <aside className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between"><div className="flex gap-3"><Unplug aria-hidden="true" className="mt-0.5 size-5 shrink-0" /><div><p className="font-black">eBay is disconnected</p><p className="mt-1 text-sm font-medium">Reconnect eBay before refreshing a Listing or taking a selling action.</p></div></div><Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white" href="/ebay">Reconnect eBay</Link></aside> : null}
+  return <section aria-labelledby="page-title" className="grid gap-4">
+    <p className="text-sm font-medium text-zinc-600">Find tracked eBay listings, inspect the exact Copies in each offer, and recover safely when a status needs attention.</p>
+    {ebayStatus.isError ? <aside className="rounded-lg border border-rose-300 bg-rose-50 p-4 text-rose-950" role="alert"><p className="font-black">eBay readiness could not be checked</p><p className="mt-1 text-sm font-medium">Tracked local history remains visible, but eBay actions are paused.</p><button className="mt-3 min-h-11 rounded-md border border-rose-400 bg-white px-4 text-sm font-bold" onClick={() => void ebayStatus.refetch()} type="button">Retry eBay check</button></aside>
+      : ebayStatus.data && !ebayStatus.data.capability.ebay.allowed ? <aside className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between" id="ebay-actions-paused"><div className="flex gap-3"><Unplug aria-hidden="true" className="mt-0.5 size-5 shrink-0" /><div><p className="font-black">eBay actions are paused</p><p className="mt-1 text-sm font-medium">{ebayStatus.data.capability.ebay.message} {ebayStatus.data.capability.ebay.remedy}</p></div></div>{["not_connected", "reconnect_required", "missing_scopes"].includes(ebayStatus.data.capability.ebay.code) ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white" href="/ebay">Open eBay settings</Link> : null}</aside> : null}
     <form className="grid gap-3 rounded-lg border border-zinc-300 bg-white p-4 md:grid-cols-[minmax(0,1fr)_12rem_12rem_auto]" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); update({ page: 1, query: String(form.get("query") || "") }); }}>
       <label className="min-w-0"><span className="sr-only">Search listings</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" defaultValue={initialState.query} name="query" placeholder="Search title, card, set, Copy reference, or item ID" /></label>
       <label><span className="sr-only">Lifecycle state</span><select className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold" onChange={(event) => update({ lifecycle: event.target.value as EbayListingsRouteState["lifecycle"], page: 1 })} value={initialState.lifecycle}>{lifecycleOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

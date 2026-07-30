@@ -13,6 +13,7 @@ import {
   Search,
 } from "lucide-react";
 import Image from "next/image";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   DestructiveToast,
@@ -27,6 +28,11 @@ import {
   WizardActions,
   WizardProgress,
 } from "@/components/records/entry-form-ui";
+import {
+  DraftConflictDialog,
+  DraftHydrationBoundary,
+  FormDraftStatus,
+} from "@/components/records/form-draft-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import {
   copyExposureSelectorLabel,
@@ -35,6 +41,8 @@ import {
   physicalCopyStateLabel,
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { generatedSaleRecordName } from "@/lib/records/record-name";
+import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
+import { hasFields, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
 import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
 import type {
   CardCopy,
@@ -77,17 +85,30 @@ type LibraryImpact = {
   target: WishlistTarget;
 };
 
-function newSaleDraft(): SaleDraft {
+function newSaleDraft(copyId?: string | null): SaleDraft {
   return {
     version: 3,
-    kind: null,
+    kind: copyId ? "single" : null,
     recordName: "",
     date: today(),
     source: "eBay",
     proceeds: "",
     notes: "",
-    copyIds: [],
+    copyIds: copyId ? [copyId] : [],
   };
+}
+
+function isSaleDraft(value: unknown): value is SaleDraft {
+  if (!isRecord(value) || !hasFields(value, ["version", "kind", "recordName", "date", "source", "proceeds", "notes", "copyIds"])) return false;
+  return value.version === 3
+    && (value.kind === null || isOneOf(value.kind, ["single", "bulk"] as const))
+    && isString(value.recordName)
+    && isString(value.date)
+    && isString(value.source)
+    && isString(value.proceeds)
+    && isString(value.notes)
+    && Array.isArray(value.copyIds)
+    && value.copyIds.every(isString);
 }
 
 function CopyThumbnail({ eager = false, item, primaryPhotoUrl }: { eager?: boolean; item: AvailableCopy; primaryPhotoUrl?: string | null }) {
@@ -143,11 +164,26 @@ function LibraryImpactNotice({ impacts }: { impacts: LibraryImpact[] }) {
   );
 }
 
-export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
+export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: string) => void }) {
   const source = useRecordsDataSource();
-  const stored = source.drafts.sale as Partial<SaleDraft> | undefined;
-  const legacyDraftReset = Boolean(stored && (stored as { version?: number }).version !== 3);
-  const [draft, setDraft] = useState<SaleDraft>(() => (stored as { version?: number } | undefined)?.version === 3 ? stored as SaleDraft : newSaleDraft());
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedCopyId = searchParams.get("copyId");
+  const initialDraft = useMemo(() => newSaleDraft(requestedCopyId), [requestedCopyId]);
+  const launchIntent = useMemo(() => ({
+    kind: requestedCopyId ? "copy" as const : "none" as const,
+    id: requestedCopyId,
+    label: requestedCopyId ? `physical Copy #${copyShortReference(requestedCopyId)}` : undefined,
+  }), [requestedCopyId]);
+  const lifecycle = useFormDraftLifecycle({
+    workflow: "sale",
+    ownerScope: source.draftOwnerScope,
+    origin: `/records/new/sale${searchParams.size ? `?${searchParams.toString()}` : ""}`,
+    intent: launchIntent,
+    initialData: initialDraft,
+    isValidData: isSaleDraft,
+  });
+  const { data: draft, setData: setDraft } = lifecycle;
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -224,8 +260,6 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       : [];
   }), [selectedCopies, source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
 
-  useEffect(() => source.setDraft("sale", draft), [draft, source]);
-
   useEffect(() => {
     if (source.mode !== "live" || !photoCopyIds) return;
     let active = true;
@@ -287,8 +321,8 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
       setError(result.message);
       return;
     }
-    source.clearDraft("sale");
-    onSaved(result.id!);
+    lifecycle.discard();
+    onSaved(result.id!, result.warning);
   }
 
   function chooseType(kind: SaleKind) {
@@ -338,10 +372,16 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
   const resultEnd = Math.min(page * salePageSize, filteredCopies.length);
 
   return (
+    <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.back()} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
+        if (!window.confirm("Discard this Sale draft and start again?")) return;
+        lifecycle.discard();
+        setStep(1);
+      }} recoveryMessage={lifecycle.recoveryMessage} restored={lifecycle.restored} />
       <WizardProgress labels={["Sale type", "Sale details", "Cards sold", "Review"]} step={step} />
-      {legacyDraftReset ? <PreviewNotice label="Draft reset.">Your earlier Sale draft was reset because record names are now available.</PreviewNotice> : null}
 
       {step === 1 ? (
         <StepPanel step={step}>
@@ -632,5 +672,6 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string) => void }) {
         totalSteps={4}
       />
     </form>
+    </DraftHydrationBoundary>
   );
 }

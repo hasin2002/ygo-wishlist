@@ -10,8 +10,8 @@ import {
   Search,
 } from "lucide-react";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import {
   blankCardContents,
   CardContentsEditor,
@@ -21,9 +21,9 @@ import {
 import {
   DestructiveToast,
   fieldClass,
+  parsePoundsToPence,
   FormSection,
   penceToPounds,
-  poundsToPence,
   PreviewNotice,
   selectNumberOnFocus,
   StepPanel,
@@ -33,11 +33,27 @@ import {
   WizardProgress,
 } from "@/components/records/entry-form-ui";
 import {
+  DraftConflictDialog,
+  DraftHydrationBoundary,
+  FormDraftStatus,
+} from "@/components/records/form-draft-ui";
+import {
   blankProductIdentity,
   isTcgplayerProductUrl,
   ProductIdentityEditor,
   type ProductIdentityDraft,
 } from "@/components/records/product-identity-editor";
+import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
+import {
+  hasFields,
+  isCardContentsDraft,
+  isInteger,
+  isNullableString,
+  isOneOf,
+  isProductIdentityDraft,
+  isRecord,
+  isString,
+} from "@/lib/records/form-draft-validators";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import type {
   InventoryKind,
@@ -120,7 +136,7 @@ const purchaseKindOptions = [
 type SealedDraft = ProductIdentityDraft & { quantity: number };
 
 type PurchaseDraft = {
-  version: 6;
+  version: 7;
   kind: InventoryKind | null;
   recordName: string;
   date: string;
@@ -128,6 +144,7 @@ type PurchaseDraft = {
   sourceOther: string;
   listingUrl: string;
   total: string;
+  amountKnown: boolean;
   notes: string;
   card: CardContentsDraft;
   sealed: SealedDraft;
@@ -138,9 +155,35 @@ type PurchaseDraft = {
   supplyQuantity: number;
 };
 
+function isPurchaseDraft(value: unknown): value is PurchaseDraft {
+  if (!isRecord(value) || !hasFields(value, [
+    "version", "kind", "recordName", "date", "sourceOption", "sourceOther", "listingUrl", "total",
+    "amountKnown", "notes", "card", "sealed", "bulkTotalCardCount", "bulkCards", "supplyCategory", "supplyOther", "supplyQuantity",
+  ])) return false;
+  return value.version === 7
+    && (value.kind === null || isOneOf(value.kind, ["card", "sealed", "bulk", "supply"] as const))
+    && isString(value.recordName)
+    && isString(value.date)
+    && isOneOf(value.sourceOption, sourceOptions.map((option) => option.value))
+    && isString(value.sourceOther)
+    && isString(value.listingUrl)
+    && isString(value.total)
+    && typeof value.amountKnown === "boolean"
+    && isString(value.notes)
+    && isCardContentsDraft(value.card)
+    && isProductIdentityDraft(value.sealed)
+    && isInteger(value.sealed.quantity)
+    && isString(value.bulkTotalCardCount)
+    && Array.isArray(value.bulkCards)
+    && value.bulkCards.every(isCardContentsDraft)
+    && isOneOf(value.supplyCategory, ["sleeves", "binder", "storage", "playmat", "other"] as const)
+    && isString(value.supplyOther)
+    && isInteger(value.supplyQuantity);
+}
+
 function purchaseDraft(prefilledName: string): PurchaseDraft {
   return {
-    version: 6,
+    version: 7,
     kind: prefilledName ? "card" : null,
     recordName: "",
     date: today(),
@@ -148,6 +191,7 @@ function purchaseDraft(prefilledName: string): PurchaseDraft {
     sourceOther: "",
     listingUrl: "",
     total: "",
+    amountKnown: true,
     notes: "",
     card: blankCardContents(prefilledName),
     sealed: { ...blankProductIdentity(), quantity: 1 },
@@ -213,8 +257,9 @@ function cardCountSummary(cards: Array<{ quantity: number }>) {
   return `${cards.length} card ${cards.length === 1 ? "type" : "types"} · ${copies} ${copies === 1 ? "copy" : "copies"}`;
 }
 
-export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void }) {
+export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?: string) => void }) {
   const source = useRecordsDataSource();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const prefilledName = searchParams.get("cardName") ?? "";
   const prefilledTargetId = searchParams.get("targetId");
@@ -224,10 +269,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
   const prefilledPrinting = prefilledTarget
     ? source.snapshot.printings.find((printing) => printing.targetId === prefilledTarget.id)
     : null;
-  const stored = source.drafts.purchase as Partial<PurchaseDraft> | undefined;
-  const legacyDraftReset = Boolean(stored && (stored as { version?: number }).version !== 6);
-  const [draft, setDraft] = useState<PurchaseDraft>(() => {
-    if ((stored as { version?: number } | undefined)?.version === 6) return stored as PurchaseDraft;
+  const initialDraft = useMemo<PurchaseDraft>(() => {
     const initial = purchaseDraft(prefilledTarget?.name || prefilledName);
     if (!prefilledTarget) return initial;
     const edition: ProductEdition = prefilledTarget.edition.toLowerCase().includes("unlimited")
@@ -251,19 +293,34 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
         editedFields: [],
       },
     };
+  }, [prefilledName, prefilledPrinting, prefilledTarget]);
+  const launchIntent = useMemo(() => ({
+    kind: prefilledTargetId ? "wishlist-target" as const : "none" as const,
+    id: prefilledTargetId,
+    label: prefilledTarget?.name || prefilledName || undefined,
+  }), [prefilledName, prefilledTarget?.name, prefilledTargetId]);
+  const lifecycle = useFormDraftLifecycle({
+    workflow: "purchase",
+    ownerScope: source.draftOwnerScope,
+    origin: `/records/new/purchase${searchParams.size ? `?${searchParams.toString()}` : ""}`,
+    intent: launchIntent,
+    initialData: initialDraft,
+    isValidData: isPurchaseDraft,
   });
+  const { data: draft, setData: setDraft } = lifecycle;
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const giftSelected = draft.sourceOption === "gift";
-  const totalPence = giftSelected ? 0 : poundsToPence(draft.total);
+  const amountKnown = giftSelected || draft.amountKnown;
+  const parsedTotalPence = parsePoundsToPence(draft.total);
+  const totalPence = amountKnown ? (giftSelected ? 0 : parsedTotalPence ?? 0) : 0;
   const resolvedSource = sourceLabel(draft);
-
-  useEffect(() => source.setDraft("purchase", draft), [draft, source]);
 
   function detailsError() {
     if (!draft.recordName.trim()) return "Add a short record name before continuing.";
-    if (!draft.date || !draft.total.trim()) return "Add the date and all-in amount before continuing.";
+    if (!draft.date) return "Add the purchase date before continuing.";
+    if (amountKnown && !giftSelected && parsedTotalPence === null) return "Enter an amount such as 12 or 12.34, or mark the cost as unknown.";
     const sourceProblem = sourceValidationError(draft);
     if (sourceProblem) return sourceProblem;
     if (draft.listingUrl.trim() && !isHttpUrl(draft.listingUrl.trim())) return "Enter a complete purchase listing link beginning with http:// or https://.";
@@ -315,6 +372,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
       source: resolvedSource,
       listingUrl: draft.listingUrl.trim(),
       totalPence,
+      amountKnown,
       notes: draft.notes.trim(),
     };
     const result = await (draft.kind === "card"
@@ -327,24 +385,30 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
 
     setPending(false);
     if (!result.ok) { setError(result.message); return; }
-    source.clearDraft("purchase");
-    onSaved(result.id!);
+    lifecycle.discard();
+    onSaved(result.id!, result.warning);
   }
 
   const selectedKind = purchaseKindOptions.find((option) => option.kind === draft.kind);
 
   return (
+    <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.back()} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
+        if (!window.confirm("Discard this Purchase draft and start again?")) return;
+        lifecycle.discard();
+        setStep(1);
+      }} recoveryMessage={lifecycle.recoveryMessage} restored={lifecycle.restored} />
       <WizardProgress labels={["Item type", "Purchase", "Item details", "Review"]} step={step} />
-      {legacyDraftReset ? <PreviewNotice label="Draft reset.">Your earlier purchase draft was reset because record names are now required.</PreviewNotice> : null}
 
       {step === 1 ? <StepPanel step={step}><FormSection description="Choose one acquisition kind. Bulk can contain several identified cards, but the Purchase itself stays one lot." number={1} title="What did you buy?">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-purchase-kind-options>
           {purchaseKindOptions.map((option) => {
             const Icon = option.icon;
             const selected = draft.kind === option.kind;
-            return <button aria-pressed={selected} className={`group flex min-h-32 cursor-pointer items-start gap-4 rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[#8a1f2d] focus:ring-offset-2 ${selected ? "border-[#8a1f2d] bg-rose-50 ring-1 ring-[#8a1f2d]" : "border-zinc-300 bg-white hover:border-zinc-500 hover:bg-zinc-50"}`} key={option.kind} onClick={() => setDraft((current) => ({ ...current, kind: option.kind }))} type="button"><span className={`grid size-11 shrink-0 place-items-center rounded-lg ${selected ? "bg-[#8a1f2d] text-white" : "bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200"}`}><Icon className="size-5" /></span><span><strong className="block text-base text-zinc-950">{option.label}</strong><span className="mt-1 block text-sm font-medium leading-5 text-zinc-500">{option.description}</span></span></button>;
+            return <button aria-pressed={selected} className={`group flex h-full cursor-pointer items-start gap-3 rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[#8a1f2d] focus:ring-offset-2 ${selected ? "border-[#8a1f2d] bg-rose-50 ring-1 ring-[#8a1f2d]" : "border-zinc-300 bg-white hover:border-zinc-500 hover:bg-zinc-50"}`} key={option.kind} onClick={() => setDraft((current) => ({ ...current, kind: option.kind }))} type="button"><span className={`grid size-10 shrink-0 place-items-center rounded-lg ${selected ? "bg-[#8a1f2d] text-white" : "bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200"}`}><Icon className="size-5" /></span><span><strong className="block text-base text-zinc-950">{option.label}</strong><span className="mt-1 block text-sm font-medium leading-5 text-zinc-500">{option.description}</span></span></button>;
           })}
         </div>
       </FormSection></StepPanel> : null}
@@ -353,9 +417,9 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className={fieldClass} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, recordName: event.target.value }))} placeholder="e.g. July eBay job lot" required value={draft.recordName} /><span className="mt-1 block text-xs font-medium text-zinc-500">A short label you will recognise in Records History.</span></label>
           <label><span className="text-sm font-bold text-zinc-700">Purchase date <span className="text-rose-700">*</span></span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required type="date" value={draft.date} /></label>
-          <SellerSourceField onChange={(sourceValue) => setDraft((current) => ({ ...current, ...sourceValue, total: sourceValue.sourceOption === "gift" ? "0.00" : current.total }))} value={draft} />
+          <SellerSourceField onChange={(sourceValue) => setDraft((current) => ({ ...current, ...sourceValue, total: sourceValue.sourceOption === "gift" ? "0.00" : current.total, amountKnown: sourceValue.sourceOption === "gift" ? true : current.amountKnown }))} value={draft} />
           <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Purchase listing link <span className="font-medium text-zinc-400">(optional)</span></span><input className={fieldClass} inputMode="url" onChange={(event) => setDraft((current) => ({ ...current, listingUrl: event.target.value }))} placeholder="https://www.ebay.co.uk/itm/…" type="url" value={draft.listingUrl} /></label>
-          <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-bold leading-none text-zinc-500">£</span><input className={`${fieldClass} mt-0 pl-7 read-only:cursor-not-allowed read-only:bg-zinc-100 read-only:text-zinc-500`} inputMode="decimal" min="0" onChange={(event) => setDraft((current) => ({ ...current, total: event.target.value }))} placeholder="0.00" readOnly={giftSelected} required step="0.01" type="number" value={giftSelected ? "0.00" : draft.total} /></div><span className="mt-1 block text-xs font-medium text-zinc-500">{giftSelected ? "Gift selected — amount is fixed at £0.00." : "Include delivery, fees, and discounts."}</span></label>
+          <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid {amountKnown ? <span className="text-rose-700">*</span> : null}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-bold leading-none text-zinc-500">£</span><input className={`${fieldClass} mt-0 pl-7 read-only:cursor-not-allowed read-only:bg-zinc-100 read-only:text-zinc-500`} disabled={!amountKnown} inputMode="decimal" min="0" onChange={(event) => setDraft((current) => ({ ...current, total: event.target.value }))} placeholder="0.00" readOnly={giftSelected} required={amountKnown} step="0.01" type="number" value={giftSelected ? "0.00" : draft.total} /></div><span className="mt-1 block text-xs font-medium text-zinc-500">{giftSelected ? "Gift selected — amount is fixed at £0.00." : amountKnown ? "Include delivery, fees, and discounts." : "The cost will remain unknown, not £0.00."}</span><span className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-700"><input checked={!amountKnown} disabled={giftSelected} onChange={(event) => setDraft((current) => ({ ...current, amountKnown: !event.target.checked, total: event.target.checked ? "" : current.total }))} type="checkbox" /> Cost unknown</span></label>
           <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Purchase notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className={textAreaClass} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Condition, postage, or purchase context" value={draft.notes} /></label>
         </div>
       </FormSection></StepPanel> : null}
@@ -368,7 +432,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
       </FormSection></StepPanel> : null}
 
       {step === 4 ? <StepPanel step={step}><div className="grid gap-4"><PreviewNotice label={source.mode === "preview" ? "Preview only." : "Review before saving."}>This is a read-only review. Nothing has been saved; only the confirmation button below creates the {source.mode === "preview" ? "preview " : ""}purchase.</PreviewNotice><FormSection description="Check the purchase facts and item details. Use Edit to correct a section before confirming." number={4} title="Review purchase">
-        <div className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"><div><span className="text-xs font-bold uppercase text-zinc-500">Record name</span><p className="mt-1 font-bold">{draft.recordName}</p><p className="mt-1 text-sm font-medium text-zinc-500">{selectedKind?.label} · £{penceToPounds(totalPence)} · {resolvedSource} · {draft.date}</p></div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button></div>
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3"><div><span className="text-xs font-bold uppercase text-zinc-500">Record name</span><p className="mt-1 font-bold">{draft.recordName}</p><p className="mt-1 text-sm font-medium text-zinc-500">{selectedKind?.label} · {amountKnown ? `£${penceToPounds(totalPence)}` : "Cost unknown"} · {resolvedSource} · {draft.date}</p></div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button></div>
         {draft.listingUrl ? <a className="mt-3 inline-flex min-h-11 items-center gap-2 break-all text-sm font-bold text-[#8a1f2d]" href={draft.listingUrl} rel="noreferrer" target="_blank">Open original listing <ExternalLink className="size-4 shrink-0" /></a> : null}
         <div className="mt-4 grid gap-3">
           <div className="flex items-center justify-between"><h3 className="font-bold">{selectedKind?.label}</h3><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button></div>
@@ -383,16 +447,18 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string) => void 
 
       <WizardActions finalLabel={`Confirm${source.mode === "preview" ? " preview" : ""} purchase`} onBack={() => { setError(null); setStep((current) => Math.max(1, current - 1)); }} onConfirm={submit} onNext={nextStep} pending={pending} step={step} totalSteps={4} />
     </form>
+    </DraftHydrationBoundary>
   );
 }
 
 type OpeningDraft = {
-  version: 7;
+  version: 8;
   acquisitionMode: "tracked" | "untracked" | null;
   recordName: string;
   date: string;
   notes: string;
   total: string;
+  amountKnown: boolean;
   product: ProductIdentityDraft;
   sealedUnitId: string | null;
   sourceOption: SourceOption;
@@ -400,20 +466,40 @@ type OpeningDraft = {
   pulls: CardContentsDraft[];
 };
 
-export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }) {
+function isOpeningDraft(value: unknown): value is OpeningDraft {
+  if (!isRecord(value) || !hasFields(value, [
+    "version", "acquisitionMode", "recordName", "date", "notes", "total", "product", "sealedUnitId",
+    "amountKnown", "sourceOption", "sourceOther", "pulls",
+  ])) return false;
+  return value.version === 8
+    && (value.acquisitionMode === null || value.acquisitionMode === "tracked" || value.acquisitionMode === "untracked")
+    && isString(value.recordName)
+    && isString(value.date)
+    && isString(value.notes)
+    && isString(value.total)
+    && typeof value.amountKnown === "boolean"
+    && isProductIdentityDraft(value.product)
+    && isNullableString(value.sealedUnitId)
+    && isOneOf(value.sourceOption, sourceOptions.map((option) => option.value))
+    && isString(value.sourceOther)
+    && Array.isArray(value.pulls)
+    && value.pulls.every(isCardContentsDraft);
+}
+
+export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?: string) => void }) {
   const source = useRecordsDataSource();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requested = searchParams.get("sealedId");
   const requestedUnit = source.snapshot.sealedUnits.find((unit) => unit.id === requested && unit.status === "sealed");
-  const stored = source.drafts["pack-opening"] as Partial<OpeningDraft> | undefined;
-  const legacyDraftReset = Boolean(stored && (stored as { version?: number }).version !== 7);
-  const [draft, setDraft] = useState<OpeningDraft>(() => (stored as { version?: number } | undefined)?.version === 7 ? stored as OpeningDraft : {
-    version: 7,
+  const initialDraft = useMemo<OpeningDraft>(() => ({
+    version: 8,
     acquisitionMode: requestedUnit ? "tracked" : null,
     recordName: "",
     date: today(),
     notes: "",
     total: requestedUnit ? ((source.snapshot.records.find((record) => record.id === requestedUnit.acquiredRecordId)?.amountPence ?? 0) / 100).toFixed(2) : "",
+    amountKnown: requestedUnit ? source.snapshot.records.find((record) => record.id === requestedUnit.acquiredRecordId)?.amountKnown !== false : true,
     product: {
       ...blankProductIdentity(requestedUnit?.name || ""),
       tcgplayerUrl: requestedUnit?.tcgplayerUrl || "",
@@ -425,7 +511,21 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
     sourceOption: "ebay",
     sourceOther: "",
     pulls: [blankCardContents()],
+  }), [requestedUnit, source.snapshot.records]);
+  const launchIntent = useMemo(() => ({
+    kind: requested ? "sealed-unit" as const : "none" as const,
+    id: requested,
+    label: requestedUnit?.name || (requested ? "the requested sealed unit" : undefined),
+  }), [requested, requestedUnit?.name]);
+  const lifecycle = useFormDraftLifecycle({
+    workflow: "pack-opening",
+    ownerScope: source.draftOwnerScope,
+    origin: `/records/new/opening${searchParams.size ? `?${searchParams.toString()}` : ""}`,
+    intent: launchIntent,
+    initialData: initialDraft,
+    isValidData: isOpeningDraft,
   });
+  const { data: draft, setData: setDraft } = lifecycle;
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -439,15 +539,14 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
     ? source.snapshot.records.find((record) => record.id === selectedTrackedUnit.acquiredRecordId)
     : null;
   const openingSource = selectedAcquisition?.source ?? resolvedSource;
-  const openingTotalPence = selectedAcquisition?.amountPence ?? (giftSelected ? 0 : poundsToPence(draft.total));
+  const openingAmountKnown = selectedAcquisition ? selectedAcquisition.amountKnown !== false : giftSelected || draft.amountKnown;
+  const openingTotalPence = selectedAcquisition?.amountPence ?? (openingAmountKnown ? (giftSelected ? 0 : parsePoundsToPence(draft.total) ?? 0) : 0);
   const matchingSealedUnits = source.snapshot.sealedUnits.filter((unit) => {
     if (unit.status !== "sealed") return false;
     const acquisition = source.snapshot.records.find((record) => record.id === unit.acquiredRecordId);
     const query = sealedQuery.trim().toLowerCase();
     return !query || [unit.name, unit.edition, acquisition?.source, acquisition?.title].filter(Boolean).join(" ").toLowerCase().includes(query);
   });
-
-  useEffect(() => source.setDraft("pack-opening", draft), [draft, source]);
 
   function selectTrackedUnit(sealedUnitId: string) {
     const unit = source.snapshot.sealedUnits.find((item) => item.id === sealedUnitId && item.status === "sealed");
@@ -457,6 +556,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
       sourceOption: sourceOptions.find((option) => option.label === acquisition.source)?.value ?? "other",
       sourceOther: sourceOptions.some((option) => option.label === acquisition.source) ? "" : acquisition.source,
       total: (acquisition.amountPence / 100).toFixed(2),
+      amountKnown: acquisition.amountKnown !== false,
       product: { ...current.product, name: unit.name, tcgplayerUrl: unit.tcgplayerUrl || "", imageUrl: unit.imageUrl || null, edition: unit.edition || "", fetchAttempted: true, fetchStatus: "resolved", fetchMessage: "Loaded from tracked sealed stock." },
     }));
   }
@@ -471,7 +571,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
     if (draft.acquisitionMode === "untracked") {
       const problem = productError(draft.product, "sealed");
       if (problem) return problem;
-      if (!giftSelected && !draft.total.trim()) return "Add the all-in amount paid, or choose Gift.";
+      if (openingAmountKnown && !giftSelected && parsePoundsToPence(draft.total) === null) return "Enter an amount such as 12.34, or mark the cost as unknown.";
     }
     if (!draft.date) return "Add the opening date.";
     const sourceProblem = sourceValidationError(draft);
@@ -512,25 +612,32 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
       sealedUnitId: draft.sealedUnitId,
       source: openingSource,
       totalPence: openingTotalPence,
+      amountKnown: openingAmountKnown,
       useTrackedStock: draft.acquisitionMode === "tracked",
       pulls: draft.pulls.map((pull) => ({ ...productInput(pull), id: pull.id, quantity: pull.quantity })),
     });
     setPending(false);
     if (!result.ok) { setError(result.message); return; }
-    source.clearDraft("pack-opening");
-    onSaved(result.id!);
+    lifecycle.discard();
+    onSaved(result.id!, result.warning);
   }
 
   return (
+    <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.back()} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
+        if (!window.confirm("Discard this Pack Opening draft and start again?")) return;
+        lifecycle.discard();
+        setStep(1);
+      }} recoveryMessage={lifecycle.recoveryMessage} restored={lifecycle.restored} />
       <WizardProgress labels={["Opening type", "Product", "Pulled cards", "Review"]} step={step} />
-      {legacyDraftReset ? <PreviewNotice label="Draft reset.">Your earlier opening draft was reset because the opening type is now a separate first step.</PreviewNotice> : null}
 
       {step === 1 ? <StepPanel step={step}><FormSection description="Choose the kind of opening before adding any product details." number={1} title="How are you recording this opening?"><div className="grid gap-3 sm:grid-cols-2"><button aria-pressed={draft.acquisitionMode === "tracked"} className={`group flex min-h-32 items-start gap-4 rounded-lg border p-5 text-left ${draft.acquisitionMode === "tracked" ? "border-[#8a1f2d] bg-rose-50" : "border-zinc-300 bg-white hover:border-zinc-500 hover:bg-zinc-50"}`} onClick={() => setDraft((current) => ({ ...current, acquisitionMode: "tracked", sealedUnitId: null }))} type="button"><span className={`grid size-12 shrink-0 place-items-center rounded-lg ${draft.acquisitionMode === "tracked" ? "bg-[#8a1f2d] text-white" : "bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200"}`}><Archive className="size-6" /></span><span><strong className="block text-lg">Tracked sealed stock</strong><span className="mt-2 block text-sm font-medium text-zinc-500">Choose one product already in your sealed Inventory.</span></span></button><button aria-pressed={draft.acquisitionMode === "untracked"} className={`group flex min-h-32 items-start gap-4 rounded-lg border p-5 text-left ${draft.acquisitionMode === "untracked" ? "border-[#8a1f2d] bg-rose-50" : "border-zinc-300 bg-white hover:border-zinc-500 hover:bg-zinc-50"}`} onClick={() => setDraft((current) => ({ ...current, acquisitionMode: "untracked", sealedUnitId: null }))} type="button"><span className={`grid size-12 shrink-0 place-items-center rounded-lg ${draft.acquisitionMode === "untracked" ? "bg-[#8a1f2d] text-white" : "bg-zinc-100 text-zinc-700 group-hover:bg-zinc-200"}`}><PackageOpen className="size-6" /></span><span><strong className="block text-lg">Untracked opening</strong><span className="mt-2 block text-sm font-medium text-zinc-500">Record the sealed product, source, and full cost now.</span></span></button></div></FormSection></StepPanel> : null}
 
       {step === 2 ? <StepPanel step={step}><FormSection description={draft.acquisitionMode === "tracked" ? "Find the exact sealed unit you are opening." : "Add the sealed product and the shared details for this opening."} number={2} title="Opening details">
-        {draft.acquisitionMode === "tracked" ? <div className="grid gap-4"><label><span className="text-sm font-bold text-zinc-700">Find sealed product <span className="text-rose-700">*</span></span><span className="relative mt-1 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input autoFocus className={`${fieldClass} mt-0 pl-9`} onChange={(event) => setSealedQuery(event.target.value)} placeholder="Search product, edition, source, or purchase name" value={sealedQuery} /></span></label><div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-2">{matchingSealedUnits.length ? matchingSealedUnits.map((unit) => { const acquisition = source.snapshot.records.find((record) => record.id === unit.acquiredRecordId); const selected = unit.id === draft.sealedUnitId; return <button aria-pressed={selected} className={`w-full rounded-md border p-3 text-left transition ${selected ? "border-[#8a1f2d] bg-rose-50" : "border-transparent hover:border-zinc-300 hover:bg-zinc-50"}`} key={unit.id} onClick={() => selectTrackedUnit(unit.id)} type="button"><span className="block font-bold text-zinc-950">{unit.name}</span><span className="mt-1 block text-sm font-medium text-zinc-500">{unit.edition || "Edition unknown"} · {acquisition ? `£${(acquisition.amountPence / 100).toFixed(2)} · ${acquisition.source} · ${acquisition.date}` : "Purchase details unavailable"}</span></button>; }) : <p className="px-3 py-6 text-center text-sm font-medium text-zinc-500">No available sealed products match that search.</p>}</div>{selectedAcquisition ? <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm"><strong className="block">Cost from the original sealed purchase</strong><p className="mt-1 font-medium text-zinc-600">£{(selectedAcquisition.amountPence / 100).toFixed(2)} · {selectedAcquisition.source} · {selectedAcquisition.date}</p><p className="mt-1 text-zinc-500">This opening will use one sealed unit. The cost is already counted on that purchase.</p></div> : null}</div> : <div className="grid gap-5"><ProductIdentityEditor hideSealedEdition kind="sealed" onChange={(product) => setDraft((current) => ({ ...current, product }))} value={draft.product} /><label><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className={fieldClass} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, recordName: event.target.value }))} placeholder="e.g. Spellcasters Command opening" required value={draft.recordName} /></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">Product edition <span className="font-medium text-zinc-400">(optional)</span></span><select className={fieldClass} onChange={(event) => updateOpeningEdition(event.target.value as ProductEdition | "")} value={draft.product.edition}><option value="">Not specified</option><option value="1st Edition">1st Edition</option><option value="Unlimited Edition">Unlimited Edition</option><option value="Limited Edition">Limited Edition</option></select></label><SellerSourceField onChange={(sourceValue) => setDraft((current) => ({ ...current, ...sourceValue, total: sourceValue.sourceOption === "gift" ? "0.00" : current.total }))} value={draft} /></div><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-bold text-zinc-500">£</span><input className={`${fieldClass} mt-0 pl-7 read-only:bg-zinc-100`} inputMode="decimal" min="0" onChange={(event) => setDraft((current) => ({ ...current, total: event.target.value }))} readOnly={giftSelected} required step="0.01" type="number" value={giftSelected ? "0.00" : draft.total} /></div><span className="mt-1 block text-xs font-medium text-zinc-500">{giftSelected ? "Gift selected — amount is fixed at £0.00." : "Include delivery, fees, and discounts."}</span></label><label><span className="text-sm font-bold text-zinc-700">Opening date <span className="text-rose-700">*</span></span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required type="date" value={draft.date} /></label></div><label><span className="text-sm font-bold text-zinc-700">Opening notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className={textAreaClass} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Condition, pull, or opening context" value={draft.notes} /></label></div>}
+        {draft.acquisitionMode === "tracked" ? <div className="grid gap-4"><label><span className="text-sm font-bold text-zinc-700">Find sealed product <span className="text-rose-700">*</span></span><span className="relative mt-1 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input autoFocus className={`${fieldClass} mt-0 pl-9`} onChange={(event) => setSealedQuery(event.target.value)} placeholder="Search product, edition, source, or purchase name" value={sealedQuery} /></span></label><div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-2">{matchingSealedUnits.length ? matchingSealedUnits.map((unit) => { const acquisition = source.snapshot.records.find((record) => record.id === unit.acquiredRecordId); const selected = unit.id === draft.sealedUnitId; return <button aria-pressed={selected} className={`w-full rounded-md border p-3 text-left transition ${selected ? "border-[#8a1f2d] bg-rose-50" : "border-transparent hover:border-zinc-300 hover:bg-zinc-50"}`} key={unit.id} onClick={() => selectTrackedUnit(unit.id)} type="button"><span className="block font-bold text-zinc-950">{unit.name}</span><span className="mt-1 block text-sm font-medium text-zinc-500">{unit.edition || "Edition unknown"} · {acquisition ? `${acquisition.amountKnown === false ? "Cost unknown" : `£${(acquisition.amountPence / 100).toFixed(2)}`} · ${acquisition.source} · ${acquisition.date}` : "Purchase details unavailable"}</span></button>; }) : <p className="px-3 py-6 text-center text-sm font-medium text-zinc-500">No available sealed products match that search.</p>}</div>{selectedAcquisition ? <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm"><strong className="block">Cost from the original sealed purchase</strong><p className="mt-1 font-medium text-zinc-600">{selectedAcquisition.amountKnown === false ? "Cost unknown" : `£${(selectedAcquisition.amountPence / 100).toFixed(2)}`} · {selectedAcquisition.source} · {selectedAcquisition.date}</p><p className="mt-1 text-zinc-500">This opening will use one sealed unit. The cost is already counted on that purchase.</p></div> : null}</div> : <div className="grid gap-5"><ProductIdentityEditor hideSealedEdition kind="sealed" onChange={(product) => setDraft((current) => ({ ...current, product }))} value={draft.product} /><label><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className={fieldClass} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, recordName: event.target.value }))} placeholder="e.g. Spellcasters Command opening" required value={draft.recordName} /></label><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">Product edition <span className="font-medium text-zinc-400">(optional)</span></span><select className={fieldClass} onChange={(event) => updateOpeningEdition(event.target.value as ProductEdition | "")} value={draft.product.edition}><option value="">Not specified</option><option value="1st Edition">1st Edition</option><option value="Unlimited Edition">Unlimited Edition</option><option value="Limited Edition">Limited Edition</option></select></label><SellerSourceField onChange={(sourceValue) => setDraft((current) => ({ ...current, ...sourceValue, total: sourceValue.sourceOption === "gift" ? "0.00" : current.total, amountKnown: sourceValue.sourceOption === "gift" ? true : current.amountKnown }))} value={draft} /></div><div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">All-in amount paid {openingAmountKnown ? <span className="text-rose-700">*</span> : null}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-bold text-zinc-500">£</span><input className={`${fieldClass} mt-0 pl-7 read-only:bg-zinc-100`} disabled={!openingAmountKnown} inputMode="decimal" min="0" onChange={(event) => setDraft((current) => ({ ...current, total: event.target.value }))} readOnly={giftSelected} required={openingAmountKnown} step="0.01" type="number" value={giftSelected ? "0.00" : draft.total} /></div><span className="mt-1 block text-xs font-medium text-zinc-500">{giftSelected ? "Gift selected — amount is fixed at £0.00." : openingAmountKnown ? "Include delivery, fees, and discounts." : "The cost will remain unknown, not £0.00."}</span><span className="mt-2 flex items-center gap-2 text-sm font-semibold"><input checked={!openingAmountKnown} disabled={giftSelected} onChange={(event) => setDraft((current) => ({ ...current, amountKnown: !event.target.checked, total: event.target.checked ? "" : current.total }))} type="checkbox" /> Cost unknown</span></label><label><span className="text-sm font-bold text-zinc-700">Opening date <span className="text-rose-700">*</span></span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} required type="date" value={draft.date} /></label></div><label><span className="text-sm font-bold text-zinc-700">Opening notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className={textAreaClass} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Condition, pull, or opening context" value={draft.notes} /></label></div>}
       </FormSection></StepPanel> : null}
 
       {step === 3 ? <StepPanel step={step}><FormSection description="Each row creates physical Copies tied to this opening. Fetch and check every card before reviewing." number={3} title="Pulled cards"><CardContentsEditor noun="pulled card" onChange={(pulls) => setDraft((current) => ({ ...current, pulls }))} rows={draft.pulls} /></FormSection></StepPanel> : null}
@@ -544,5 +651,6 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string) => void }
 
       <WizardActions finalLabel={`Confirm${source.mode === "preview" ? " preview" : ""} opening`} onBack={() => { setError(null); setStep((current) => Math.max(1, current - 1)); }} onConfirm={submit} onNext={nextStep} pending={pending} step={step} totalSteps={4} />
     </form>
+    </DraftHydrationBoundary>
   );
 }

@@ -33,6 +33,9 @@ export async function resolve(specifier, context, nextResolve) {
   if (specifier === "next/headers") {
     return { shortCircuit: true, url: "data:text/javascript,export%20async%20function%20headers()%7Breturn%20new%20Headers()%7D" };
   }
+  if (specifier === "next/server") {
+    return nextResolve("next/server.js", context);
+  }
   if (specifier.startsWith("@/")) {
     const file = await existingFile(path.join(root, "src", specifier.slice(2)));
     if (file) return { shortCircuit: true, url: pathToFileURL(file).href };

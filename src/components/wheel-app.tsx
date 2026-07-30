@@ -28,6 +28,10 @@ import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 import { useClientReady } from "@/lib/use-client-ready";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
 
 type WheelItem = inferRouterOutputs<AppRouter>["wheel"]["state"]["active"][number];
 type ChaseFilterValue = "unset" | "5" | "4" | "3" | "2" | "1";
@@ -329,7 +333,7 @@ function Pager({
 
 export function WheelApp() {
   const clientReady = useClientReady();
-  const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
   const wheelQuery = trpc.wheel.state.useQuery(undefined, {
     enabled: clientReady,
   });
@@ -337,6 +341,7 @@ export function WheelApp() {
   const resetWheel = trpc.wheel.reset.useMutation();
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [winner, setWinner] = useState<WheelItem | null>(null);
   const [selectedCardModal, setSelectedCardModal] = useState<WheelItem | null>(
     null,
@@ -344,10 +349,14 @@ export function WheelApp() {
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const [resetOpen, setResetOpen] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
+  const [resetWarning, setResetWarning] = useState<string | null>(null);
   const [resetStatus, setResetStatus] = useState("");
+  const [wheelActionError, setWheelActionError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState(1);
   const [pickedPage, setPickedPage] = useState(1);
   const [mobileWheelDetailsOpen, setMobileWheelDetailsOpen] = useState(false);
+  const spinActionRef = useRef(false);
+  const resetActionRef = useRef(false);
   const [chaseFilters, setChaseFilters] = useState<ChaseFilterValue[]>([]);
   const [minPriceInput, setMinPriceInput] = useState("");
   const [maxPriceInput, setMaxPriceInput] = useState("");
@@ -402,7 +411,9 @@ export function WheelApp() {
   const busy =
     wheelQuery.isLoading ||
     spinWheel.isPending ||
-    resetWheel.isPending;
+    resetWheel.isPending ||
+    spinning ||
+    resetting;
 
   useEffect(() => {
     return () => {
@@ -439,27 +450,45 @@ export function WheelApp() {
   }, [selectedCardModal]);
 
   async function spin() {
-    if (busy || spinning || !filteredActive.length) {
+    if (spinActionRef.current || resetActionRef.current || busy || !filteredActive.length) {
       return;
     }
+    spinActionRef.current = true;
+    setSpinning(true);
 
     if (resultTimerRef.current) {
       window.clearTimeout(resultTimerRef.current);
     }
 
     setWinner(null);
-    const result = await spinWheel.mutateAsync({
-      chaseLevels: chaseFilterPayload(chaseFilters),
-      maxPrice: maxPriceFilter ?? undefined,
-      minPrice: minPriceFilter ?? undefined,
-    });
+    setWheelActionError(null);
+    let result: Awaited<ReturnType<typeof spinWheel.mutateAsync>>;
+    try {
+      result = await spinWheel.mutateAsync({
+        chaseLevels: chaseFilterPayload(chaseFilters),
+        maxPrice: maxPriceFilter ?? undefined,
+        minPrice: minPriceFilter ?? undefined,
+      });
+    } catch (error) {
+      spinActionRef.current = false;
+      setSpinning(false);
+      setWheelActionError(error instanceof Error ? error.message : "The wheel did not record a pick. Nothing changed; try spinning again.");
+      return;
+    }
+    try {
+      await collectionChanged("wheel");
+    } catch (error) {
+      setWheelActionError(collectionRefreshFailureMessage(error));
+    }
     const winnerIndex = filteredActive.findIndex(
       (item) => item.card.id === result.selected.card.id,
     );
     const winnerSegment = spinSegments[winnerIndex];
 
     if (!winnerSegment) {
-      await utils.wheel.state.invalidate();
+      spinActionRef.current = false;
+      setSpinning(false);
+      setWheelActionError("The wheel recorded a pick, but its animation could not be prepared. Refresh before spinning again.");
       return;
     }
 
@@ -473,39 +502,52 @@ export function WheelApp() {
       delta += 360;
     }
 
-    setSpinning(true);
     setRotation(rotation + 1800 + delta);
 
     resultTimerRef.current = window.setTimeout(() => {
       setWinner(result.selected);
       setSelectedCardModal(result.selected);
+      spinActionRef.current = false;
       setSpinning(false);
-      void utils.wheel.state.invalidate();
     }, 2300);
   }
 
   async function reset() {
-    if (resetWheel.isPending) {
+    if (resetActionRef.current || spinActionRef.current || busy) {
+      return;
+    }
+    resetActionRef.current = true;
+    setResetting(true);
+
+    setResetError(null);
+    setResetWarning(null);
+    setResetStatus("");
+
+    let result: Awaited<ReturnType<typeof resetWheel.mutateAsync>>;
+    try {
+      result = await resetWheel.mutateAsync();
+    } catch (error) {
+      resetActionRef.current = false;
+      setResetting(false);
+      setResetError(resetErrorMessage(error));
       return;
     }
 
-    setResetError(null);
-    setResetStatus("");
-
+    setWinner(null);
+    setRotation(0);
+    setSelectedCardModal(null);
+    setTilt({ x: 0, y: 0 });
+    setActivePage(1);
+    setPickedPage(1);
     try {
-      const result = await resetWheel.mutateAsync();
-
-      setWinner(null);
-      setRotation(0);
-      setResetOpen(false);
-      setSelectedCardModal(null);
-      setTilt({ x: 0, y: 0 });
-      setActivePage(1);
-      setPickedPage(1);
-      setResetStatus(resetSuccessMessage(result.resetCount));
-      void utils.wheel.state.invalidate();
+      await collectionChanged("wheel");
     } catch (error) {
-      setResetError(resetErrorMessage(error));
+      setResetWarning(collectionRefreshFailureMessage(error));
+    } finally {
+      setResetOpen(false);
+      setResetStatus(resetSuccessMessage(result.resetCount));
+      resetActionRef.current = false;
+      setResetting(false);
     }
   }
 
@@ -551,7 +593,6 @@ export function WheelApp() {
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <AppHeader
-          eyebrow="Wishlist decider"
           title="Spin for next card"
           actions={
             <div className="flex items-center gap-2">
@@ -561,6 +602,7 @@ export function WheelApp() {
                 disabled={busy}
                 onClick={() => {
                   setResetError(null);
+                  setResetWarning(null);
                   setResetOpen(true);
                 }}
                 title="Reset wheel"
@@ -571,6 +613,8 @@ export function WheelApp() {
             </div>
           }
         />
+        {wheelActionError ? <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900" role="alert">{wheelActionError}</p> : null}
+        {resetWarning ? <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950" role="alert">{resetWarning}</p> : null}
 
         <div aria-atomic="true" aria-live="polite">
           {resetStatus ? (
@@ -777,7 +821,7 @@ export function WheelApp() {
                 <DataLoadError
                   className="w-full"
                   message={wheelLoadErrorMessage(wheelQuery.error.message)}
-                  onRetry={() => void wheelQuery.refetch()}
+                  onRetry={() => wheelQuery.refetch()}
                   title="Could not load wheel"
                 />
               ) : (
@@ -800,7 +844,7 @@ export function WheelApp() {
                   type="button"
                 >
                   {wheelQuery.isLoading ? (
-                    <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
+                    <span role="status"><Loader2 aria-hidden="true" className="mx-auto size-6 animate-spin text-[#8a1f2d]" /><span className="sr-only">Loading wheel cards…</span></span>
                   ) : (
                     <div>
                       <p className="flex items-center justify-center gap-1 text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
@@ -948,7 +992,7 @@ export function WheelApp() {
 
       {resetOpen ? (
         <div
-          aria-busy={resetWheel.isPending}
+          aria-busy={resetting}
           aria-labelledby="reset-wheel-title"
           aria-modal="true"
           className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
@@ -979,7 +1023,7 @@ export function WheelApp() {
             <div className="mt-5 flex justify-end gap-2">
               <button
                 className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-60"
-                disabled={resetWheel.isPending}
+                disabled={resetting}
                 onClick={() => {
                   setResetError(null);
                   setResetOpen(false);
@@ -990,11 +1034,11 @@ export function WheelApp() {
               </button>
               <button
                 className="inline-flex min-h-10 items-center gap-2 rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
-                disabled={resetWheel.isPending}
+                disabled={resetting}
                 onClick={reset}
                 type="button"
               >
-                {resetWheel.isPending ? (
+                {resetting ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
                     Resetting...

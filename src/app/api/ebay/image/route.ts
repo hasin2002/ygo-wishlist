@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  EbayImageOperationError,
+  executeEbayImagePostOperation,
+  parseEbayImagePostOperation,
+} from "@/lib/records/ebay-image-operation";
+import {
   archiveAndImportEbayImage,
   archiveAndImportInventoryImage,
   archiveInventoryImageDraft,
@@ -10,6 +15,7 @@ import {
   uploadArchivedEbayImage,
 } from "@/server/ebay-listing";
 import { EbayAuthorizationError } from "@/server/ebay-seller";
+import { getEbayCapabilityForSession } from "@/server/ebay-capabilities";
 import { getSessionFromHeaders } from "@/server/session";
 
 export const runtime = "nodejs";
@@ -33,16 +39,21 @@ function previewUrl(copyId: string, archiveKey: string) {
 
 export async function GET(request: Request) {
   const session = await getSessionFromHeaders(request.headers);
-  if (!session) return NextResponse.json({ message: "Sign in to view a listing image." }, { status: 401 });
-  if (session.user.role !== "admin") {
-    return NextResponse.json({ message: "Administrator access is required." }, { status: 403 });
-  }
   const params = new URL(request.url).searchParams;
   const copyId = params.get("copyId")?.trim() ?? "";
   const archiveKey = params.get("key")?.trim() ?? "";
   if (!copyId || !archiveKey) {
     return NextResponse.json({ message: "The archived listing image is missing." }, { status: 400 });
   }
+  const capability = await getEbayCapabilityForSession(session);
+  if (!capability.canManageListingPhotoDrafts) {
+    return NextResponse.json({ message: capability.mode === "preview"
+      ? "Listing photos are unavailable in preview mode. Switch to live Records."
+      : session
+        ? "Administrator seller permission is required to view listing photos."
+        : "Sign in to view a listing image." }, { status: session ? 403 : 401 });
+  }
+  if (!session) return NextResponse.json({ message: "Sign in to view a listing image." }, { status: 401 });
 
   try {
     const image = await getEbayListingImageDraft(session.user.id, copyId, archiveKey);
@@ -61,131 +72,68 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const session = await getSessionFromHeaders(request.headers);
-  if (!session) return NextResponse.json({ message: "Sign in to upload a listing image." }, { status: 401 });
-  if (session.user.role !== "admin") {
-    return NextResponse.json({ message: "Administrator access is required." }, { status: 403 });
-  }
-
-  let image: File | null = null;
-  let archiveKey = "";
-  let sourceUrl = "";
-  let inventoryKey = "";
-  let inventoryCopyId = "";
-  let stageOnly = false;
-  let copyId = "";
+  let parsed: ReturnType<typeof parseEbayImagePostOperation>;
   try {
     const form = await request.formData();
-    const candidate = form.get("image");
-    image = candidate instanceof File ? candidate : null;
-    const preparedImage = form.get("archiveKey");
-    archiveKey = typeof preparedImage === "string"
-      ? preparedImage.trim()
-      : "";
-    const source = form.get("sourceUrl");
-    sourceUrl = typeof source === "string" ? source.trim() : "";
-    const savedImage = form.get("inventoryKey");
-    inventoryKey = typeof savedImage === "string" ? savedImage.trim() : "";
-    const inventoryCopy = form.get("inventoryCopyId");
-    inventoryCopyId = typeof inventoryCopy === "string" ? inventoryCopy.trim() : "";
-    stageOnly = form.get("stageOnly") === "true";
-    const copy = form.get("copyId");
-    copyId = typeof copy === "string" ? copy.trim() : "";
-  } catch {
-    return NextResponse.json({ message: "Choose an image file to upload." }, { status: 400 });
+    parsed = parseEbayImagePostOperation(form);
+  } catch (error) {
+    return NextResponse.json({ message: error instanceof EbayImageOperationError
+      ? error.message
+      : "Choose one valid listing-photo operation." }, { status: 400 });
   }
-  if (!copyId) return NextResponse.json({ message: "Choose the physical card copy for this listing." }, { status: 400 });
-  if (archiveKey) {
-    try {
-      const result = await uploadArchivedEbayImage(
-        session.user.id,
-        copyId,
-        archiveKey,
-      );
+  const session = await getSessionFromHeaders(request.headers);
+  const capability = await getEbayCapabilityForSession(session);
+  const localInventoryStage = parsed.operation.kind === "stage-inventory";
+  if (localInventoryStage) {
+    if (!capability.canManageListingPhotoDrafts) {
+      return NextResponse.json({ message: capability.mode === "preview"
+        ? "Listing photos are unavailable in preview mode. Switch to live Records."
+        : session
+          ? "Administrator seller permission is required to prepare listing photos."
+          : "Sign in to prepare listing photos." }, { status: session ? 403 : 401 });
+    }
+  } else {
+    if (!capability.ebay.allowed) {
       return NextResponse.json({
-        ...result,
-        previewUrl: previewUrl(copyId, result.archiveKey),
-      });
-    } catch (error) {
-      if (error instanceof EbayAuthorizationError) {
-        return NextResponse.json({
-          message: "Reconnect eBay before preparing the lot photos.",
-        }, { status: 401 });
-      }
-      const message = error instanceof EbayListingError
-        ? error.message
-        : "The prepared photo could not be uploaded to eBay.";
-      return NextResponse.json({ message }, { status: 502 });
+        message: `${capability.ebay.message} ${capability.ebay.remedy}`.trim(),
+      }, { status: session ? 403 : 401 });
     }
   }
-  if (inventoryKey) {
-    try {
-      const result = stageOnly
-        ? await archiveInventoryImageDraft(
-            session.user.id,
-            copyId,
-            inventoryKey,
-            inventoryCopyId || copyId,
-          )
-        : await archiveAndImportInventoryImage(
-            session.user.id,
-            copyId,
-            inventoryKey,
-            inventoryCopyId || copyId,
-          );
-      return NextResponse.json({ ...result, previewUrl: previewUrl(copyId, result.archiveKey) });
-    } catch (error) {
-      if (error instanceof EbayAuthorizationError) {
-        return NextResponse.json({ message: "Connect eBay before importing a saved card photo." }, { status: 401 });
-      }
-      const message = error instanceof EbayListingError
-        ? error.message
-        : "The saved card photo could not be imported to eBay.";
-      return NextResponse.json({ message }, { status: 502 });
+  if (!session) return NextResponse.json({ message: "Sign in to manage listing photos." }, { status: 401 });
+  const { copyId, operation } = parsed;
+  if (operation.kind === "upload-file") {
+    if (!allowedImageTypes.has(operation.file.type)) {
+      return NextResponse.json({ message: "Use a JPG, PNG, WEBP, AVIF, HEIC, GIF, BMP, or TIFF image." }, { status: 400 });
     }
-  }
-  if (sourceUrl) {
-    try {
-      const result = await archiveAndImportEbayImage(session.user.id, copyId, sourceUrl);
-      return NextResponse.json({ ...result, previewUrl: previewUrl(copyId, result.archiveKey) });
-    } catch (error) {
-      if (error instanceof EbayAuthorizationError) {
-        return NextResponse.json({ message: "Connect eBay before importing a listing image." }, { status: 401 });
-      }
-      const message = error instanceof EbayListingError
-        ? error.message
-        : "The catalogue image could not be imported to eBay.";
-      return NextResponse.json({ message }, { status: 502 });
+    if (operation.file.size === 0 || operation.file.size > maximumImageBytes) {
+      return NextResponse.json({ message: "Use an image smaller than 12 MB." }, { status: 400 });
     }
-  }
-  if (!image || !allowedImageTypes.has(image.type)) {
-    return NextResponse.json({ message: "Use a JPG, PNG, WEBP, AVIF, HEIC, GIF, BMP, or TIFF image." }, { status: 400 });
-  }
-  if (image.size === 0 || image.size > maximumImageBytes) {
-    return NextResponse.json({ message: "Use an image smaller than 12 MB." }, { status: 400 });
   }
 
   try {
-    const result = await archiveAndUploadEbayImage(session.user.id, copyId, image);
+    const result = await executeEbayImagePostOperation(parsed, session.user.id, {
+      importCatalogue: archiveAndImportEbayImage,
+      importInventory: archiveAndImportInventoryImage,
+      stageInventory: archiveInventoryImageDraft,
+      uploadArchived: uploadArchivedEbayImage,
+      uploadFile: archiveAndUploadEbayImage,
+    });
     return NextResponse.json({ ...result, previewUrl: previewUrl(copyId, result.archiveKey) });
   } catch (error) {
     if (error instanceof EbayAuthorizationError) {
-      return NextResponse.json({ message: "Connect eBay before uploading a listing image." }, { status: 401 });
+      return NextResponse.json({ message: "Reconnect eBay before sending listing photos to eBay." }, { status: 401 });
     }
     const message = error instanceof EbayListingError
       ? error.message
-      : "The image could not be uploaded to eBay. Try again shortly.";
+      : localInventoryStage
+        ? "The saved card photo could not be prepared."
+        : "The image could not be uploaded to eBay. Try again shortly.";
     return NextResponse.json({ message }, { status: 502 });
   }
 }
 
 export async function DELETE(request: Request) {
   const session = await getSessionFromHeaders(request.headers);
-  if (!session) return NextResponse.json({ message: "Sign in to remove a listing image." }, { status: 401 });
-  if (session.user.role !== "admin") {
-    return NextResponse.json({ message: "Administrator access is required." }, { status: 403 });
-  }
-
   let copyId = "";
   let archiveKey = "";
   try {
@@ -198,6 +146,15 @@ export async function DELETE(request: Request) {
   if (!copyId || !archiveKey) {
     return NextResponse.json({ message: "Choose the listing image to remove." }, { status: 400 });
   }
+  const capability = await getEbayCapabilityForSession(session);
+  if (!capability.canManageListingPhotoDrafts) {
+    return NextResponse.json({ message: capability.mode === "preview"
+      ? "Listing photos cannot be removed in preview mode. Switch to live Records."
+      : session
+        ? "Administrator seller permission is required to remove listing photos."
+        : "Sign in to remove a listing image." }, { status: session ? 403 : 401 });
+  }
+  if (!session) return NextResponse.json({ message: "Sign in to remove a listing image." }, { status: 401 });
 
   try {
     await removeEbayListingImageDraft(session.user.id, copyId, archiveKey);

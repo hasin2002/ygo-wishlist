@@ -13,6 +13,11 @@ import {
   queryCacheStorageKey,
   serializeQueryCache,
 } from "@/lib/query-cache-persistence";
+import {
+  confirmCollectionCacheRevision,
+  currentCollectionCacheRevision,
+  currentCollectionRevision,
+} from "@/lib/collection-change";
 import type { AppRouter } from "@/server/root";
 import { useState, type ReactNode } from "react";
 
@@ -52,8 +57,8 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
   const [persister] = useState(() =>
     createSyncStoragePersister({
       key: queryCacheStorageKey,
-      deserialize: deserializeQueryCache,
-      serialize: serializeQueryCache,
+      deserialize: (value) => deserializeQueryCache(value, currentCollectionRevision(), confirmCollectionCacheRevision),
+      serialize: (value) => serializeQueryCache(value, currentCollectionCacheRevision()),
       storage: typeof window === "undefined" ? undefined : window.sessionStorage,
       throttleTime: 1_000,
     }),
