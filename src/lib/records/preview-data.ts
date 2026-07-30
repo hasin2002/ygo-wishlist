@@ -21,6 +21,7 @@ import {
   ordinaryPurchaseCopyAllocations,
   ordinaryPurchaseLineAllocation,
 } from "./purchase-accounting.ts";
+import { sealedPurchaseUnitAllocations } from "./sealed-purchase-accounting.ts";
 import { compactRecordName, generatedSaleRecordName } from "./record-name.ts";
 import { buildCopyEbayExposureStates } from "./copy-ebay-exposure.ts";
 
@@ -838,9 +839,24 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
     addAttention(card, card.name);
     generatedTitle = `Purchased ${card.name}`;
   } else if (input.kind === "sealed") {
+    let allocation;
+    try {
+      allocation = sealedPurchaseUnitAllocations({
+        amountKnown: input.amountKnown !== false,
+        amountPence: input.totalPence,
+        unitCount: input.product.quantity,
+        overrides: input.product.unitAllocations,
+      });
+    } catch (error) {
+      return { next: snapshot, result: { ok: false, message: error instanceof Error ? error.message : "Invalid sealed-unit allocation." } satisfies DataSourceResult };
+    }
+    if (allocation.mode === "override" && !input.product.unitAllocationsReviewed) {
+      return { next: snapshot, result: { ok: false, message: "Review and confirm the unequal sealed-unit costs before saving this Purchase." } satisfies DataSourceResult };
+    }
     const entityIds: string[] = [];
-    for (let index = 0; index < input.product.quantity; index += 1) {
-      const sealedId = previewId("sealed");
+    const ids = Array.from({ length: input.product.quantity }, () => previewId("sealed"));
+    const allocationById = new Map([...ids].sort().map((sealedId, index) => [sealedId, allocation.allocations[index]! ]));
+    for (const sealedId of ids) {
       entityIds.push(sealedId);
       next.sealedUnits.push({
         id: sealedId,
@@ -852,9 +868,11 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
         status: "sealed",
         acquiredRecordId: id,
         openedRecordId: null,
+        allocationPence: allocationById.get(sealedId)!,
+        allocationMode: allocation.mode,
       });
     }
-    lines.push(recordLine("sealed", input.product.name, input.product.quantity, entityIds, null, input.product.edition || "Edition unknown"));
+    lines.push(recordLine("sealed", input.product.name, input.product.quantity, entityIds, input.amountKnown === false ? null : input.totalPence, input.product.edition || "Edition unknown"));
     addAttention(input.product, input.product.name);
     generatedTitle = `Purchased ${input.product.name}`;
   } else if (input.kind === "bulk") {
@@ -965,6 +983,8 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
       status: "sealed",
       acquiredRecordId: importedId,
       openedRecordId: null,
+      allocationPence: isGift || input.amountKnown !== false ? (isGift ? 0 : input.totalPence) : null,
+      allocationMode: "equal",
     };
     next.sealedUnits.push(sealed);
     next.records.unshift({
@@ -1136,6 +1156,37 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
       });
       for (const [index, copy] of copies.entries()) copy.allocationPence = allocations[index]!;
       line.allocationPence = ordinaryPurchaseLineAllocation({ amountKnown: record.amountKnown !== false, amountPence: record.amountPence });
+    } else if (record.lines.length === 1 && record.lines[0]?.kind === "sealed") {
+      const line = record.lines[0];
+      const units = next.sealedUnits
+        .filter((unit) => line.entityIds.includes(unit.id))
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const hasOverrides = units.some((unit) => unit.allocationMode === "override");
+      const currentTotal = units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0);
+      const currentKnown = units.every((unit) => unit.allocationPence !== null && unit.allocationPence !== undefined);
+      if (units.some((unit) => unit.openedRecordId) && (
+        currentKnown !== (record.amountKnown !== false)
+        || (record.amountKnown !== false && currentTotal !== record.amountPence)
+      )) {
+        return { next: snapshot, result: { ok: false, message: "This Purchase has an opened sealed unit, so its exact historical allocation cannot be changed." } satisfies DataSourceResult };
+      }
+      if (hasOverrides && !update.sealedAllocationOverrideConfirmed && (
+        record.amountKnown === false || currentTotal !== record.amountPence
+      )) {
+        return { next: snapshot, result: { ok: false, message: "This Purchase has reviewed unequal unit costs. Confirm resetting them to an even split before changing the total." } satisfies DataSourceResult };
+      }
+      if (!(hasOverrides && !update.sealedAllocationOverrideConfirmed && currentTotal === record.amountPence)) {
+        const { allocations } = sealedPurchaseUnitAllocations({
+          amountKnown: record.amountKnown !== false,
+          amountPence: record.amountPence,
+          unitCount: units.length,
+        });
+        for (const [index, unit] of units.entries()) {
+          unit.allocationPence = allocations[index]!;
+          unit.allocationMode = "equal";
+        }
+        line.allocationPence = record.amountKnown === false ? null : record.amountPence;
+      }
     } else if (record.lines.length === 1) {
       record.lines[0]!.allocationPence = ordinaryPurchaseLineAllocation({
         amountKnown: record.amountKnown !== false,

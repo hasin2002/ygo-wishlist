@@ -33,6 +33,8 @@
     "db:repair:ebay-composition:dry-run": "node --env-file-if-exists=.env.local scripts/repair-ebay-composition-schema.mjs",
     "db:repair:ebay-composition:apply": "node --env-file-if-exists=.env.local scripts/repair-ebay-composition-schema.mjs --apply",
     "records:purchase-accounting:dry-run": "node --env-file-if-exists=.env.local scripts/audit-ordinary-purchase-accounting.mjs",
+    "records:sealed-unit-costs:dry-run": "node --env-file-if-exists=.env.local scripts/audit-sealed-unit-cost-allocations.mjs",
+    "records:sealed-unit-costs:apply": "node --env-file-if-exists=.env.local scripts/reconcile-sealed-unit-cost-allocations.mjs --apply",
     "db:studio": "drizzle-kit studio --config drizzle.config.ts",
     "db:studio:pg": "drizzle-kit studio --config drizzle.config.ts",
     "db:studio:sqlite": "drizzle-kit studio --config drizzle.sqlite.config.ts",

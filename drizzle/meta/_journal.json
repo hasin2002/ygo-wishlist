@@ -29,6 +29,13 @@
       "when": 1785439234477,
       "tag": "0003_allow_zero_wishlist_demand",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785442800000,
+      "tag": "0004_sealed_unit_cost_allocations",
+      "breakpoints": true
     }
   ]
 }

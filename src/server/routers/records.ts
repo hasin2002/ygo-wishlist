@@ -25,6 +25,7 @@ import {
   ordinaryPurchaseCopyAllocations,
   ordinaryPurchaseLineAllocation,
 } from "@/lib/records/purchase-accounting";
+import { sealedPurchaseUnitAllocations } from "@/lib/records/sealed-purchase-accounting";
 import { compactRecordName, generatedSaleRecordName } from "@/lib/records/record-name";
 import {
   buildCopyEbayExposureStates,
@@ -128,7 +129,12 @@ const purchaseSchema = z.discriminatedUnion("kind", [
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
     amountKnown: z.boolean().default(true),
-    product: sealedProductInputSchema.extend({ quantity: z.number().int().positive().max(10_000) }),
+    product: sealedProductInputSchema.extend({
+      quantity: z.number().int().positive().max(10_000),
+      /** Whole-pence values, in the reviewed unit order shown by the form. */
+      unitAllocations: z.array(z.number().int().nonnegative()).optional(),
+      unitAllocationsReviewed: z.boolean().optional(),
+    }),
   }),
   commonRecordSchema.extend({
     kind: z.literal("bulk"),
@@ -177,6 +183,8 @@ const updateRecordDetailsSchema = recordMutationIdentitySchema.extend({
     listingUrl: z.string().trim().url().nullable().or(z.literal("")),
     amountPence: z.number().int().nonnegative(),
     amountKnown: z.boolean().optional(),
+    /** Required before replacing reviewed unequal sealed-unit allocations. */
+    sealedAllocationOverrideConfirmed: z.boolean().optional(),
     notes: z.string().trim().max(4_000),
   }),
 });
@@ -319,6 +327,70 @@ async function syncOrdinaryPurchaseAccounting(
   }
   await tx.update(recordLines).set({
     allocationPence: ordinaryPurchaseLineAllocation({ amountKnown, amountPence }),
+    updatedAt: now,
+  }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
+  return true;
+}
+
+/** Reconcile one sealed Purchase line without ever using its whole receipt as one unit's cost. */
+async function syncSealedPurchaseAccounting(
+  tx: Transaction,
+  ownerId: string,
+  recordId: string,
+  amountKnown: boolean,
+  amountPence: number,
+  now: Date,
+  overrideConfirmed = false,
+) {
+  const lines = await tx.select().from(recordLines).where(and(
+    eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, recordId),
+  )).orderBy(asc(recordLines.position)).for("update");
+  const sealedLines = lines.filter((line) => line.kind === "sealed");
+  if (!sealedLines.length) return false;
+  if (lines.length !== 1 || sealedLines.length !== 1) {
+    conflict("Sealed Purchases support one sealed line only. No cost changes were saved.");
+  }
+  const [line] = sealedLines;
+  const units = await tx.select().from(sealedUnits).where(and(
+    eq(sealedUnits.ownerId, ownerId), eq(sealedUnits.acquiredRecordId, recordId),
+  )).orderBy(asc(sealedUnits.allocationIndex), asc(sealedUnits.id)).for("update");
+  if (
+    units.length !== line.quantity
+    || units.some((unit) => unit.acquiredLineId !== line.id || unit.allocationIndex === null)
+  ) {
+    conflict("This sealed Purchase has historical units without a reviewed allocation. Run the sealed-unit allocation dry-run before editing its cost.");
+  }
+  const currentKnown = units.every((unit) => unit.allocationPence !== null);
+  const currentTotal = units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0);
+  if (units.some((unit) => unit.openedRecordId) && (
+    currentKnown !== amountKnown || (amountKnown && currentTotal !== amountPence)
+  )) {
+    conflict("This Purchase has an opened sealed unit, so its exact historical allocation cannot be changed.");
+  }
+  const hasOverrides = units.some((unit) => unit.allocationMode === "override");
+  // The comparison above deliberately does not infer a receipt total from a
+  // unit. We only need confirmation when the requested accounting state will
+  // replace an override (including known -> unknown).
+  if (hasOverrides && overrideConfirmed === false) {
+    const unchanged = amountKnown && currentTotal === amountPence;
+    if (!unchanged) {
+      conflict("This Purchase has reviewed unequal unit costs. Confirm resetting them to an even split before changing the total.");
+    }
+  }
+  if (hasOverrides && amountKnown && units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0) === amountPence && !overrideConfirmed) {
+    return true;
+  }
+  const { allocations } = sealedPurchaseUnitAllocations({ amountKnown, amountPence, unitCount: units.length });
+  for (const [index, unit] of units.entries()) {
+    await tx.update(sealedUnits).set({
+      allocationIndex: index,
+      allocationPence: allocations[index]!,
+      allocationMode: "equal",
+      updatedAt: now,
+    }).where(and(eq(sealedUnits.id, unit.id), eq(sealedUnits.ownerId, ownerId)));
+  }
+  await tx.update(recordLines).set({
+    allocationPence: amountKnown ? amountPence : null,
     updatedAt: now,
   }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
   return true;
@@ -763,6 +835,8 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       status: unit.status,
       acquiredRecordId: unit.acquiredRecordId,
       openedRecordId: unit.openedRecordId,
+      allocationPence: unit.allocationPence,
+      allocationMode: unit.allocationMode,
     })),
     bulkLots: lots.map((lot) => ({
       id: lot.id,
@@ -1106,14 +1180,34 @@ export const recordsRouter = router({
         })));
       } else if (input.kind === "sealed") {
         const lineId = id("line");
+        let allocation: ReturnType<typeof sealedPurchaseUnitAllocations>;
+        try {
+          allocation = sealedPurchaseUnitAllocations({
+            amountKnown: input.amountKnown,
+            amountPence: input.totalPence,
+            unitCount: input.product.quantity,
+            overrides: input.product.unitAllocations,
+          });
+        } catch (error) {
+          conflict(error instanceof Error ? error.message : "Invalid sealed-unit allocation.");
+        }
+        if (allocation.mode === "override" && !input.product.unitAllocationsReviewed) {
+          conflict("Review and confirm the unequal sealed-unit costs before saving this Purchase.");
+        }
         await insertLine(tx, {
           id: lineId, ownerId, recordId, position: 0, kind: "sealed", name: input.product.name,
           quantity: input.product.quantity, allocationPence: input.amountKnown ? input.totalPence : null,
           detail: input.product.edition, createdAt: now, updatedAt: now,
         });
         const canonicalUrl = canonicalProductUrl(input.product.tcgplayerUrl);
-        await tx.insert(sealedUnits).values(Array.from({ length: input.product.quantity }, () => ({
-          id: id("sealed"), ownerId, acquiredRecordId: recordId, acquiredLineId: lineId,
+        const unitIds = Array.from({ length: input.product.quantity }, () => id("sealed"));
+        const allocationByUnitId = new Map([...unitIds].sort().map((unitId, index) => [unitId, {
+          allocationIndex: index,
+          allocationPence: allocation.allocations[index]!,
+        }]));
+        await tx.insert(sealedUnits).values(unitIds.map((unitId) => ({
+          id: unitId, ownerId, acquiredRecordId: recordId, acquiredLineId: lineId,
+          ...allocationByUnitId.get(unitId)!, allocationMode: allocation.mode,
           name: input.product.name, edition: input.product.edition, tcgplayerUrl: input.product.tcgplayerUrl,
           canonicalTcgplayerUrl: canonicalUrl, imageUrl: input.product.imageUrl, status: "sealed" as const,
           createdAt: now, updatedAt: now,
@@ -1215,6 +1309,9 @@ export const recordsRouter = router({
         });
         [sealed] = await tx.insert(sealedUnits).values({
           id: sealedId, ownerId, acquiredRecordId: importedId, acquiredLineId: importedLineId,
+          allocationIndex: 0,
+          allocationPence: isGift || input.amountKnown ? (isGift ? 0 : input.totalPence) : null,
+          allocationMode: "equal",
           name: input.product.name, edition: input.product.edition, tcgplayerUrl: input.product.tcgplayerUrl,
           canonicalTcgplayerUrl: canonicalUrl, imageUrl: input.product.imageUrl, status: "sealed",
           createdAt: now, updatedAt: now,
@@ -1479,19 +1576,30 @@ export const recordsRouter = router({
           now,
         );
         if (!syncedCardPurchase) {
-          const lines = await tx.select().from(recordLines).where(and(
-            eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
-          )).for("update");
-          if (lines.length !== 1) {
-            conflict("A Purchase must have one allocation source. No changes were saved.");
+          const syncedSealedPurchase = await syncSealedPurchaseAccounting(
+            tx,
+            ownerId,
+            record.id,
+            nextAmountKnown,
+            input.update.amountPence,
+            now,
+            input.update.sealedAllocationOverrideConfirmed,
+          );
+          if (!syncedSealedPurchase) {
+            const lines = await tx.select().from(recordLines).where(and(
+              eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
+            )).for("update");
+            if (lines.length !== 1) {
+              conflict("A Purchase must have one allocation source. No changes were saved.");
+            }
+            await tx.update(recordLines).set({
+              allocationPence: ordinaryPurchaseLineAllocation({
+                amountKnown: nextAmountKnown,
+                amountPence: input.update.amountPence,
+              }),
+              updatedAt: now,
+            }).where(and(eq(recordLines.id, lines[0]!.id), eq(recordLines.ownerId, ownerId)));
           }
-          await tx.update(recordLines).set({
-            allocationPence: ordinaryPurchaseLineAllocation({
-              amountKnown: nextAmountKnown,
-              amountPence: input.update.amountPence,
-            }),
-            updatedAt: now,
-          }).where(and(eq(recordLines.id, lines[0]!.id), eq(recordLines.ownerId, ownerId)));
         }
       }
       await tx.update(recordEntries).set({
@@ -1942,9 +2050,12 @@ export const recordsRouter = router({
         const identityChanged = input.update.name !== line.name
           || Boolean(input.update.edition && units.some((unit) => unit.edition !== input.update.edition));
         if (units.some((unit) => unit.openedRecordId) && (
-          identityChanged || input.update.quantity < units.length
+          identityChanged || input.update.quantity !== units.length
         )) {
-          conflict(`“${line.name}” has already been opened, so its identity or quantity cannot be reduced.`);
+          conflict(`“${line.name}” has already been opened, so its identity or quantity cannot change.`);
+        }
+        if (input.update.quantity !== units.length && units.some((unit) => unit.allocationMode === "override")) {
+          conflict("This Purchase has reviewed unequal unit costs. Confirm an even reallocation from Record details before changing its quantity.");
         }
         if (input.update.quantity < units.length) {
           const removeCount = units.length - input.update.quantity;
@@ -1959,6 +2070,7 @@ export const recordsRouter = router({
             { length: input.update.quantity - units.length },
             () => ({
               id: id("sealed"), ownerId, acquiredRecordId: record.id, acquiredLineId: line.id,
+              allocationIndex: null, allocationPence: null, allocationMode: "equal" as const,
               name: input.update.name, edition: input.update.edition ?? base.edition,
               tcgplayerUrl: base.tcgplayerUrl, canonicalTcgplayerUrl: base.canonicalTcgplayerUrl,
               imageUrl: base.imageUrl, status: "sealed" as const, createdAt: now, updatedAt: now,
@@ -1972,6 +2084,28 @@ export const recordsRouter = router({
         }).where(and(
           eq(sealedUnits.ownerId, ownerId), eq(sealedUnits.acquiredLineId, line.id),
         ));
+        const allUnits = await tx.select().from(sealedUnits).where(and(
+          eq(sealedUnits.ownerId, ownerId), eq(sealedUnits.acquiredLineId, line.id),
+        )).orderBy(asc(sealedUnits.id)).for("update");
+        if (input.update.quantity !== units.length || allUnits.some((unit) => unit.allocationIndex === null)) {
+          const { allocations } = sealedPurchaseUnitAllocations({
+            amountKnown: record.amountKnown,
+            amountPence: record.amountPence,
+            unitCount: allUnits.length,
+          });
+          for (const [index, unit] of allUnits.entries()) {
+            await tx.update(sealedUnits).set({
+              allocationIndex: index,
+              allocationPence: allocations[index]!,
+              allocationMode: "equal",
+              updatedAt: now,
+            }).where(and(eq(sealedUnits.id, unit.id), eq(sealedUnits.ownerId, ownerId)));
+          }
+          await tx.update(recordLines).set({
+            allocationPence: record.amountKnown ? record.amountPence : null,
+            updatedAt: now,
+          }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
+        }
         await tx.update(recordLines).set({
           name: input.update.name,
           quantity: input.update.quantity,

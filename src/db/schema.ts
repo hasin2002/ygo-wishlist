@@ -935,6 +935,13 @@ export const sealedUnits = pgTable(
     acquiredLineId: text("acquired_line_id")
       .notNull()
       .references(() => recordLines.id, { onDelete: "restrict" }),
+    /** Stable receipt position; keeps deterministic-pence allocation durable. */
+    allocationIndex: integer("allocation_index"),
+    /** Null means genuinely unknown, never a free sealed product. */
+    allocationPence: integer("allocation_pence"),
+    allocationMode: text("allocation_mode", { enum: ["equal", "override"] })
+      .notNull()
+      .default("equal"),
     openedRecordId: text("opened_record_id").references(() => recordEntries.id, {
       onDelete: "restrict",
     }),
@@ -953,6 +960,19 @@ export const sealedUnits = pgTable(
     index("sealed_units_owner_status_idx").on(table.ownerId, table.status),
     index("sealed_units_owner_product_idx").on(table.ownerId, table.canonicalTcgplayerUrl),
     index("sealed_units_owner_record_idx").on(table.ownerId, table.acquiredRecordId),
+    uniqueIndex("sealed_units_owner_line_allocation_unique").on(
+      table.ownerId,
+      table.acquiredLineId,
+      table.allocationIndex,
+    ),
+    check(
+      "sealed_units_allocation_index_nonnegative",
+      sql`${table.allocationIndex} is null or ${table.allocationIndex} >= 0`,
+    ),
+    check(
+      "sealed_units_allocation_nonnegative",
+      sql`${table.allocationPence} is null or ${table.allocationPence} >= 0`,
+    ),
   ],
 );
 
