@@ -38,29 +38,6 @@ export const users = pgTable(
   ],
 );
 
-export type FeatureIdeasCanvas = {
-  canvasHeight: number;
-  canvasWidth: number;
-  connections: Array<{ from: string; id: string; to: string; type: "arrow" | "line" }>;
-  freeTexts: Array<{ id: string; text: string; x: number; y: number }>;
-  ideas: Array<{ id: string; text: string; x: number; y: number }>;
-};
-
-export const featureIdeaPages = pgTable(
-  "feature_idea_pages",
-  {
-    id: text("id").primaryKey(),
-    title: text("title").notNull(),
-    canvas: jsonb("canvas").$type<FeatureIdeasCanvas>().notNull(),
-    createdById: text("created_by_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
-    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
-  },
-  (table) => [index("feature_idea_pages_updated_idx").on(table.updatedAt)],
-);
-
 export const sessions = pgTable(
   "sessions",
   {
@@ -334,7 +311,7 @@ export const cardTargets = pgTable(
       table.normalizedEdition,
     ),
     index("card_targets_owner_name_idx").on(table.ownerId, table.normalizedName),
-    check("card_targets_desired_quantity_positive", sql`${table.desiredQuantity} >= 1`),
+    check("card_targets_desired_quantity_nonnegative", sql`${table.desiredQuantity} >= 0`),
     check(
       "card_targets_estimated_price_nonnegative",
       sql`${table.estimatedPricePence} is null or ${table.estimatedPricePence} >= 0`,

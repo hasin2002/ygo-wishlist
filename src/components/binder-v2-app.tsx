@@ -33,6 +33,11 @@ import { useSession } from "@/lib/auth-client";
 import { useClientReady } from "@/lib/use-client-ready";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
+import { settleConfirmedChange } from "@/lib/collection-change";
 
 type Card = inferRouterOutputs<AppRouter>["library"]["binderList"][number];
 type CardTypeFilter =
@@ -358,7 +363,9 @@ export function BinderV2App() {
   const { data: session } = useSession();
   const initialAuth = useInitialAuth();
   const canEdit = Boolean(session) || initialAuth.isAuthenticated;
-  const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
+  const binderActionRef = useRef(false);
+  const [binderError, setBinderError] = useState<string | null>(null);
   const cardsQuery = trpc.library.binderList.useQuery(undefined, {
     enabled: clientReady,
     staleTime: 30_000,
@@ -366,21 +373,11 @@ export function BinderV2App() {
   const layoutQuery = trpc.binder.layout.useQuery(undefined, {
     enabled: clientReady,
   });
-  const setSlot = trpc.binder.setSlot.useMutation({
-    onSuccess: () => void utils.binder.layout.invalidate(),
-  });
-  const clearSlot = trpc.binder.clearSlot.useMutation({
-    onSuccess: () => void utils.binder.layout.invalidate(),
-  });
-  const clearCard = trpc.binder.clearCard.useMutation({
-    onSuccess: () => void utils.binder.layout.invalidate(),
-  });
-  const clearAll = trpc.binder.clearAll.useMutation({
-    onSuccess: () => void utils.binder.layout.invalidate(),
-  });
-  const swapPages = trpc.binder.swapPages.useMutation({
-    onSuccess: () => void utils.binder.layout.invalidate(),
-  });
+  const setSlot = trpc.binder.setSlot.useMutation();
+  const clearSlot = trpc.binder.clearSlot.useMutation();
+  const clearCard = trpc.binder.clearCard.useMutation();
+  const clearAll = trpc.binder.clearAll.useMutation();
+  const swapPages = trpc.binder.swapPages.useMutation();
 
   const allCards = useMemo(
     () => [...(cardsQuery.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
@@ -599,23 +596,41 @@ export function BinderV2App() {
     pageTotals,
   ]);
 
-  function placeCard(pageIndex: number, slotIndex: number, cardId: string) {
-    if (!canEdit) {
-      return;
+  async function runBinderMutation(action: () => Promise<unknown>) {
+    if (binderActionRef.current) return false;
+    binderActionRef.current = true;
+    setBinderError(null);
+    const outcome = await settleConfirmedChange(
+      action,
+      () => collectionChanged("binder"),
+    );
+    binderActionRef.current = false;
+    if (!outcome.ok) {
+      setBinderError(`${outcome.error instanceof Error ? outcome.error.message : "The Binder change could not be saved."} Nothing changed; your exact selection is still available.`);
+      return false;
     }
-
-    setSlot.mutate({ cardId, pageIndex, slotIndex });
-    setSelectedCardId(null);
+    if (outcome.refreshError) {
+      setBinderError(collectionRefreshFailureMessage(outcome.refreshError));
+    }
+    return true;
   }
 
-  function removeCardFromBinder(cardId: string | null = draggedCardId) {
-    if (!canEdit || !cardId) {
-      return;
+  async function placeCard(pageIndex: number, slotIndex: number, cardId: string) {
+    if (!canEdit || binderActionRef.current) return;
+    const confirmed = await runBinderMutation(() => setSlot.mutateAsync({ cardId, pageIndex, slotIndex }));
+    if (confirmed) {
+      setSelectedCardId(null);
+      setDraggedCardId(null);
     }
+  }
 
-    clearCard.mutate({ cardId });
-    setDraggedCardId(null);
-    setSelectedCardId(null);
+  async function removeCardFromBinder(cardId: string | null = draggedCardId) {
+    if (!canEdit || !cardId || binderActionRef.current) return;
+    const confirmed = await runBinderMutation(() => clearCard.mutateAsync({ cardId }));
+    if (confirmed) {
+      setDraggedCardId(null);
+      setSelectedCardId(null);
+    }
   }
 
   function toggleTypeFilter(type: CardTypeFilter) {
@@ -664,7 +679,7 @@ export function BinderV2App() {
   }
 
   function handleSlotClick(event: MouseEvent<HTMLDivElement>) {
-    if (!canEdit) {
+    if (!canEdit || binderActionRef.current) {
       return;
     }
 
@@ -681,17 +696,17 @@ export function BinderV2App() {
     const cardId = slot.dataset.cardId || null;
 
     if (selectedCard) {
-      placeCard(pageIndex, slotIndex, selectedCard.id);
+      void placeCard(pageIndex, slotIndex, selectedCard.id);
       return;
     }
 
     if (cardId) {
-      clearSlot.mutate({ pageIndex, slotIndex });
+      void runBinderMutation(() => clearSlot.mutateAsync({ pageIndex, slotIndex }));
     }
   }
 
   function handleSlotDragStart(event: DragEvent<HTMLDivElement>) {
-    if (!canEdit) {
+    if (!canEdit || binderActionRef.current) {
       return;
     }
 
@@ -708,7 +723,7 @@ export function BinderV2App() {
   }
 
   function handleBookDrop(event: DragEvent<HTMLDivElement>) {
-    if (!canEdit) {
+    if (!canEdit || binderActionRef.current) {
       return;
     }
 
@@ -721,18 +736,17 @@ export function BinderV2App() {
       return;
     }
 
-    placeCard(Number(slot.dataset.pageIndex), Number(slot.dataset.slotIndex), draggedCardId);
-    setDraggedCardId(null);
+    void placeCard(Number(slot.dataset.pageIndex), Number(slot.dataset.slotIndex), draggedCardId);
   }
 
-  function clearBinder() {
-    if (!canEdit) {
-      return;
+  async function clearBinder() {
+    if (!canEdit || binderActionRef.current) return;
+    const confirmed = await runBinderMutation(() => clearAll.mutateAsync());
+    if (confirmed) {
+      setSelectedCardId(null);
+      setDraggedCardId(null);
+      setResetModalOpen(false);
     }
-
-    clearAll.mutate();
-    setSelectedCardId(null);
-    setResetModalOpen(false);
   }
 
   function openSwapModal() {
@@ -756,7 +770,7 @@ export function BinderV2App() {
     };
   }
 
-  function swapBinderPages(event: FormEvent<HTMLFormElement>) {
+  async function swapBinderPages(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const sourcePageNumber = parsePageNumber(swapFromPage);
     const targetPageNumber = parsePageNumber(swapToPage);
@@ -771,19 +785,16 @@ export function BinderV2App() {
       return;
     }
 
+    if (binderActionRef.current) return;
     setSwapError("");
-    swapPages.mutate(
-      {
+    const confirmed = await runBinderMutation(() => swapPages.mutateAsync({
         sourcePageIndex: sourcePageNumber - 1,
         targetPageIndex: targetPageNumber - 1,
-      },
-      {
-        onSuccess: () => {
-          setSwapModalOpen(false);
-          goToPage(sourcePageNumber - 1);
-        },
-      },
-    );
+      }));
+    if (confirmed) {
+      setSwapModalOpen(false);
+      goToPage(sourcePageNumber - 1);
+    }
   }
 
   function goToPage(pageIndex: number) {
@@ -921,7 +932,6 @@ export function BinderV2App() {
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <AppHeader
-          eyebrow="Binder planner"
           title="Page-flip binder"
           actions={canEdit ? (
             <div className="flex items-center gap-2">
@@ -938,6 +948,7 @@ export function BinderV2App() {
             </div>
           ) : undefined}
         />
+        {binderError ? <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900" role="alert">{binderError}</p> : null}
 
         <section
           className={`grid min-w-0 gap-5 ${
@@ -1028,18 +1039,15 @@ export function BinderV2App() {
                 <div className="absolute inset-0 z-10 grid place-items-center bg-white/90 p-4">
                   <DataLoadError
                     className="w-full max-w-md"
-                    onRetry={() => {
-                      void cardsQuery.refetch();
-                      void layoutQuery.refetch();
-                    }}
+                    onRetry={() => Promise.all([cardsQuery.refetch(), layoutQuery.refetch()])}
                     title="We couldn’t open the binder"
                   />
                 </div>
               )}
               {(cardsQuery.isLoading || layoutQuery.isLoading) &&
                 !(cardsQuery.isError || layoutQuery.isError) && (
-                <div className="absolute inset-0 z-10 grid place-items-center bg-white/70">
-                  <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
+                <div className="absolute inset-0 z-10 grid place-items-center bg-white/70" role="status">
+                  <div className="text-center"><Loader2 aria-hidden="true" className="mx-auto size-6 animate-spin text-[#8a1f2d]" /><p className="mt-3 font-bold">Loading Binder cards and pages…</p></div>
                 </div>
               )}
               {isNarrowViewport ? (

@@ -27,18 +27,21 @@ export const spendRouter = router({
     const rows = await db.select().from(recordEntries).where(and(
       eq(recordEntries.ownerId, ctx.collectionOwnerId),
       eq(recordEntries.status, "active"),
-      eq(recordEntries.amountKnown, true),
       gte(recordEntries.occurredOn, `${month}-01`),
       lte(recordEntries.occurredOn, `${month}-31`),
     ));
     const acquisitions = rows.filter((record) => (
       record.type === "purchase" || record.type === "imported-acquisition"
     ));
+    const knownAcquisitions = acquisitions.filter((record) => record.amountKnown);
     return {
-      count: acquisitions.length,
+      count: knownAcquisitions.length,
+      knownCount: knownAcquisitions.length,
+      unknownCount: acquisitions.length - knownAcquisitions.length,
+      complete: knownAcquisitions.length === acquisitions.length,
       label: monthLabel(month),
       month,
-      total: acquisitions.reduce((sum, record) => sum + record.amountPence, 0) / 100,
+      total: knownAcquisitions.reduce((sum, record) => sum + record.amountPence, 0) / 100,
     };
   }),
 

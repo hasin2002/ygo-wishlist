@@ -6,7 +6,7 @@ import { AnimatedCardWall } from "@/components/animated-card-wall";
 import { LoginForm } from "@/components/login-form";
 import { getCurrentSession } from "@/server/session";
 
-const privatePaths = new Set(["/assign-chase", "/spend", "/wheel"]);
+const privatePaths = new Set(["/assign-chase", "/spend", "/wheel", "/wishlist/new"]);
 
 export const metadata: Metadata = {
   title: "Sign in | Yu-Gi-Oh! Wishlist",

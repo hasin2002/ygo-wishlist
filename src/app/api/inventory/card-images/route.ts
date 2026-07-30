@@ -42,15 +42,17 @@ async function indexedImages(ownerId: string, copyId: string) {
   )).orderBy(asc(cardCopyImages.position), asc(cardCopyImages.createdAt));
 }
 
-async function adminSession(request: Request) {
+async function ownerSession(request: Request) {
   const session = await getSessionFromHeaders(request.headers);
   if (!session) return { response: NextResponse.json({ message: "Sign in to manage card images." }, { status: 401 }) };
-  if (session.user.role !== "admin") return { response: NextResponse.json({ message: "Administrator access is required." }, { status: 403 }) };
+  if (process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1") {
+    return { response: NextResponse.json({ message: "Card photos are unavailable in preview mode. Switch to live Records." }, { status: 403 }) };
+  }
   return { session };
 }
 
 export async function GET(request: Request) {
-  const auth = await adminSession(request);
+  const auth = await ownerSession(request);
   if (auth.response) return auth.response;
   const copyId = new URL(request.url).searchParams.get("copyId")?.trim() ?? "";
   const copyIds = new URL(request.url).searchParams.get("copyIds")?.split(",").map((id) => id.trim()).filter(Boolean).slice(0, 100) ?? [];
@@ -98,7 +100,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await adminSession(request);
+  const auth = await ownerSession(request);
   if (auth.response) return auth.response;
   let copyId = "";
   let image: File | null = null;
@@ -132,7 +134,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = await adminSession(request);
+  const auth = await ownerSession(request);
   if (auth.response) return auth.response;
   let copyId = "";
   let key = "";
@@ -158,7 +160,7 @@ export async function DELETE(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await adminSession(request);
+  const auth = await ownerSession(request);
   if (auth.response) return auth.response;
   try {
     const body = await request.json() as { copyId?: unknown; keys?: unknown };

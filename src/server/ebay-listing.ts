@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   cardCopies,
@@ -36,7 +36,7 @@ import {
 import {
   getEbayListingsForCopiesMembershipFirst,
   hasEbayCompositionSchema,
-  isMissingEbayCompositionSchema,
+  legacySafeEbayListingSelection,
   type EbayListingForCopy,
 } from "@/server/ebay-listing-composition";
 import {
@@ -369,6 +369,8 @@ export async function publishEbayListing(ownerId: string, details: EbayListingDe
     throw new EbayListingError("eBay has not approved this listing for publishing. Review the validation messages and fees.");
   }
 
+  const compositionAvailable = await hasEbayCompositionSchema();
+  const accessToken = await getEbaySellerAccessToken(ownerId);
   const listingId = `ebay-listing-${crypto.randomUUID()}`;
   const draftKeys = details.images.map((image) => image.archiveKey);
   const archivedKeys = await copyListingImageDraftsToArchive({
@@ -377,58 +379,117 @@ export async function publishEbayListing(ownerId: string, details: EbayListingDe
     listingId,
     ownerId,
   });
-
-  let result: Awaited<ReturnType<typeof tradingCall>>;
-  try {
-    result = await tradingCall(ownerId, "AddItem", itemXml);
-  } catch (error) {
-    await deleteArchivedListingImages(archivedKeys);
-    throw error;
-  }
-  if (!result.itemId || result.errors.some((error) => error.severity === "Error")) {
-    await deleteArchivedListingImages(archivedKeys);
-    throw new EbayListingError(result.errors.find((error) => error.message)?.message ?? "eBay did not publish the listing.");
-  }
-
   const now = new Date();
-  const listingUrl = `https://www.ebay.co.uk/itm/${result.itemId}`;
-  const listingValues = {
-    id: listingId,
-    ownerId,
-    copyId: details.copyId,
-    itemId: result.itemId,
-    listingUrl,
-    title: details.title,
-    status: "active" as const,
-    listingState: "active" as const,
-    saleState: "none" as const,
-    listingStartedAt: now,
-    lastRemoteEventAt: now,
-    lastSyncedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  };
+  let remoteAddAttempted = false;
+  let publishedItemId: string | null = null;
   try {
     await db.transaction(async (tx) => {
-      await tx.insert(ebayListings).values(listingValues);
-      await tx.insert(ebayListingMembers).values({
-        copyId: details.copyId,
-        createdAt: now,
-        fulfilmentPosition: 0,
-        id: `ebay-listing-member-${crypto.randomUUID()}`,
-        listingId,
-        ownerId,
-        updatedAt: now,
-      });
+      const copies = await tx.select().from(cardCopies).where(and(
+        eq(cardCopies.ownerId, ownerId),
+        eq(cardCopies.id, details.copyId),
+      )).for("update");
+      if (copies.length !== 1 || copies[0]?.status !== "available") {
+        throw new EbayListingError("This Copy changed while its listing was being published. Refresh and review it again.");
+      }
+      const related: EbayListingForCopy[] = [];
+      if (compositionAvailable) {
+        const members = await tx.select({
+          copyId: ebayListingMembers.copyId,
+          fulfilmentPosition: ebayListingMembers.fulfilmentPosition,
+          listing: ebayListings,
+          memberId: ebayListingMembers.id,
+        }).from(ebayListingMembers)
+          .innerJoin(ebayListings, and(
+            eq(ebayListingMembers.listingId, ebayListings.id),
+            eq(ebayListingMembers.ownerId, ebayListings.ownerId),
+          ))
+          .where(and(
+            eq(ebayListingMembers.ownerId, ownerId),
+            eq(ebayListings.ownerId, ownerId),
+            eq(ebayListingMembers.copyId, details.copyId),
+          ));
+        related.push(...members.map((row) => ({ ...row, relationSource: "member" as const })));
+      }
+      const legacy = compositionAvailable
+        ? await tx.select().from(ebayListings).where(and(
+          eq(ebayListings.ownerId, ownerId),
+          eq(ebayListings.copyId, details.copyId),
+        )).for("update")
+        : await tx.select(legacySafeEbayListingSelection).from(ebayListings).where(and(
+          eq(ebayListings.ownerId, ownerId),
+          eq(ebayListings.copyId, details.copyId),
+        )).for("update");
+      for (const listing of legacy) {
+        if (!related.some((row) => row.listing.id === listing.id)) {
+          related.push({ copyId: details.copyId, fulfilmentPosition: null, listing, memberId: null, relationSource: "legacy" });
+        }
+      }
+      if (!decideRelatedListingEligibility(related).eligible) {
+        throw new EbayListingError("This Copy gained eBay exposure while its listing was being published. Refresh and review it again.");
+      }
+
+      remoteAddAttempted = true;
+      const result = await tradingCall(ownerId, "AddItem", itemXml, accessToken);
+      if (!result.itemId || result.errors.some((error) => error.severity === "Error")) {
+        throw new EbayListingError(result.errors.find((error) => error.message)?.message ?? "eBay did not publish the listing.");
+      }
+      publishedItemId = result.itemId;
+      const listingUrl = `https://www.ebay.co.uk/itm/${result.itemId}`;
+      if (compositionAvailable) {
+        await tx.insert(ebayListings).values({
+          id: listingId,
+          ownerId,
+          copyId: details.copyId,
+          itemId: result.itemId,
+          listingUrl,
+          title: details.title,
+          status: "active",
+          listingState: "active",
+          saleState: "none",
+          listingStartedAt: now,
+          lastRemoteEventAt: now,
+          lastSyncedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else {
+        await tx.execute(sql`
+          insert into ${ebayListings} (
+            id, owner_id, copy_id, item_id, listing_url, title, status,
+            listing_state, sale_state, listing_started_at,
+            last_remote_event_at, last_synced_at, created_at, updated_at
+          ) values (
+            ${listingId}, ${ownerId}, ${details.copyId}, ${result.itemId},
+            ${listingUrl}, ${details.title}, 'active', 'active', 'none',
+            ${now}, ${now}, ${now}, ${now}, ${now}
+          )
+        `);
+      }
+      if (compositionAvailable) {
+        await tx.insert(ebayListingMembers).values({
+          copyId: details.copyId,
+          createdAt: now,
+          fulfilmentPosition: 0,
+          id: `ebay-listing-member-${crypto.randomUUID()}`,
+          listingId,
+          ownerId,
+          updatedAt: now,
+        });
+      }
     });
   } catch (error) {
-    // The approved additive migration may not yet be present. The legacy
-    // parent insert remains the safe compatibility path until it is applied.
-    if (!isMissingEbayCompositionSchema(error)) throw error;
-    await db.insert(ebayListings).values(listingValues);
+    if (!remoteAddAttempted) {
+      await deleteArchivedListingImages(archivedKeys);
+      throw error;
+    }
+    if (publishedItemId) {
+      throw new EbayListingError("eBay published this listing but its local Copy link could not be saved. Do not relist; review the eBay offer and contact support.");
+    }
+    throw new EbayListingError("eBay may have published this listing, but the result could not be confirmed or saved locally. Do not retry until you have reviewed the eBay offer.");
   }
   await deleteListingImageDrafts(ownerId, details.copyId, draftKeys);
-  return { archivedImageCount: archivedKeys.length, itemId: result.itemId, listingUrl };
+  if (!publishedItemId) throw new EbayListingError("eBay did not return an item ID. Do not relist; review the eBay offer.");
+  return { archivedImageCount: archivedKeys.length, itemId: publishedItemId, listingUrl: `https://www.ebay.co.uk/itm/${publishedItemId}` };
 }
 
 function assertLotCopyIds(copyIds: string[], imageDraftCopyId: string) {

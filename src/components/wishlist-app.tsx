@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeft,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
   Search,
   SlidersHorizontal,
   Star,
+  Trash2,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -26,9 +28,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
-import { CardNoteIndicator } from "@/components/card-note-indicator";
 import { DataLoadError } from "@/components/data-load-error";
 import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
@@ -36,6 +39,10 @@ import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import { useClientReady } from "@/lib/use-client-ready";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
 import type { AppRouter } from "@/server/root";
 import { trpc } from "@/trpc/client";
 
@@ -81,6 +88,7 @@ type CardForm = {
 };
 type EditForm = Omit<CardForm, "edition"> & {
   id: string;
+  desiredQuantity: number;
   ebayListingUrl: string;
   paidPriceText: string;
   chaseLevel: string;
@@ -95,8 +103,12 @@ type PricingRun = {
   running: boolean;
   total: number;
 };
+type CardDetailState = {
+  card: Card;
+  returnFocusTo: HTMLElement | null;
+};
 
-const pageSize = 8;
+const pageSize = 10;
 
 function formatPriceRefreshTime(value: Date) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -318,6 +330,7 @@ function normalizePaidPrice(value: string) {
 function editFormFromCard(card: Card): EditForm {
   return {
     id: card.id,
+    desiredQuantity: card.desiredQuantity,
     name: card.name,
     url: card.url ?? "",
     imageUrl: card.imageUrl ?? "",
@@ -385,23 +398,86 @@ function EditCardModal({
   onSave: () => void;
   setForm: (updater: (current: EditForm) => EditForm) => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6">
-      <section className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-lg border border-zinc-300 bg-white p-4 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold">Edit card</h2>
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.hasAttribute("hidden"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.requestAnimationFrame(() => previouslyFocused?.focus());
+    };
+  }, []);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      aria-labelledby="edit-card-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/45 px-0 py-0 backdrop-blur-sm sm:px-4 sm:py-6"
+      role="dialog"
+    >
+      <section
+        className="flex max-h-dvh w-full flex-col overflow-hidden bg-white shadow-2xl sm:max-h-[90dvh] sm:max-w-4xl sm:rounded-lg sm:border sm:border-zinc-300"
+        ref={dialogRef}
+      >
+        <header className="flex items-center justify-between gap-4 border-b border-zinc-200 px-4 py-3 sm:px-5">
+          <h2 className="text-xl font-black" id="edit-card-title">Edit card</h2>
           <button
-            aria-label="Close edit modal"
-            className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
-            onClick={onClose}
+            aria-label="Close edit card"
+            className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
+            onClick={() => onCloseRef.current()}
+            ref={closeButtonRef}
             type="button"
           >
-            <X className="size-4" />
+            <X aria-hidden="true" className="size-4" />
           </button>
-        </div>
+        </header>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block sm:col-span-2">
+        <div className="overflow-y-auto p-4 sm:p-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block md:col-span-2">
             <span className="text-sm font-medium text-zinc-700">Card name</span>
             <input
               className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
@@ -412,8 +488,8 @@ function EditCardModal({
             />
           </label>
 
-          <label className="block sm:col-span-2">
-            <span className="text-sm font-medium text-zinc-700">Link</span>
+          <label className="block md:col-span-2">
+            <span className="text-sm font-medium text-zinc-700">TCGplayer product link</span>
             <input
               className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
               onChange={(event) =>
@@ -423,154 +499,288 @@ function EditCardModal({
             />
           </label>
 
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">
-              Manual market price
-            </span>
-            <input
-              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  marketPriceText: event.target.value,
-                }))
-              }
-              placeholder="£12.50"
-              value={form.marketPriceText}
-            />
-            {form.priceText ? (
-              <span className="mt-1 block text-xs font-medium text-zinc-500">
-                eBay estimate: {form.priceText}
-              </span>
-            ) : null}
-          </label>
-
-          {form.status === "owned" ? (
-            <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-medium leading-5 text-blue-950 sm:col-span-2">
-              Purchase cost, date, and physical Copy details come from Records. Open this card&apos;s Copies to edit the originating Purchase or Pack Opening.
-            </div>
-          ) : null}
-
-          <RarityCombobox
-            value={form.rarity}
-            onChange={(rarity) => setForm((current) => ({ ...current, rarity }))}
-          />
-
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">Edition</span>
-            <select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white" onChange={(event) => setForm((current) => ({ ...current, edition: event.target.value as EditForm["edition"] }))} value={form.edition}>
-              {form.edition === "Unknown edition" ? <option value="Unknown edition">Unknown edition — choose one</option> : null}
-              <option value="1st Edition">1st Edition</option>
-              <option value="Unlimited Edition">Unlimited Edition</option>
-              <option value="Limited Edition">Limited Edition</option>
-            </select>
-            {form.edition === "Unknown edition" ? <span className="mt-1 block text-xs font-semibold text-amber-700">Legacy data did not include an edition. Choose the physical card&apos;s edition before saving.</span> : null}
-          </label>
-
-          <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">
-              Library state
-            </span>
-            <p className="mt-1 text-sm font-bold capitalize text-zinc-800">
-              {form.status === "wishlist" ? "Wishlist target" : "Owned from Records"}
-            </p>
-            <p className="mt-1 text-xs font-medium leading-5 text-zinc-500">
-              Ownership changes belong in Records so acquisition history is preserved.
-            </p>
-          </div>
-
-          {form.status === "wishlist" ? (
+          <div className={`grid gap-4 md:col-span-2 sm:grid-cols-2 ${form.desiredQuantity > 0 ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
             <label className="block">
-              <span className="text-sm font-medium text-zinc-700">
-                Chase level
-              </span>
-              <select
-                className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    chaseLevel: event.target.value,
-                  }))
-                }
-                value={form.chaseLevel}
-              >
-                <option value="">No chase</option>
-                <option value="5">5 - next</option>
-                <option value="4">4</option>
-                <option value="3">3</option>
-                <option value="2">2</option>
-                <option value="1">1 - nice to have</option>
-              </select>
-            </label>
-          ) : null}
-
-          {form.status === "wishlist" ? (
-            <label className="block sm:col-span-2">
-              <span className="text-sm font-medium text-zinc-700">
-                Saved eBay listing
-              </span>
+              <span className="text-sm font-medium text-zinc-700">Manual market price</span>
               <input
                 className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    ebayListingUrl: event.target.value,
+                    marketPriceText: event.target.value,
                   }))
                 }
-                placeholder="https://www.ebay.co.uk/itm/..."
-                type="url"
-                value={form.ebayListingUrl}
+                placeholder="£12.50"
+                value={form.marketPriceText}
               />
-              <span className="mt-1 block text-xs font-medium text-zinc-500">
-                Separate from the eBay pricing/search link.
-              </span>
+              {form.priceText ? (
+                <span className="mt-1 block text-xs font-medium text-zinc-500">
+                  eBay estimate: {form.priceText}
+                </span>
+              ) : null}
             </label>
-          ) : null}
 
-          <label className="block sm:col-span-2">
-            <span className="text-sm font-medium text-zinc-700">Image URL</span>
-            <input
-              className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+            <RarityCombobox
+              value={form.rarity}
+              onChange={(rarity) => setForm((current) => ({ ...current, rarity }))}
+            />
+
+            <label className="block">
+              <span className="text-sm font-medium text-zinc-700">Edition</span>
+              <select
+                className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    edition: event.target.value as EditForm["edition"],
+                  }))
+                }
+                value={form.edition}
+              >
+                {form.edition === "Unknown edition" ? <option value="Unknown edition">Unknown edition — choose one</option> : null}
+                <option value="1st Edition">1st Edition</option>
+                <option value="Unlimited Edition">Unlimited Edition</option>
+                <option value="Limited Edition">Limited Edition</option>
+              </select>
+              {form.edition === "Unknown edition" ? <span className="mt-1 block text-xs font-semibold text-amber-700">Choose an edition before saving.</span> : null}
+            </label>
+
+            {form.desiredQuantity > 0 ? (
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-700">Chase</span>
+                <select
+                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      chaseLevel: event.target.value,
+                    }))
+                  }
+                  value={form.chaseLevel}
+                >
+                  <option value="">None</option>
+                  <option value="5">5 - next</option>
+                  <option value="4">4</option>
+                  <option value="3">3</option>
+                  <option value="2">2</option>
+                  <option value="1">1 - later</option>
+                </select>
+              </label>
+            ) : null}
+          </div>
+
+          <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+            {form.desiredQuantity > 0 ? (
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-700">Saved eBay listing</span>
+                <input
+                  className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      ebayListingUrl: event.target.value,
+                    }))
+                  }
+                  placeholder="https://www.ebay.co.uk/itm/..."
+                  type="url"
+                  value={form.ebayListingUrl}
+                />
+              </label>
+            ) : null}
+
+            <label className="block">
+              <span className="text-sm font-medium text-zinc-700">Image URL</span>
+              <input
+                className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    imageUrl: event.target.value,
+                  }))
+                }
+                type="url"
+                value={form.imageUrl}
+              />
+            </label>
+          </div>
+
+          <label className="block md:col-span-2">
+            <span className="text-sm font-medium text-zinc-700">Notes</span>
+            <textarea
+              className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,
-                  imageUrl: event.target.value,
+                  notes: event.target.value,
                 }))
               }
-              value={form.imageUrl}
+              value={form.notes}
             />
           </label>
+          </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-between gap-2 border-t border-zinc-200 pt-4">
+        <footer className={`flex flex-col gap-3 border-t border-zinc-200 bg-zinc-50 px-4 py-3 sm:flex-row sm:items-center sm:px-5 ${
+          form.desiredQuantity > 0 ? "sm:justify-between" : "sm:justify-end"
+        }`}>
+          {form.desiredQuantity > 0 ? (
+            <button
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2"
+              disabled={saving}
+              onClick={() => onDelete(form.id)}
+              type="button"
+            >
+              <Trash2 aria-hidden="true" className="size-4" />
+              Remove from wishlist
+            </button>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+            <button
+              className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+              onClick={() => onCloseRef.current()}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+              disabled={saving || form.edition === "Unknown edition"}
+              onClick={onSave}
+              type="button"
+            >
+              {saving ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Save aria-hidden="true" className="size-4" />}
+              Save changes
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+    , document.body,
+  );
+}
+
+function RemoveWishlistDialog({
+  card,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  card: Card;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  const pendingRef = useRef(pending);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    pendingRef.current = pending;
+  }, [pending]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (pendingRef.current) return;
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.hasAttribute("hidden"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      window.requestAnimationFrame(() => previouslyFocused?.isConnected && previouslyFocused.focus());
+    };
+  }, []);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      aria-describedby="remove-wishlist-description"
+      aria-labelledby="remove-wishlist-title"
+      aria-modal="true"
+      className="fixed inset-0 z-[60] grid place-items-center bg-zinc-950/45 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !pendingRef.current) onCloseRef.current();
+      }}
+      role="alertdialog"
+    >
+      <section
+        className="w-full max-w-md rounded-lg border border-zinc-300 bg-[#fdfcf8] p-5 text-zinc-950 shadow-2xl"
+        ref={dialogRef}
+      >
+        <span className="grid size-11 place-items-center rounded-full bg-rose-100 text-[#8a1f2d]">
+          <Trash2 aria-hidden="true" className="size-5" />
+        </span>
+        <h2 className="mt-4 text-xl font-black" id="remove-wishlist-title">
+          Remove from wishlist?
+        </h2>
+        <p
+          className="mt-2 text-sm font-medium leading-6 text-zinc-600"
+          id="remove-wishlist-description"
+        >
+          {card.ownedQuantity > 0
+            ? `${card.name} will have Wanted set to 0. Its ${card.ownedQuantity} owned ${card.ownedQuantity === 1 ? "Copy" : "Copies"} and all Record history will stay.`
+            : `${card.name} will be removed from your wishlist. Any Copy and Record history will stay.`}
+        </p>
+        <div className="mt-5 grid grid-cols-2 gap-2">
           <button
-            className="h-10 rounded-md px-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 hover:text-rose-800"
-            onClick={() => onDelete(form.id)}
-            type="button"
-          >
-            Delete target
-          </button>
-          <div className="flex justify-end gap-2">
-          <button
-            className="h-10 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-            onClick={onClose}
+            className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+            disabled={pending}
+            onClick={() => onCloseRef.current()}
+            ref={cancelButtonRef}
             type="button"
           >
             Cancel
           </button>
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-            disabled={saving || form.edition === "Unknown edition"}
-            onClick={onSave}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
+            disabled={pending}
+            onClick={onConfirm}
             type="button"
           >
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-            Save
+            {pending ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
+            Remove
           </button>
-          </div>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1069,7 +1279,7 @@ function AddCardForm({
         />
       </label>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="block">
             <span className="text-sm font-medium text-zinc-700">
               Manual market price
@@ -1098,19 +1308,10 @@ function AddCardForm({
             <option value="Limited Edition">Limited Edition</option>
           </select>
         </label>
-      </div>
-
-      <div className="grid gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-[1fr_1fr]">
-        <div>
-          <p className="text-sm font-bold text-zinc-800">Wishlist Target</p>
-          <p className="mt-1 text-xs font-medium leading-5 text-zinc-500">
-            Adding here records what you want. Use a Purchase or Pack opening to create physical copies.
-          </p>
-        </div>
         <label className="block">
           <span className="text-sm font-medium text-zinc-700">Chase</span>
           <select
-            className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-[#8a1f2d]"
+            className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
             onChange={(event) =>
               setForm((current) => ({ ...current, chaseLevel: event.target.value }))
             }
@@ -1176,111 +1377,164 @@ function AddCardForm({
         ) : (
           <Plus className="size-4" />
         )}
-        Add wishlist target
+        Add to wishlist
       </button>
     </form>
   );
 }
 
-function AddCardDialog({
-  createError,
-  form,
-  isPending,
-  onClose,
-  onSubmit,
-  setForm,
-}: {
-  createError: { message: string } | null;
-  form: CardForm;
-  isPending: boolean;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  setForm: (updater: (current: CardForm) => CardForm) => void;
-}) {
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
+export function AddWishlistApp() {
+  const router = useRouter();
+  const [form, setForm] = useState(emptyForm);
+  const collectionChanged = useCollectionChange();
+  const create = trpc.library.create.useMutation();
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    try {
+      await create.mutateAsync({
+        name: form.name || undefined,
+        url: form.url,
+        imageUrl: form.imageUrl || undefined,
+        marketPriceText: normalizeMarketPrice(form.priceText) || undefined,
+        rarity: form.rarity,
+        edition: form.edition,
+        chaseLevel: form.chaseLevel ? Number(form.chaseLevel) : null,
+        status: "wishlist",
+        notes: form.notes || undefined,
+      });
+      setForm(emptyForm());
+      try {
+        await collectionChanged("target");
+      } catch {
+        // The target is saved. The destination performs a fresh query.
       }
+      router.replace("/");
+    } catch {
+      // The mutation exposes its actionable error beside the form.
     }
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
+  }
 
   return (
-    <div
-      aria-labelledby="add-card-title"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-zinc-950/40 px-0 pt-10 backdrop-blur-sm lg:items-center lg:px-4 lg:py-6"
-      role="dialog"
-    >
-      <section className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg border border-zinc-300 bg-white shadow-2xl lg:max-h-[90vh] lg:max-w-2xl lg:rounded-lg">
-        <div className="flex items-center justify-between gap-4 border-b border-zinc-200 p-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">
-              Add wishlist target
+    <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
+        <AppHeader title="Add to wishlist" />
+        <Link
+          className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-700 transition hover:text-[#8a1f2d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]"
+          href="/"
+        >
+          <ArrowLeft aria-hidden className="size-4" />
+          Back to Library
+        </Link>
+        <section className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm sm:p-6">
+          <div className="mb-5 border-b border-zinc-200 pb-4">
+            <h2 className="text-xl font-black">Wishlist details</h2>
+            <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-zinc-600">
+              Add the exact card printing you want. Purchases and pack openings remain in Records.
             </p>
-            <h2 className="mt-1 text-xl font-bold" id="add-card-title">
-              Add to Library
-            </h2>
           </div>
-          <button
-            aria-label="Close add wishlist target form"
-            className="grid size-10 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-        <div className="overflow-auto p-4">
           <AddCardForm
-            createError={createError}
+            createError={create.error}
             form={form}
-            isPending={isPending}
-            onSubmit={onSubmit}
+            isPending={create.isPending}
+            onSubmit={submit}
             setForm={setForm}
           />
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function CollectionQuantitySummary({
+  card,
+  roomy = false,
+}: {
+  card: Card;
+  roomy?: boolean;
+}) {
+  return (
+    <dl
+      aria-label={`Wanted ${card.desiredQuantity}, owned ${card.ownedQuantity}`}
+      className={`grid grid-cols-2 divide-x divide-zinc-200 overflow-hidden border border-zinc-200 bg-zinc-50 text-center ${roomy ? "rounded-md" : "border-x-0 border-b-0"}`}
+      data-library-quantity-summary
+    >
+      {[
+        ["Wanted", card.desiredQuantity],
+        ["Owned", card.ownedQuantity],
+      ].map(([label, value]) => (
+        <div className={roomy ? "px-3 py-2.5" : "px-1.5 py-2"} key={label}>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.06em] text-zinc-600">{label}</dt>
+          <dd className={`${roomy ? "text-xl" : "text-lg"} mt-0.5 font-black leading-none tabular-nums text-zinc-950`}>{value}</dd>
         </div>
-      </section>
-    </div>
+      ))}
+    </dl>
   );
 }
 
 function CardImagePreviewDialog({
   card,
   onClose,
+  returnFocusTo,
 }: {
   card: Card;
   onClose: () => void;
+  returnFocusTo: HTMLElement | null;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onClose();
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.hasAttribute("hidden"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
       }
     }
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    closeButtonRef.current?.focus();
-    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown);
 
     return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
+      window.requestAnimationFrame(() => {
+        (returnFocusTo?.isConnected ? returnFocusTo : previouslyFocused)?.focus();
+      });
     };
-  }, [onClose]);
+  }, [returnFocusTo]);
 
   function updateTilt(event: MouseEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1293,32 +1547,37 @@ function CardImagePreviewDialog({
     });
   }
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      aria-labelledby="card-image-preview-title"
+      aria-label={`Larger image of ${card.name}`}
       aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/70 px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/80 px-4 py-6 backdrop-blur-sm"
+      data-library-image-preview
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCloseRef.current();
+      }}
       role="dialog"
     >
-      <div className="relative w-full max-w-md text-center">
+      <section className="relative max-h-full max-w-full" ref={dialogRef}>
         <button
-          aria-label="Close card image"
-          className="absolute right-0 top-0 z-10 grid size-10 translate-x-3 -translate-y-3 place-items-center rounded-md border border-zinc-700 bg-zinc-950/80 text-zinc-300 shadow-sm transition hover:border-white hover:text-white"
-          onClick={onClose}
+          aria-label={`Close larger image of ${card.name}`}
+          className="absolute right-0 top-0 z-10 grid size-11 translate-x-2 -translate-y-2 place-items-center rounded-full border border-white/25 bg-zinc-950/85 text-white shadow-lg transition hover:border-white hover:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+          onClick={() => onCloseRef.current()}
           ref={closeButtonRef}
-          title="Close card image"
           type="button"
         >
-          <X className="size-4" />
+          <X aria-hidden="true" className="size-5" />
         </button>
         <div
-          className="mx-auto w-[min(82vw,360px)]"
+          className="w-[min(82vw,420px,56dvh)] max-w-full"
           onMouseLeave={() => setTilt({ x: 0, y: 0 })}
           onMouseMove={updateTilt}
           style={{ perspective: "1200px" }}
         >
           <div
-            className="rounded-xl bg-zinc-950 p-3 shadow-2xl transition-transform duration-150"
+            className="rounded-xl bg-zinc-950/80 p-2 shadow-2xl transition-transform duration-150"
             style={{
               transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
               transformStyle: "preserve-3d",
@@ -1333,25 +1592,9 @@ function CardImagePreviewDialog({
             />
           </div>
         </div>
-        <h2
-          className="mt-4 text-2xl font-bold leading-tight text-white"
-          id="card-image-preview-title"
-        >
-          {card.name}
-        </h2>
-        <div className="mt-4 flex justify-center">
-          <a
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-white/20 bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15"
-            href={ebaySearchUrl(card)}
-            rel="noreferrer"
-            target="_blank"
-          >
-            eBay
-            <ExternalLink className="size-4" />
-          </a>
-        </div>
-      </div>
+      </section>
     </div>
+    , document.body,
   );
 }
 
@@ -1469,16 +1712,16 @@ export function WishlistApp() {
   } = useMemo(() => trackerUrlState(searchParams), [searchParams]);
   const [searchInput, setSearchInput] = useState(query);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
-  const [addFormOpen, setAddFormOpen] = useState(false);
-  const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
-  const [imagePreviewCard, setImagePreviewCard] = useState<Card | null>(null);
+  const [cardDetail, setCardDetail] = useState<CardDetailState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
+  const [collectionWarning, setCollectionWarning] = useState<string | null>(null);
   const [pricingRun, setPricingRun] = useState<PricingRun | null>(null);
   const [pricingRefreshDialogOpen, setPricingRefreshDialogOpen] = useState(false);
   const [pricingCandidateCount, setPricingCandidateCount] = useState<number | null>(null);
   const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
 
   const updateTrackerUrl = useCallback(function updateTrackerUrl(
     updates: Partial<
@@ -1538,16 +1781,12 @@ export function WishlistApp() {
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
   }, [pricingRun?.running]);
 
-  function invalidateCardsAndSpend() {
-    void utils.library.binderList.invalidate();
-    void utils.library.chaseQueue.invalidate();
-    void utils.library.list.invalidate();
-    void utils.library.summary.invalidate();
-    void utils.library.trackerPage.invalidate();
-    void utils.binder.layout.invalidate();
-    void utils.spend.currentMonth.invalidate();
-    void utils.spend.monthlyFavourites.invalidate();
-    void utils.wheel.state.invalidate();
+  async function invalidateCardsAndSpend() {
+    try {
+      await collectionChanged("target");
+    } catch (error) {
+      setCollectionWarning(collectionRefreshFailureMessage(error));
+    }
   }
 
   const trackerInput = useMemo(
@@ -1586,13 +1825,6 @@ export function WishlistApp() {
     enabled: clientReady,
     staleTime: 30_000,
   });
-  const create = trpc.library.create.useMutation({
-    onSuccess: () => {
-      setForm(emptyForm());
-      setAddFormOpen(false);
-      invalidateCardsAndSpend();
-    },
-  });
   const refreshPricing = trpc.library.refreshPricing.useMutation();
   const recordPricingRefresh = trpc.library.recordPricingRefresh.useMutation({
     onSuccess: () => {
@@ -1600,12 +1832,12 @@ export function WishlistApp() {
     },
   });
   const deleteCard = trpc.library.delete.useMutation({
-    onSuccess: invalidateCardsAndSpend,
+    onSuccess: async () => { await invalidateCardsAndSpend(); },
   });
   const updateCard = trpc.library.update.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       setEditForm(null);
-      invalidateCardsAndSpend();
+      await invalidateCardsAndSpend();
     },
   });
 
@@ -1638,31 +1870,16 @@ export function WishlistApp() {
   const lastVisibleCard = Math.min(currentPage * pageSize, totalCards);
   const counts = list.data?.counts ?? { owned: 0, total: 0, wishlist: 0 };
   const values = list.data?.values ?? { owned: 0, paid: 0, wishlist: 0 };
+  const paidCompleteness = list.data?.paidCompleteness ?? {
+    complete: true,
+    knownCopyCount: 0,
+    unknownCopyCount: 0,
+  };
   const canEdit = list.data?.canEdit ?? false;
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!canEdit) {
-      return;
-    }
-    create.mutate({
-      name: form.name || undefined,
-      url: form.url,
-      imageUrl: form.imageUrl || undefined,
-      marketPriceText: normalizeMarketPrice(form.priceText) || undefined,
-      rarity: form.rarity,
-      edition: form.edition,
-      chaseLevel: form.chaseLevel ? Number(form.chaseLevel) : null,
-      status: "wishlist",
-      notes: form.notes || undefined,
-    });
-  }
 
   function deleteCardById(cardId: string) {
     const card = cards.find((item) => item.id === cardId);
     if (!card) return;
-    setEditForm(null);
     setDeleteTarget(card);
   }
 
@@ -1769,7 +1986,7 @@ export function WishlistApp() {
       imageUrl: editForm.imageUrl || undefined,
       priceText: editForm.priceText || undefined,
       marketPriceText: normalizeMarketPrice(editForm.marketPriceText) || undefined,
-      ebayListingUrl: editForm.status === "wishlist" ? editForm.ebayListingUrl : "",
+      ebayListingUrl: editForm.desiredQuantity > 0 ? editForm.ebayListingUrl : "",
       rarity: editForm.rarity || undefined,
       edition: editForm.edition,
       chaseLevel:
@@ -1785,57 +2002,21 @@ export function WishlistApp() {
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <AppHeader
-          eyebrow="Cards, targets, and market estimates"
           title="Library"
-          actions={
-            <div className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-zinc-300 bg-white text-center shadow-sm sm:min-w-[420px]">
-            <div className="border-r border-zinc-200 px-4 py-3">
-              <p className="text-2xl font-bold">{counts.total}</p>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-                Tracked
-              </p>
-            </div>
-            <div className="border-r border-zinc-200 px-4 py-3">
-              <p className="text-2xl font-bold text-[#8a1f2d]">
-                {counts.wishlist}
-              </p>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-                Wants
-              </p>
-              <p className="mt-1 text-xs font-semibold text-zinc-400">
-                {formatCurrency(values.wishlist)}
-              </p>
-            </div>
-            <div className="px-4 py-3">
-              <p className="text-2xl font-bold text-[#196047]">
-                {counts.owned}
-              </p>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
-                Owned
-              </p>
-              <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-xs font-semibold leading-4 text-zinc-400">
-                <span>Worth {formatCurrency(values.owned)}</span>
-                {canEdit && values.paid ? (
-                  <span>Paid {formatCurrency(values.paid)}</span>
-                ) : null}
-              </div>
-            </div>
-          </div>
-          }
         />
 
         <section className="flex min-w-0 flex-col gap-4">
-          <div className="flex flex-col gap-3 rounded-lg border border-zinc-300 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Cards</h2>
-              <p className="mt-1 text-sm font-medium text-zinc-500">
-                Browse wishlist targets and current cards. Use Records for purchases, pulls, and sales.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <RarityGuidePopover />
-              {canEdit ? (
-                <>
+          <div className="rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold">Cards</h2>
+                <p className="mt-1 text-sm font-medium text-zinc-500">
+                  Browse wishlist targets and current cards. Use Records for purchases, pulls, and sales.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <RarityGuidePopover />
+                {canEdit ? (
                   <button
                     aria-label="Refresh current UK eBay estimates for all cards"
                     className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
@@ -1851,17 +2032,49 @@ export function WishlistApp() {
                       }`}
                     />
                   </button>
-                  <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-semibold text-white transition hover:bg-[#711826]"
-                    onClick={() => setAddFormOpen(true)}
-                    type="button"
-                  >
-                    <Plus className="size-4" />
-                    Add target
-                  </button>
-                </>
-              ) : null}
+                ) : null}
+              </div>
             </div>
+            <dl
+              aria-label="Library summary"
+              className={`mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-zinc-200 bg-zinc-200 ${
+                canEdit ? "sm:grid-cols-4" : "sm:grid-cols-3"
+              }`}
+              data-library-summary
+            >
+              <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Tracked cards</dt>
+                <dd className="mt-1 text-xl font-black leading-none tabular-nums text-zinc-950">{counts.total}</dd>
+                <dd className="mt-1 text-xs font-semibold text-zinc-500">
+                  {counts.wishlist} wanted · {counts.owned} owned
+                </dd>
+              </div>
+              <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Wishlist value</dt>
+                <dd className="mt-1 text-xl font-black leading-none tabular-nums text-[#8a1f2d]">{formatCurrency(values.wishlist)}</dd>
+                <dd className="mt-1 text-xs font-semibold text-zinc-500">{counts.wishlist} wanted</dd>
+              </div>
+              <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Owned value</dt>
+                <dd className="mt-1 text-xl font-black leading-none tabular-nums text-[#196047]">{formatCurrency(values.owned)}</dd>
+                <dd className="mt-1 text-xs font-semibold text-zinc-500">{counts.owned} owned</dd>
+              </div>
+              {canEdit ? (
+                <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Purchase cost</dt>
+                  <dd className="mt-1 text-xl font-black leading-none tabular-nums text-emerald-700">
+                    {paidCompleteness.knownCopyCount > 0 ? formatCurrency(values.paid) : "—"}
+                  </dd>
+                  <dd className="mt-1 text-xs font-semibold text-zinc-500">
+                    {paidCompleteness.unknownCopyCount > 0
+                      ? `${paidCompleteness.unknownCopyCount} cost${paidCompleteness.unknownCopyCount === 1 ? "" : "s"} missing`
+                      : paidCompleteness.knownCopyCount > 0
+                        ? `${paidCompleteness.knownCopyCount} cost${paidCompleteness.knownCopyCount === 1 ? "" : "s"} recorded`
+                        : "No costs recorded"}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
           </div>
 
           <section className="flex min-w-0 flex-col gap-4">
@@ -1952,12 +2165,12 @@ export function WishlistApp() {
 
             {list.isError ? (
               <DataLoadError
-                onRetry={() => void list.refetch()}
+                onRetry={() => list.refetch()}
                 title="We couldn’t open the collection"
               />
             ) : !clientReady || list.isLoading ? (
-              <div className="grid min-h-80 place-items-center rounded-lg border border-zinc-300 bg-white">
-                <Loader2 className="size-6 animate-spin text-[#8a1f2d]" />
+              <div className="grid min-h-80 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
+                <div className="text-center"><Loader2 aria-hidden="true" className="mx-auto size-6 animate-spin text-[#8a1f2d]" /><p className="mt-3 font-bold">Loading Library cards…</p></div>
               </div>
             ) : cards.length === 0 ? (
               <div className="grid min-h-80 place-items-center rounded-lg border border-dashed border-zinc-300 bg-white px-4 text-center">
@@ -1972,18 +2185,24 @@ export function WishlistApp() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                <div
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5"
+                  data-library-results
+                >
                   {paginatedCards.map((card: Card) => (
                     <article
+                      data-library-card
                       key={card.id}
-                      className="group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md"
+                      className="group flex min-w-0 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md sm:h-full sm:flex-col"
                     >
-                      <div className="grid aspect-[4/5] w-full place-items-center border-b border-zinc-200 bg-[#f7f6f2] p-3">
+                      <div className="flex w-32 shrink-0 flex-col border-r border-zinc-200 sm:w-full sm:border-r-0" data-library-media-column>
+                      <div className="grid h-36 place-items-center bg-[#f7f6f2] p-2 sm:h-auto sm:aspect-[4/5] sm:border-b sm:p-3" data-library-media>
                         {card.imageUrl ? (
                           <button
                             aria-label={`Open larger image of ${card.name}`}
                             className="group/image relative grid h-full w-full cursor-zoom-in place-items-center rounded-md transition hover:bg-zinc-100 focus-visible:bg-zinc-100"
-                            onClick={() => setImagePreviewCard(card)}
+                            data-library-action
+                            onClick={(event) => setCardDetail({ card, returnFocusTo: event.currentTarget })}
                             title="Open larger image"
                             type="button"
                           >
@@ -1996,7 +2215,7 @@ export function WishlistApp() {
                             />
                             <span
                               aria-hidden
-                              className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-md border border-white/20 bg-zinc-950/75 text-white opacity-0 shadow-sm transition group-hover/image:opacity-100 group-focus-visible/image:opacity-100"
+                              className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-md border border-white/20 bg-zinc-950/75 text-white shadow-sm transition sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100"
                             >
                               <Search className="size-3.5" />
                             </span>
@@ -2007,13 +2226,15 @@ export function WishlistApp() {
                           </div>
                         )}
                       </div>
+                      <CollectionQuantitySummary card={card} />
+                      </div>
 
-                      <div className="flex min-w-0 flex-1 flex-col gap-3 p-3">
-                        <div className="flex min-w-0 items-start gap-2">
+                      <div className="flex min-w-0 flex-1 flex-col gap-1.5 p-2 sm:gap-3 sm:p-3">
+                        <div className="flex min-w-0 items-start">
                           <div className="min-w-0 flex-1">
                             {canEdit ? (
                               <button
-                                className="line-clamp-2 text-left text-[17px] font-bold leading-[1.2] text-zinc-950 underline-offset-4 transition hover:text-[#8a1f2d] hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d] sm:text-lg"
+                                className="line-clamp-2 min-h-11 min-w-11 text-left text-base font-bold leading-[1.2] text-zinc-950 underline-offset-4 transition hover:text-[#8a1f2d] hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d] sm:text-lg"
                                 onClick={() => openCardEditor(card)}
                                 title={`Edit ${card.name}`}
                                 type="button"
@@ -2022,7 +2243,7 @@ export function WishlistApp() {
                               </button>
                             ) : (
                               <h3
-                                className="line-clamp-2 text-[17px] font-bold leading-[1.2] text-zinc-950 sm:text-lg"
+                                className="line-clamp-2 text-base font-bold leading-[1.2] text-zinc-950 sm:text-lg"
                                 title={card.name}
                               >
                                 {card.name}
@@ -2030,13 +2251,13 @@ export function WishlistApp() {
                             )}
                           </div>
                           <span
-                            className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
+                            className={`ml-2 shrink-0 rounded-md border px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] ${
                               card.status === "owned"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-rose-50 text-rose-700"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                : "border-rose-200 bg-rose-50 text-rose-800"
                             }`}
                           >
-                            {card.status === "owned" ? "Owned" : "Want"}
+                            {card.status === "owned" ? "Owned" : "Wishlist"}
                           </span>
                         </div>
 
@@ -2044,7 +2265,7 @@ export function WishlistApp() {
                           {(card.marketPriceText || card.priceText) ? (
                             <div className="min-w-0">
                               <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                                <span className="text-xl font-extrabold leading-none tabular-nums text-zinc-950">
+                                <span className="text-lg font-extrabold leading-none tabular-nums text-zinc-950 sm:text-xl">
                                   {card.marketPriceText ?? card.priceText}
                                 </span>
                                 {card.marketPriceText ? (
@@ -2059,46 +2280,44 @@ export function WishlistApp() {
                                 </p>
                               ) : null}
                             </div>
-                          ) : null}
+                          ) : (
+                            <p className="text-xs font-bold text-zinc-500">Value unknown · Unpriced</p>
+                          )}
 
-                          <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5" data-library-metadata>
                             {rarityAbbreviation(card.rarity) ? (
                               <span
-                                className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold uppercase tracking-[0.08em] text-zinc-700"
+                                className="inline-flex h-7 items-center whitespace-nowrap rounded-md border border-zinc-200 bg-zinc-50 px-2 text-xs font-bold uppercase tracking-[0.08em] text-zinc-700"
                                 title={card.rarity ?? undefined}
                               >
                                 {rarityAbbreviation(card.rarity)}
                               </span>
                             ) : null}
                             {card.status === "wishlist" && card.chaseLevel ? (
-                              <span className="rounded-md border border-rose-100 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700">
+                              <span className="inline-flex h-7 items-center whitespace-nowrap rounded-md border border-rose-100 bg-rose-50 px-2 text-xs font-bold text-rose-700">
                                 Chase {card.chaseLevel}
                               </span>
                             ) : null}
-                            {card.status === "owned" && card.paidPriceText ? (
-                              <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                                {normalizePaidPrice(card.paidPriceText)}
+                            {card.status === "owned" && (card.paidPriceText !== null || (card.paidPriceCompleteness?.unknownCopyCount ?? 0) > 0) ? (
+                              <span className="inline-flex h-7 items-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-xs font-black tabular-nums text-emerald-800">
+                                {card.paidPriceText !== null ? normalizePaidPrice(card.paidPriceText) : "Cost unknown"}{(card.paidPriceCompleteness?.unknownCopyCount ?? 0) > 0 ? ` · ${card.paidPriceCompleteness!.unknownCopyCount} cost${card.paidPriceCompleteness!.unknownCopyCount === 1 ? "" : "s"} unknown` : ""}
                               </span>
                             ) : null}
                             {card.status === "owned" && card.purchaseMonth ? (
-                              <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-600">
+                              <span className="inline-flex h-7 items-center whitespace-nowrap rounded-md border border-zinc-200 bg-zinc-50 px-2 text-xs font-bold text-zinc-600">
                                 {monthLabel(card.purchaseMonth)}
                               </span>
                             ) : null}
-                            <CardNoteIndicator
-                              align="right"
-                              label={`View note for ${card.name}`}
-                              note={card.notes}
-                            />
                           </div>
                         </div>
 
-                        <div className="mt-auto flex flex-col gap-2 border-t border-zinc-100 pt-3">
+                        <div className="mt-auto flex flex-col gap-2 border-t border-zinc-100 pt-2 sm:pt-3">
                           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                             {isTcgplayerUrl(card.url) ? (
                               <a
                                 aria-label={`Open ${card.name} on TCGplayer`}
-                                className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                                data-library-action
                                 href={card.url ?? undefined}
                                 rel="noreferrer"
                                 target="_blank"
@@ -2109,7 +2328,8 @@ export function WishlistApp() {
                             ) : null}
                             <a
                               aria-label={`Open eBay search for ${card.name}`}
-                              className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                              data-library-action
                               href={ebaySearchUrl(card)}
                               rel="noreferrer"
                               target="_blank"
@@ -2120,7 +2340,8 @@ export function WishlistApp() {
                             {card.url && !isTcgplayerUrl(card.url) ? (
                               <a
                                 aria-label={`Open saved link for ${card.name}`}
-                                className="inline-flex size-8 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                                data-library-action
                                 href={card.url}
                                 rel="noreferrer"
                                 target="_blank"
@@ -2239,6 +2460,11 @@ export function WishlistApp() {
         </aside>
       ) : null}
       <DestructiveToast message={pricingError} onDismiss={() => setPricingError(null)} title="Pricing refresh stopped" />
+      <DestructiveToast
+        message={collectionWarning}
+        onDismiss={() => setCollectionWarning(null)}
+        title="Change saved; refresh needed"
+      />
       {pricingRefreshDialogOpen ? (
         <PricingRefreshDialog
           candidateCount={pricingCandidateCount}
@@ -2250,69 +2476,32 @@ export function WishlistApp() {
           }}
         />
       ) : null}
-      {imagePreviewCard ? (
+      {cardDetail ? (
         <CardImagePreviewDialog
-          card={imagePreviewCard}
-          onClose={() => setImagePreviewCard(null)}
-        />
-      ) : null}
-      {addFormOpen ? (
-        <AddCardDialog
-          createError={create.error}
-          form={form}
-          isPending={create.isPending}
-          onClose={() => setAddFormOpen(false)}
-          onSubmit={submit}
-          setForm={setForm}
+          card={cardDetail.card}
+          onClose={() => setCardDetail(null)}
+          returnFocusTo={cardDetail.returnFocusTo}
         />
       ) : null}
       {canEdit && deleteTarget ? (
-        <div
-          aria-labelledby="delete-card-title"
-          aria-modal="true"
-          className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/35 px-4 backdrop-blur-sm"
-          role="alertdialog"
-        >
-          <div className="w-full max-w-sm rounded-lg border border-zinc-300 bg-[#f6f4ef] p-4 text-zinc-950 shadow-2xl">
-            <p
-              className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]"
-              id="delete-card-title"
-            >
-              Delete card
-            </p>
-            <h2 className="mt-2 text-2xl font-bold tracking-normal">
-              Remove this card?
-            </h2>
-            <p className="mt-2 text-sm font-medium leading-6 text-zinc-600">
-              {deleteTarget.name} will be removed from the Library and any binder
-              slot it appears in.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-                onClick={() => setDeleteTarget(null)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
-                disabled={deleteCard.isPending}
-                onClick={() =>
-                  deleteCard.mutate(
-                    { id: deleteTarget.id },
-                    { onSuccess: () => setDeleteTarget(null) },
-                  )
-                }
-                type="button"
-              >
-                Delete card
-              </button>
-            </div>
-          </div>
-        </div>
+        <RemoveWishlistDialog
+          card={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() =>
+            deleteCard.mutate(
+              { id: deleteTarget.id },
+              {
+                onSuccess: () => {
+                  setDeleteTarget(null);
+                  setEditForm(null);
+                },
+              },
+            )
+          }
+          pending={deleteCard.isPending}
+        />
       ) : null}
-      {canEdit && editForm ? (
+      {canEdit && editForm && !deleteTarget ? (
         <EditCardModal
           form={editForm}
           onClose={() => setEditForm(null)}

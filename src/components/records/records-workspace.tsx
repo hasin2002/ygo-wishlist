@@ -41,11 +41,20 @@ export function RecordsWorkspace({ children }: { children: React.ReactNode }) {
   const ebayListing = isEbayListingPath(pathname) && copyId && targetId
     ? { copyId, targetId }
     : null;
+  const pageTitle = pathname === "/records"
+    ? "Records"
+    : pathname === "/records/history"
+      ? "History"
+      : pathname === "/records/inventory"
+        ? "Inventory"
+        : pathname === "/records/listings"
+          ? "Listings"
+          : null;
 
   return (
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <AppHeader eyebrow="Private collection records" title="Records" />
+        {pageTitle ? <AppHeader title={pageTitle} /> : null}
         <PreviewBanner />
         <Suspense fallback={<RecordsContentLoading />}>
           {isListingsWorkspacePath(pathname)

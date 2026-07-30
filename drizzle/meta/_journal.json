@@ -15,6 +15,20 @@
       "when": 1785361604142,
       "tag": "0001_enforce_card_printing_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785367920391,
+      "tag": "0002_remove_feature_idea_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785439234477,
+      "tag": "0003_allow_zero_wishlist_demand",
+      "breakpoints": true
     }
   ]
 }

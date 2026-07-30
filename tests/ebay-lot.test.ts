@@ -184,14 +184,20 @@ test("saved Copy photos can be staged before eBay authentication succeeds", asyn
     new URL("../src/app/api/ebay/image/route.ts", import.meta.url),
     "utf8",
   );
+  const operation = await readFile(
+    new URL("../src/lib/records/ebay-image-operation.ts", import.meta.url),
+    "utf8",
+  );
   const server = await readFile(
     new URL("../src/server/ebay-listing.ts", import.meta.url),
     "utf8",
   );
-  assert.match(route, /stageOnly/);
+  assert.match(operation, /stageOnly/);
   assert.match(route, /archiveInventoryImageDraft/);
   assert.match(route, /uploadArchivedEbayImage/);
   assert.match(server, /export async function archiveInventoryImageDraft/);
   assert.match(server, /export async function uploadArchivedEbayImage/);
-  assert.match(route, /Reconnect eBay before preparing the lot photos/);
+  assert.match(route, /localInventoryStage/);
+  assert.match(route, /capability\.canManageListingPhotoDrafts/);
+  assert.match(route, /capability\.ebay\.allowed/);
 });

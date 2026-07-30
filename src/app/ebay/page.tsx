@@ -84,9 +84,9 @@ export default async function EbayPage({
   const connectHref = ebayConnectHref(returnTo);
 
   return (
-    <main className="min-h-dvh bg-[#f6f4ef] px-4 py-7 text-zinc-950 sm:px-6 lg:pl-[calc(var(--app-nav-width)+2rem)] lg:pr-8 lg:pt-10">
-      <div className="mx-auto max-w-4xl">
-        <AppHeader eyebrow="Admin workspace" title="eBay selling" />
+    <main className="app-page-shell min-h-dvh bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
+      <div className="mx-auto max-w-7xl">
+        <AppHeader title="eBay selling" />
 
         <section className="mt-7 rounded-2xl border border-zinc-300 bg-white p-5 shadow-sm sm:p-7">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

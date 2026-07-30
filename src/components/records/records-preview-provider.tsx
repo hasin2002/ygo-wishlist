@@ -40,6 +40,11 @@ import {
 import { buildCopyEbayExposureStates } from "@/lib/records/copy-ebay-exposure";
 import { trpc } from "@/trpc/client";
 import { useClientReady } from "@/lib/use-client-ready";
+import {
+  collectionRefreshFailureMessage,
+  useCollectionChange,
+} from "@/lib/use-collection-change";
+import { settleConfirmedChange } from "@/lib/collection-change";
 
 const emptySnapshot: RecordsSnapshot = {
   version: 1,
@@ -219,8 +224,12 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     mode: "preview",
     status: !snapshot ? "loading" : "ready",
     errorMessage: null,
+    draftOwnerScope: "preview",
+    draftsHydrated: hydrated,
+    draftRecoveryMessage: null,
     snapshot: snapshot ?? emptySnapshot,
     drafts,
+    refresh: async () => undefined,
     resolveTcgplayerProduct,
     searchLibraryCards: (query) => searchLibraryCards(snapshot ?? emptySnapshot, query),
     createPurchase: (input) => withSnapshot((current) => applyPurchase(current, input)),
@@ -259,7 +268,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
   return <RecordsDataSourceContext.Provider value={value}>{children}</RecordsDataSourceContext.Provider>;
 }
 
-function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
+function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNode; ownerScope: string }) {
   const clientReady = useClientReady();
   const [drafts, setDrafts] = useState<RecordsDrafts>({});
   const [draftsHydrated, setDraftsHydrated] = useState(false);
@@ -267,7 +276,7 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
     enabled: clientReady,
     staleTime: 30_000,
   });
-  const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
   const createPurchase = trpc.records.createPurchase.useMutation();
   const createOpening = trpc.records.createOpening.useMutation();
   const createSale = trpc.records.createSale.useMutation();
@@ -297,14 +306,24 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
     window.sessionStorage.setItem(recordsDraftStorageKey, JSON.stringify(stored));
   }, [drafts, draftsHydrated]);
 
-  async function finish(mutation: Promise<{ id: string }>): Promise<DataSourceResult> {
-    try {
-      const result = await mutation;
-      await utils.records.snapshot.invalidate();
-      return { ok: true, id: result.id };
-    } catch (error) {
-      return errorResult(error);
-    }
+  async function finish(mutation: Promise<{ id: string; warning?: string }>, change: "records" | "copies" | "target" = "records"): Promise<DataSourceResult> {
+    const outcome = await settleConfirmedChange(
+      () => mutation,
+      () => collectionChanged(change),
+    );
+    if (!outcome.ok) return errorResult(outcome.error);
+    return {
+      ok: true,
+      id: outcome.value.id,
+      ...(outcome.refreshError || outcome.value.warning
+        ? {
+            warning: [
+              outcome.value.warning,
+              outcome.refreshError ? collectionRefreshFailureMessage(outcome.refreshError) : null,
+            ].filter(Boolean).join(" "),
+          }
+        : {}),
+    };
   }
 
   function revisionFor(recordId: string) {
@@ -323,10 +342,14 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
 
   const value: RecordsDataSource = {
     mode: "live",
-    status: snapshotQuery.isPending ? "loading" : snapshotQuery.error ? "error" : "ready",
+    status: !draftsHydrated || snapshotQuery.isPending ? "loading" : snapshotQuery.error ? "error" : "ready",
     errorMessage: snapshotQuery.error?.message ?? null,
+    draftOwnerScope: ownerScope,
+    draftsHydrated,
+    draftRecoveryMessage: null,
     snapshot: snapshotQuery.data ?? emptySnapshot,
     drafts,
+    refresh: async () => { await snapshotQuery.refetch(); },
     resolveTcgplayerProduct,
     searchLibraryCards: (query) => searchLibraryCards(snapshotQuery.data ?? emptySnapshot, query),
     createPurchase: (input) => finish(createPurchase.mutateAsync(input)),
@@ -336,24 +359,10 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
       recordId,
       (expectedRevision) => updateDetails.mutateAsync({ recordId, expectedRevision, update }),
     ),
-    resolveCardAttention: async (update) => {
-      try {
-        const result = await resolveAttention.mutateAsync(update);
-        await utils.records.snapshot.invalidate();
-        return { ok: true, id: result.id };
-      } catch (error) {
-        return errorResult(error);
-      }
-    },
-    resolveEbayCopyLinkAttention: async (listingId) => {
-      try {
-        const result = await resolveEbayCopyLinkAttention.mutateAsync({ listingId });
-        await utils.records.snapshot.invalidate();
-        return { ok: true, id: result.id };
-      } catch (error) {
-        return errorResult(error);
-      }
-    },
+    resolveCardAttention: (update) => finish(resolveAttention.mutateAsync(update)),
+    resolveEbayCopyLinkAttention: (listingId) => finish(
+      resolveEbayCopyLinkAttention.mutateAsync({ listingId }),
+    ),
     replaceRecordCards: (recordId, cards) => withRevision(
       recordId,
       (expectedRevision) => replaceCards.mutateAsync({ recordId, expectedRevision, cards }),
@@ -362,21 +371,19 @@ function RecordsLiveStateProvider({ children }: { children: ReactNode }) {
       recordId,
       (expectedRevision) => replaceCopies.mutateAsync({ recordId, expectedRevision, copyIds }),
     ),
-    updateCardCopy: async (copyId, update) => { try { const result = await updateCopy.mutateAsync({ copyId, update }); await utils.records.snapshot.invalidate(); return { ok: true, id: result.id }; } catch (error) { return errorResult(error); } },
-    removeCardCopy: async (copyId) => { try { const result = await removeCopy.mutateAsync({ copyId }); await utils.records.snapshot.invalidate(); return { ok: true, id: result.id }; } catch (error) { return errorResult(error); } },
+    updateCardCopy: (copyId, update) => finish(updateCopy.mutateAsync({ copyId, update }), "copies"),
+    removeCardCopy: (copyId) => finish(removeCopy.mutateAsync({ copyId }), "copies"),
     updateRecordLine: (recordId, lineId, update) => withRevision(
       recordId,
       (expectedRevision) => updateLine.mutateAsync({ recordId, expectedRevision, lineId, update }),
     ),
-    deleteWishlistTarget: async (targetId) => {
-      try {
-        await deleteWishlistTarget.mutateAsync({ id: targetId });
-        await utils.records.snapshot.invalidate();
-        return { ok: true, id: targetId };
-      } catch (error) {
-        return errorResult(error);
-      }
-    },
+    deleteWishlistTarget: (targetId) => finish(
+      deleteWishlistTarget.mutateAsync({ id: targetId }).then((result) => ({
+        id: targetId,
+        warning: result.warning,
+      })),
+      "target",
+    ),
     voidRecord: (recordId) => withRevision(
       recordId,
       (expectedRevision) => changeStatus.mutateAsync({ recordId, expectedRevision, status: "void" }),
@@ -406,8 +413,12 @@ const loadingValue: RecordsDataSource = {
   mode: "live",
   status: "loading",
   errorMessage: null,
+  draftOwnerScope: "pending-session",
+  draftsHydrated: false,
+  draftRecoveryMessage: null,
   snapshot: emptySnapshot,
   drafts: {},
+  refresh: async () => undefined,
   resolveTcgplayerProduct,
   searchLibraryCards: () => [],
   createPurchase: async () => ({ ok: false, message: "Records are still loading." }),
@@ -430,16 +441,19 @@ const loadingValue: RecordsDataSource = {
 
 function RecordsLiveDataProvider({
   children,
-  initiallyAuthenticated = false,
 }: {
   children: ReactNode;
   initiallyAuthenticated?: boolean;
 }) {
   const { data: session, isPending } = useSession();
-  if ((!initiallyAuthenticated && isPending) || (!initiallyAuthenticated && !session)) {
+  // A server-authenticated shell may hydrate before the client session hook
+  // has supplied a user. Never manufacture an owner scope or dereference that
+  // absent session: wait for the authoritative client identity so drafts stay
+  // account-scoped.
+  if (isPending || !session) {
     return <RecordsDataSourceContext.Provider value={loadingValue}>{children}</RecordsDataSourceContext.Provider>;
   }
-  return <RecordsLiveStateProvider>{children}</RecordsLiveStateProvider>;
+  return <RecordsLiveStateProvider ownerScope={session.user.id}>{children}</RecordsLiveStateProvider>;
 }
 
 export function RecordsDataProvider({

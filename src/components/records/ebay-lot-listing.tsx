@@ -41,8 +41,12 @@ import {
   WizardActions,
   WizardProgress,
 } from "@/components/records/entry-form-ui";
+import { DraftHydrationBoundary, FormDraftStatus } from "@/components/records/form-draft-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { useSession } from "@/lib/auth-client";
 import { ebayLotCategory } from "@/lib/ebay-listing-options";
+import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
+import { hasFields, isNullableString, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
 import {
   buildEbayLotDescription,
   buildEbayLotTitle,
@@ -55,6 +59,7 @@ import {
   copyShortReference,
 } from "@/lib/records/copy-display";
 import { trpc } from "@/trpc/client";
+import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
 
 type Photo = {
   archiveKey: string;
@@ -102,7 +107,6 @@ type EbayVerification = {
   readyToPublish: boolean;
 };
 
-const draftKey = "ygo-library:ebay-lot-draft:v1";
 const pageSize = 20;
 
 function pence(value: string) {
@@ -122,24 +126,25 @@ function defaultDraft(): Draft {
   };
 }
 
-function initialDraft(): Draft {
-  if (typeof window === "undefined") return defaultDraft();
-  try {
-    const saved = JSON.parse(
-      window.sessionStorage.getItem(draftKey) || "{}",
-    ) as Partial<Draft>;
-    return {
-      ...defaultDraft(),
-      ...saved,
-      copyIds: Array.isArray(saved.copyIds) ? saved.copyIds : [],
-      photos: Array.isArray(saved.photos) ? saved.photos : [],
-      priceOrigin: saved.priceOrigin === "estimate" || !saved.price
-        ? "estimate"
-        : "manual",
-    };
-  } catch {
-    return defaultDraft();
-  }
+function isLotDraft(value: unknown): value is Draft {
+  if (!isRecord(value) || !hasFields(value, [
+    "copyIds", "description", "photoAnchorCopyId", "photos", "price", "priceOrigin", "shipping", "title",
+  ])) return false;
+  return Array.isArray(value.copyIds)
+    && value.copyIds.every(isString)
+    && isString(value.description)
+    && isNullableString(value.photoAnchorCopyId)
+    && Array.isArray(value.photos)
+    && value.photos.every((photo) => isRecord(photo)
+      && isString(photo.archiveKey)
+      && isString(photo.ebayUrl)
+      && isString(photo.previewUrl)
+      && (photo.sourceInventoryCopyId === undefined || isString(photo.sourceInventoryCopyId))
+      && (photo.sourceInventoryKey === undefined || isString(photo.sourceInventoryKey)))
+    && isString(value.price)
+    && isOneOf(value.priceOrigin, ["estimate", "manual"] as const)
+    && isString(value.shipping)
+    && isString(value.title);
 }
 
 function copyReference(copyId: string) {
@@ -388,8 +393,17 @@ function SoldListingResearch({ groups }: { groups: SoldListingResearchGroup[] })
 }
 
 function EbayLotForm() {
+  const collectionChanged = useCollectionChange();
   const source = useRecordsDataSource();
-  const [draft, setDraft] = useState<Draft>(() => initialDraft());
+  const lifecycle = useFormDraftLifecycle({
+    workflow: "ebay-mixed-lot",
+    ownerScope: source.draftOwnerScope,
+    origin: "/records/listings/new-lot",
+    initialData: defaultDraft(),
+    isValidData: isLotDraft,
+  });
+  const draft = lifecycle.data;
+  const setDraft = lifecycle.setData;
   const [step, setStep] = useState(1);
   const [query, setQuery] = useState("");
   const [rarity, setRarity] = useState("all");
@@ -398,6 +412,7 @@ function EbayLotForm() {
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<EbayVerification | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [arrangeAnnouncement, setArrangeAnnouncement] = useState("");
   const [manifestOpen, setManifestOpen] = useState(false);
   const [clearSelectionOpen, setClearSelectionOpen] = useState(false);
@@ -412,6 +427,7 @@ function EbayLotForm() {
     total: number;
   } | null>(null);
   const autoImportedSelectionsRef = useRef(new Set<string>());
+  const publishActionRef = useRef(false);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [importingPhoto, setImportingPhoto] = useState(false);
   const [preparingPhotos, setPreparingPhotos] = useState(false);
@@ -558,10 +574,6 @@ function EbayLotForm() {
     removingPhotoId !== null ||
     reorderingPhotos;
   const availablePhotoSlots = Math.max(0, 12 - draft.photos.length);
-
-  useEffect(() => {
-    window.sessionStorage.setItem(draftKey, JSON.stringify(draft));
-  }, [draft]);
 
   function updateDraft(next: Partial<Draft>) {
     setDraft((current) => ({ ...current, ...next }));
@@ -1096,18 +1108,36 @@ function EbayLotForm() {
   }
 
   async function confirm() {
-    if (!validation?.readyToPublish) return;
+    if (!validation?.readyToPublish || publishActionRef.current) return;
+    publishActionRef.current = true;
+    setPublishing(true);
+    setError(null);
     try {
       const result = await publish.mutateAsync(input());
-      window.sessionStorage.removeItem(draftKey);
       setPublishedUrl(result.listingUrl);
-      setError(null);
+      try {
+        await collectionChanged("listing");
+      } catch (refreshError) {
+        setError(collectionRefreshFailureMessage(refreshError));
+      }
+      try {
+        lifecycle.discard();
+      } catch {
+        setError((current) =>
+          current
+            ? `${current} The listing was published, but its local draft could not be cleared. Do not publish it again.`
+            : "The listing was published, but its local draft could not be cleared. Do not publish it again.",
+        );
+      }
     } catch (reason) {
       setError(
         reason instanceof Error
           ? reason.message
           : "Lot publication failed.",
       );
+    } finally {
+      publishActionRef.current = false;
+      setPublishing(false);
     }
   }
 
@@ -1121,6 +1151,7 @@ function EbayLotForm() {
     }`;
 
   return (
+    <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form
       autoComplete="off"
       className="grid min-w-0 gap-4"
@@ -1129,6 +1160,17 @@ function EbayLotForm() {
       <DestructiveToast
         message={error}
         onDismiss={() => setError(null)}
+      />
+      <FormDraftStatus
+        dirty={lifecycle.dirty}
+        onDiscard={() => {
+          if (!window.confirm("Discard this mixed-lot draft and clear its selected Copies and listing details?")) return;
+          lifecycle.discard();
+          setStep(1);
+          setValidation(null);
+        }}
+        recoveryMessage={lifecycle.recoveryMessage}
+        restored={lifecycle.restored}
       />
 
       <WizardProgress
@@ -2166,7 +2208,8 @@ function EbayLotForm() {
           pending={
             preparingPhotos ||
             validate.isPending ||
-            publish.isPending
+            publish.isPending ||
+            publishing
           }
           pendingLabel={
             preparingPhotos
@@ -2196,35 +2239,46 @@ function EbayLotForm() {
             : ""}
       </p>
     </form>
+    </DraftHydrationBoundary>
   );
 }
 
 export function EbayLotListing() {
+  const source = useRecordsDataSource();
+  const { data: session } = useSession();
+  const ebayStatus = trpc.ebay.status.useQuery(undefined, {
+    enabled: source.mode === "live" && Boolean(session),
+    staleTime: 30_000,
+  });
+  const capability = ebayStatus.data?.capability;
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
-      <Link
-        className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950"
-        href="/records/listings"
-      >
-        <ArrowLeft className="size-4" />
-        Back to Listings
-      </Link>
+    <div className="flex w-full flex-col gap-5">
+      <nav aria-label="Mixed lot breadcrumb" className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Link
+          className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950"
+          href="/records/listings"
+        >
+          <ArrowLeft className="size-4" />
+          Back to Listings
+        </Link>
+        <p className="text-xs font-semibold text-zinc-500">Unfinished work is kept in this browser tab.</p>
+      </nav>
       <header className="flex items-start gap-3">
         <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#8a1f2d]">
           <Layers3 className="size-5" />
         </span>
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8a1f2d]">
-            Add eBay listing
-          </p>
-          <h1 className="mt-1 text-2xl font-black">Create mixed card lot</h1>
+          <h1 className="text-2xl font-black">Create mixed card lot</h1>
           <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-zinc-600">
             Choose the exact physical Copies sold together, then create one
             fixed-price eBay offer with quantity 1.
           </p>
         </div>
       </header>
-      <EbayLotForm />
+      {source.mode !== "live" ? <section className="rounded-xl border border-zinc-300 bg-white p-6 text-center"><h2 className="text-xl font-black">Mixed lots are unavailable in preview mode</h2><p className="mt-2 text-sm font-medium text-zinc-600">Switch to live Records to prepare an eBay listing.</p></section>
+        : ebayStatus.isError ? <section className="rounded-xl border border-rose-300 bg-rose-50 p-6 text-center text-rose-950" role="alert"><h2 className="text-xl font-black">eBay readiness could not be checked</h2><p className="mt-2 text-sm font-medium">The mixed-lot editor is paused until the permission check succeeds.</p><button className="mt-4 min-h-11 rounded-md border border-rose-400 bg-white px-4 text-sm font-bold" onClick={() => void ebayStatus.refetch()} type="button">Retry eBay check</button></section>
+        : !capability?.ebay.allowed ? <section className="rounded-xl border border-amber-300 bg-amber-50 p-6 text-center text-amber-950" role="status"><h2 className="text-xl font-black">{ebayStatus.isPending ? "Checking eBay readiness" : "Mixed lot unavailable"}</h2><p className="mt-2 text-sm font-medium">{ebayStatus.isPending ? "Checking whether this account can create an eBay listing…" : capability ? `${capability.ebay.message} ${capability.ebay.remedy}` : "Sign in with seller permission to create an eBay listing."}</p>{capability && ["not_connected", "reconnect_required", "missing_scopes"].includes(capability.ebay.code) ? <Link className="mt-4 inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white" href="/ebay">Open eBay settings</Link> : null}</section>
+          : <EbayLotForm />}
     </div>
   );
 }

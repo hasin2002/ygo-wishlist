@@ -17,6 +17,10 @@ import type {
   WishlistTarget,
 } from "./types.ts";
 import { allocatePenceAt } from "./allocation.ts";
+import {
+  ordinaryPurchaseCopyAllocations,
+  ordinaryPurchaseLineAllocation,
+} from "./purchase-accounting.ts";
 import { compactRecordName, generatedSaleRecordName } from "./record-name.ts";
 import { buildCopyEbayExposureStates } from "./copy-ebay-exposure.ts";
 
@@ -595,8 +599,28 @@ export function deleteWishlistTarget(snapshot: RecordsSnapshot, targetId: string
   const target = snapshot.targets.find((item) => item.id === targetId);
   if (!target) return { next: snapshot, result: { ok: false, message: "Wishlist Target not found." } satisfies DataSourceResult };
   const printingIds = new Set(snapshot.printings.filter((printing) => printing.targetId === targetId).map((printing) => printing.id));
-  if (snapshot.copies.some((copy) => printingIds.has(copy.printingId))) {
-    return { next: snapshot, result: { ok: false, message: "This Target has Copy history and cannot be deleted. Remove or void the relevant Record instead." } satisfies DataSourceResult };
+  const copies = snapshot.copies.filter((copy) => printingIds.has(copy.printingId));
+  if (target.desiredQuantity === 0) {
+    return {
+      next: snapshot,
+      result: { ok: false, message: "This card is not currently on your wishlist." } satisfies DataSourceResult,
+    };
+  }
+  if (copies.length) {
+    const availableCopyCount = copies.filter((copy) => copy.status === "available").length;
+    const next = clone(snapshot);
+    const nextTarget = next.targets.find((item) => item.id === targetId)!;
+    nextTarget.desiredQuantity = 0;
+    return {
+      next,
+      result: {
+        ok: true,
+        id: targetId,
+        ...(availableCopyCount > 0
+          ? { warning: "Removed from the wishlist. Owned Copies and their Record history were kept." }
+          : {}),
+      } satisfies DataSourceResult,
+    };
   }
   const next = clone(snapshot);
   next.targets = next.targets.filter((item) => item.id !== targetId);
@@ -742,7 +766,7 @@ function addCopies(
   allocation?: {
     bulkLotId: string;
     indexes: number[];
-    values: number[];
+    values: Array<number | null>;
   },
 ) {
   const printing = findOrCreatePrinting(snapshot, input);
@@ -793,7 +817,24 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
   if (input.kind === "card") {
     const card = input.card;
     const ids = addCopies(next, card, id);
-    lines.push(recordLine("card", card.name, card.quantity, ids, null, `${card.setCode || "Unknown code"} · ${card.edition} · ${card.rarity}`));
+    const allocations = ordinaryPurchaseCopyAllocations({
+      amountKnown: input.amountKnown !== false,
+      amountPence: input.totalPence,
+      copyCount: ids.length,
+    });
+    const allocationByCopyId = new Map([...ids].sort().map((copyId, index) => [copyId, allocations[index]!]));
+    for (const copyId of ids) {
+      const copy = next.copies.find((item) => item.id === copyId);
+      if (copy) copy.allocationPence = allocationByCopyId.get(copyId)!;
+    }
+    lines.push(recordLine(
+      "card",
+      card.name,
+      card.quantity,
+      ids,
+      ordinaryPurchaseLineAllocation({ amountKnown: input.amountKnown !== false, amountPence: input.totalPence }),
+      `${card.setCode || "Unknown code"} · ${card.edition} · ${card.rarity}`,
+    ));
     addAttention(card, card.name);
     generatedTitle = `Purchased ${card.name}`;
   } else if (input.kind === "sealed") {
@@ -852,7 +893,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
         (_, offset) => allocationIndex + offset,
       );
       const values = indexes.map((index) => (
-        allocatePenceAt(input.totalPence, input.totalCardCount, index)
+        input.amountKnown === false ? null : allocatePenceAt(input.totalPence, input.totalCardCount, index)
       ));
       allocationIndex += card.quantity;
       const ids = addCopies(next, card, id, { bulkLotId: bulkId, indexes, values });
@@ -861,7 +902,7 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
         card.name,
         card.quantity,
         ids,
-        values.reduce((sum, value) => sum + value, 0),
+        input.amountKnown === false ? null : values.reduce<number>((sum, value) => sum + (value ?? 0), 0),
         `${card.setCode || "Unknown code"} · ${card.edition} · from ${lotName}`,
       ));
       addAttention(card, card.name);
@@ -892,7 +933,8 @@ export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
     title: compactRecordName(input.recordName, generatedTitle),
     source: input.source || "Manual entry",
     listingUrl: input.listingUrl.trim() || null,
-    amountPence: input.totalPence,
+    amountPence: input.amountKnown === false ? 0 : input.totalPence,
+    amountKnown: input.amountKnown !== false,
     notes: input.notes,
     lines,
     revision: 1,
@@ -933,10 +975,10 @@ export function applyOpening(snapshot: RecordsSnapshot, input: OpeningInput) {
       title: `Untracked ${input.product.name}`,
       source: input.source,
       listingUrl: null,
-      amountPence: isGift ? 0 : input.totalPence,
-      amountKnown: true,
-      notes: isGift ? "Gifted sealed product." : "Recorded alongside a pack opening.",
-      lines: [recordLine("sealed", input.product.name, 1, [sealedId], isGift ? 0 : input.totalPence, isGift ? `Gift · £0 · ${input.product.edition}` : `£${(input.totalPence / 100).toFixed(2)} · ${input.product.edition}`)],
+      amountPence: isGift || input.amountKnown === false ? 0 : input.totalPence,
+      amountKnown: isGift || input.amountKnown !== false,
+      notes: isGift ? "Gifted sealed product." : input.amountKnown === false ? "Cost unknown; recorded alongside a pack opening." : "Recorded alongside a pack opening.",
+      lines: [recordLine("sealed", input.product.name, 1, [sealedId], isGift || input.amountKnown !== false ? (isGift ? 0 : input.totalPence) : null, isGift ? `Gift · £0 · ${input.product.edition}` : input.amountKnown === false ? `Cost unknown · ${input.product.edition}` : `£${(input.totalPence / 100).toFixed(2)} · ${input.product.edition}`)],
       revision: 1,
       createdAt: nowIso(),
     });
@@ -1030,27 +1072,81 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
   if (!Number.isInteger(update.amountPence) || update.amountPence < 0) {
     return { next: snapshot, result: { ok: false, message: "Enter a valid non-negative amount." } satisfies DataSourceResult };
   }
+  const bulkLot = next.bulkLots.find((lot) => lot.acquiredRecordId === record.id);
+  const nextAmountKnown = update.amountKnown ?? record.amountKnown !== false;
+  if (record.type === "purchase" && !bulkLot) {
+    const cardLines = record.lines.filter((line) => line.kind === "card");
+    if (cardLines.length) {
+      const [line] = cardLines;
+      const copies = next.copies.filter((copy) => copy.acquiredRecordId === record.id);
+      if (
+        record.lines.length !== 1
+        || cardLines.length !== 1
+        || !line
+        || line.quantity < 1
+        || copies.length !== line.quantity
+        || copies.some((copy) => !line.entityIds.includes(copy.id))
+      ) {
+        return { next: snapshot, result: { ok: false, message: "Ordinary card Purchases need one complete card line before their cost can be changed." } satisfies DataSourceResult };
+      }
+    } else if (record.lines.length !== 1) {
+      return { next: snapshot, result: { ok: false, message: "A Purchase must have one allocation source before its cost can be changed." } satisfies DataSourceResult };
+    }
+  }
   record.title = update.title.trim();
   record.titleGenerated = false;
   record.date = update.date;
   record.source = update.source.trim();
   record.listingUrl = update.listingUrl?.trim() || null;
-  record.amountPence = update.amountPence;
-  record.amountKnown = true;
-  next.attention = next.attention.filter((item) => item.id !== `attention-cost-${record.id}`);
+  record.amountPence = nextAmountKnown ? update.amountPence : 0;
+  record.amountKnown = nextAmountKnown;
+  next.attention = record.amountKnown
+    ? next.attention.filter((item) => item.id !== `attention-cost-${record.id}`)
+    : next.attention;
   record.notes = update.notes.trim();
-  const bulkLot = next.bulkLots.find((lot) => lot.acquiredRecordId === record.id);
   if (bulkLot) {
     for (const copy of next.copies.filter((item) => item.bulkLotId === bulkLot.id)) {
       if (copy.allocationIndex !== null) {
-        copy.allocationPence = allocatePenceAt(update.amountPence, bulkLot.totalQuantity, copy.allocationIndex);
+        copy.allocationPence = nextAmountKnown
+          ? allocatePenceAt(update.amountPence, bulkLot.totalQuantity, copy.allocationIndex)
+          : null;
       }
     }
     for (const line of record.lines.filter((item) => item.kind === "card")) {
-      line.allocationPence = next.copies
-        .filter((copy) => line.entityIds.includes(copy.id))
-        .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0);
+      line.allocationPence = nextAmountKnown
+        ? next.copies
+          .filter((copy) => line.entityIds.includes(copy.id))
+          .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0)
+        : null;
     }
+  } else if (record.type === "purchase") {
+    const cardLines = record.lines.filter((line) => line.kind === "card");
+    if (cardLines.length === 1 && record.lines.length === 1) {
+      const line = cardLines[0]!;
+      const copies = next.copies
+        .filter((copy) => line.entityIds.includes(copy.id))
+        .sort((left, right) => left.id.localeCompare(right.id));
+      if (copies.length !== line.quantity) {
+        return { next: snapshot, result: { ok: false, message: "This Purchase's physical Copies no longer match its one card line." } satisfies DataSourceResult };
+      }
+      const allocations = ordinaryPurchaseCopyAllocations({
+        amountKnown: record.amountKnown !== false,
+        amountPence: record.amountPence,
+        copyCount: copies.length,
+      });
+      for (const [index, copy] of copies.entries()) copy.allocationPence = allocations[index]!;
+      line.allocationPence = ordinaryPurchaseLineAllocation({ amountKnown: record.amountKnown !== false, amountPence: record.amountPence });
+    } else if (record.lines.length === 1) {
+      record.lines[0]!.allocationPence = ordinaryPurchaseLineAllocation({
+        amountKnown: record.amountKnown !== false,
+        amountPence: record.amountPence,
+      });
+    }
+  } else if (record.type === "imported-acquisition" && record.lines.length === 1) {
+    record.lines[0]!.allocationPence = ordinaryPurchaseLineAllocation({
+      amountKnown: record.amountKnown !== false,
+      amountPence: record.amountPence,
+    });
   }
   record.revision += 1;
   next.records.sort((left, right) => (
@@ -1078,6 +1174,22 @@ export function replaceRecordCards(snapshot: RecordsSnapshot, recordId: string, 
   const bulkLot = hasBulkContainer
     ? next.bulkLots.find((lot) => lot.acquiredRecordId === record.id)
     : undefined;
+  if (record.type === "purchase" && !bulkLot) {
+    const [line] = existingLines;
+    const [requested] = cards;
+    const copies = line ? next.copies.filter((copy) => copy.acquiredRecordId === record.id) : [];
+    if (
+      record.lines.length !== 1
+      || existingLines.length !== 1
+      || !line
+      || line.quantity < 1
+      || copies.length !== line.quantity
+      || copies.some((copy) => !line.entityIds.includes(copy.id))
+      || cards.length !== 1
+      || !requested
+      || requested.id !== line.id
+    ) return { next: snapshot, result: { ok: false, message: "Ordinary card Purchases support one complete card line only." } satisfies DataSourceResult };
+  }
   if (!existingLines.length && !hasBulkContainer) return { next: snapshot, result: { ok: false, message: "This Record does not contain editable card items." } satisfies DataSourceResult };
   if (!cards.length && !hasBulkContainer && record.type !== "pack-opening") return { next: snapshot, result: { ok: false, message: "Keep at least one card item, or void the whole Record." } satisfies DataSourceResult };
 
@@ -1123,7 +1235,7 @@ export function replaceRecordCards(snapshot: RecordsSnapshot, recordId: string, 
       .slice(0, quantity);
     if (indexes.length !== quantity) return null;
     const values = indexes.map((index) => (
-      allocatePenceAt(editableRecord.amountPence, bulkLot.totalQuantity, index)
+      editableRecord.amountKnown === false ? null : allocatePenceAt(editableRecord.amountPence, bulkLot.totalQuantity, index)
     ));
     return addCopies(
       next,
@@ -1139,9 +1251,11 @@ export function replaceRecordCards(snapshot: RecordsSnapshot, recordId: string, 
     if (!existingLine) {
       const ids = addRecordCopies(card, card.quantity);
       if (!ids) return { next: snapshot, result: { ok: false, message: "The Bulk Lot total has no unallocated card positions left." } satisfies DataSourceResult };
-      const allocation = next.copies
-        .filter((copy) => ids.includes(copy.id))
-        .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0);
+      const allocation = record.amountKnown === false
+        ? null
+        : next.copies
+          .filter((copy) => ids.includes(copy.id))
+          .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0);
       nextCardLines.push({ ...recordLine("card", card.name.trim(), card.quantity, ids, bulkLot ? allocation : null, `${card.setCode || "Unknown code"} · ${card.edition} · ${card.rarity}`), id: card.id });
       continue;
     }
@@ -1187,15 +1301,28 @@ export function replaceRecordCards(snapshot: RecordsSnapshot, recordId: string, 
       quantity: card.quantity,
       entityIds,
       allocationPence: bulkLot
-        ? next.copies
+        ? record.amountKnown === false ? null : next.copies
             .filter((copy) => entityIds.includes(copy.id))
             .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0)
-        : existingLine.allocationPence,
+        : ordinaryPurchaseLineAllocation({ amountKnown: record.amountKnown !== false, amountPence: record.amountPence }),
       detail: `${card.setCode || "Unknown code"} · ${card.edition} · ${card.rarity}`,
     });
   }
 
   record.lines = [...record.lines.filter((line) => line.kind !== "card"), ...nextCardLines];
+  if (record.type === "purchase" && !bulkLot) {
+    const [line] = nextCardLines;
+    const copies = next.copies
+      .filter((copy) => copy.acquiredRecordId === record.id)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    const allocations = ordinaryPurchaseCopyAllocations({
+      amountKnown: record.amountKnown !== false,
+      amountPence: record.amountPence,
+      copyCount: copies.length,
+    });
+    for (const [index, copy] of copies.entries()) copy.allocationPence = allocations[index]!;
+    if (line) line.allocationPence = ordinaryPurchaseLineAllocation({ amountKnown: record.amountKnown !== false, amountPence: record.amountPence });
+  }
   if (bulkLot) {
     bulkLot.itemizedQuantity = next.copies.filter((copy) => copy.bulkLotId === bulkLot.id).length;
     bulkLot.status = bulkLot.itemizedQuantity >= bulkLot.totalQuantity ? "itemized" : "open";
@@ -1301,11 +1428,18 @@ export function removeCardCopy(snapshot: RecordsSnapshot, copyId: string) {
       return item ? [item] : [];
     });
     if (copy.bulkLotId) {
-      line.allocationPence = remainingCopies.reduce((sum, item) => sum + (item.allocationPence ?? 0), 0);
+      line.allocationPence = record.amountKnown === false
+        ? null
+        : remainingCopies.reduce((sum, item) => sum + (item.allocationPence ?? 0), 0);
     } else if (record.type === "purchase") {
-      line.allocationPence = record.amountPence;
-      for (const [index, item] of remainingCopies.entries()) {
-        item.allocationPence = allocatePenceAt(record.amountPence, remainingCopies.length, index);
+      line.allocationPence = ordinaryPurchaseLineAllocation({ amountKnown: record.amountKnown !== false, amountPence: record.amountPence });
+      const allocations = ordinaryPurchaseCopyAllocations({
+        amountKnown: record.amountKnown !== false,
+        amountPence: record.amountPence,
+        copyCount: remainingCopies.length,
+      });
+      for (const [index, item] of remainingCopies.sort((left, right) => left.id.localeCompare(right.id)).entries()) {
+        item.allocationPence = allocations[index]!;
       }
     }
   }
@@ -1388,13 +1522,17 @@ export function updateRecordLine(snapshot: RecordsSnapshot, recordId: string, li
       lot.status = lot.itemizedQuantity >= lot.totalQuantity ? "itemized" : "open";
       for (const copy of lotCopies) {
         if (copy.allocationIndex !== null) {
-          copy.allocationPence = allocatePenceAt(record.amountPence, nextTotal, copy.allocationIndex);
+          copy.allocationPence = record.amountKnown === false
+            ? null
+            : allocatePenceAt(record.amountPence, nextTotal, copy.allocationIndex);
         }
       }
       for (const cardLine of record.lines.filter((item) => item.kind === "card")) {
-        cardLine.allocationPence = next.copies
-          .filter((copy) => cardLine.entityIds.includes(copy.id))
-          .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0);
+        cardLine.allocationPence = record.amountKnown === false
+          ? null
+          : next.copies
+            .filter((copy) => cardLine.entityIds.includes(copy.id))
+            .reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0);
       }
       line.detail = `${lot.itemizedQuantity} identified of ${lot.totalQuantity} total cards`;
     }

@@ -10,17 +10,27 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, type FocusEvent, type ReactNode } from "react";
+import { localCalendarDate } from "@/lib/records/form-draft-lifecycle";
 
 export const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
 export const textAreaClass = "mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
 
 export function today() {
-  return new Date().toISOString().slice(0, 10);
+  return localCalendarDate();
 }
 
 export function poundsToPence(value: string) {
   const parsed = Number(value.replace(/[£,]/g, ""));
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 100)) : 0;
+}
+
+/** Parse a user-entered pound amount without turning blank or malformed text into £0. */
+export function parsePoundsToPence(value: string) {
+  const normalized = value.trim().replace(/^£/, "");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const [whole, fractional = ""] = normalized.split(".");
+  const pence = Number(whole) * 100 + Number(`${fractional}00`.slice(0, 2));
+  return Number.isSafeInteger(pence) && pence >= 0 ? pence : null;
 }
 
 export function penceToPounds(value: number) {

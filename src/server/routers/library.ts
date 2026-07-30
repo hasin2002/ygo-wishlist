@@ -8,6 +8,7 @@ import {
   cardTargets,
   pricingRefreshStates,
   recordEntries,
+  targetWheelEntries,
 } from "@/db/schema";
 import { getLibraryCardStatus } from "@/lib/records/library-status";
 import { fetchEbayPricing } from "@/server/ebay-pricing";
@@ -48,7 +49,7 @@ const updateTargetSchema = targetInputSchema.extend({ id: z.string().min(1) });
 const trackerPageSchema = z.object({
   chaseFilters: z.array(trackerChaseFilterSchema).default([]),
   page: z.number().int().min(1).default(1),
-  pageSize: z.number().int().min(1).max(48).default(8),
+  pageSize: z.number().int().min(1).max(50).default(10),
   priceMax: z.string().trim().default(""),
   priceMin: z.string().trim().default(""),
   priceSignalFilters: z.array(trackerPriceSignalSchema).default([]),
@@ -113,6 +114,8 @@ async function loadLibraryCards(ownerId: string, includeSpend = true) {
   const recordById = new Map(records.map((record) => [record.id, record]));
   const availableQuantityByTarget = new Map<string, number>();
   const paidPenceByTarget = new Map<string, number>();
+  const knownPurchaseCopyCountByTarget = new Map<string, number>();
+  const unknownPurchaseCopyCountByTarget = new Map<string, number>();
   const latestAcquisitionByTarget = new Map<string, typeof recordEntries.$inferSelect>();
 
   for (const copy of copies) {
@@ -130,11 +133,23 @@ async function loadLibraryCards(ownerId: string, includeSpend = true) {
 
     const record = recordById.get(copy.acquiredRecordId);
     if (!record) continue;
+    if (copy.status === "void" || record.status === "void") continue;
 
-    paidPenceByTarget.set(
-      targetId,
-      (paidPenceByTarget.get(targetId) ?? 0) + (copy.allocationPence ?? 0),
-    );
+    if (record.amountKnown === false || copy.allocationPence === null) {
+      unknownPurchaseCopyCountByTarget.set(
+        targetId,
+        (unknownPurchaseCopyCountByTarget.get(targetId) ?? 0) + 1,
+      );
+    } else {
+      paidPenceByTarget.set(
+        targetId,
+        (paidPenceByTarget.get(targetId) ?? 0) + copy.allocationPence,
+      );
+      knownPurchaseCopyCountByTarget.set(
+        targetId,
+        (knownPurchaseCopyCountByTarget.get(targetId) ?? 0) + 1,
+      );
+    }
     const latest = latestAcquisitionByTarget.get(targetId);
     if (!latest || record.occurredOn > latest.occurredOn) {
       latestAcquisitionByTarget.set(targetId, record);
@@ -144,6 +159,8 @@ async function loadLibraryCards(ownerId: string, includeSpend = true) {
   return targets.map((target) => {
     const availableQuantity = availableQuantityByTarget.get(target.id) ?? 0;
     const paidPence = paidPenceByTarget.get(target.id) ?? 0;
+    const knownPurchaseCopyCount = knownPurchaseCopyCountByTarget.get(target.id) ?? 0;
+    const unknownPurchaseCopyCount = unknownPurchaseCopyCountByTarget.get(target.id) ?? 0;
     const latestAcquisition = latestAcquisitionByTarget.get(target.id);
     const status = getLibraryCardStatus(target.desiredQuantity, availableQuantity).status;
     return {
@@ -156,7 +173,14 @@ async function loadLibraryCards(ownerId: string, includeSpend = true) {
         ? null
         : `${currency(target.estimatedPricePence)} estimate`,
       marketPriceText: currency(target.marketPricePence),
-      paidPriceText: includeSpend && paidPence > 0 ? currency(paidPence) : null,
+      // £0 is a known amount. Completeness stays explicit so a partial total
+      // can never be mistaken for a complete card-cost history.
+      paidPriceText: includeSpend && knownPurchaseCopyCount > 0 ? currency(paidPence) : null,
+      paidPriceCompleteness: includeSpend ? {
+        knownCopyCount: knownPurchaseCopyCount,
+        unknownCopyCount: unknownPurchaseCopyCount,
+        complete: unknownPurchaseCopyCount === 0,
+      } : null,
       purchaseMonth: includeSpend ? latestAcquisition?.occurredOn.slice(0, 7) ?? null : null,
       ebaySearchUrl: target.ebaySearchUrl,
       ebayListingUrl: target.ebayListingUrl,
@@ -171,7 +195,7 @@ async function loadLibraryCards(ownerId: string, includeSpend = true) {
       createdAt: target.createdAt.toISOString(),
       updatedAt: target.updatedAt.toISOString(),
     };
-  });
+  }).filter((card) => card.desiredQuantity > 0 || card.ownedQuantity > 0);
 }
 
 function marketValue(card: LibraryCard) {
@@ -243,6 +267,11 @@ function stats(cards: LibraryCard[], includeSpend: boolean) {
         : 0,
       wishlist: wishlist.reduce((sum, card) => sum + (marketValue(card) ?? 0), 0) / 100,
     },
+    paidCompleteness: includeSpend ? {
+      knownCopyCount: owned.reduce((sum, card) => sum + (card.paidPriceCompleteness?.knownCopyCount ?? 0), 0),
+      unknownCopyCount: owned.reduce((sum, card) => sum + (card.paidPriceCompleteness?.unknownCopyCount ?? 0), 0),
+      complete: owned.every((card) => card.paidPriceCompleteness?.complete !== false),
+    } : { knownCopyCount: 0, unknownCopyCount: 0, complete: true },
   };
 }
 
@@ -285,9 +314,24 @@ async function upsertTargetPrinting(
       eq(cardTargets.id, targetId), eq(cardTargets.ownerId, ownerId),
     )).returning();
   } else {
-    [target] = await db.insert(cardTargets).values({
-      id: id("target"), ownerId, desiredQuantity: 1, ...values, createdAt: now,
-    }).returning();
+    [target] = await db.select().from(cardTargets).where(and(
+      eq(cardTargets.ownerId, ownerId),
+      eq(cardTargets.normalizedName, values.normalizedName),
+      eq(cardTargets.normalizedRarity, values.normalizedRarity),
+      eq(cardTargets.normalizedEdition, values.normalizedEdition),
+    )).limit(1);
+    if (target) {
+      [target] = await db.update(cardTargets).set({
+        ...values,
+        desiredQuantity: Math.max(1, target.desiredQuantity),
+      }).where(and(
+        eq(cardTargets.id, target.id), eq(cardTargets.ownerId, ownerId),
+      )).returning();
+    } else {
+      [target] = await db.insert(cardTargets).values({
+        id: id("target"), ownerId, desiredQuantity: 1, ...values, createdAt: now,
+      }).returning();
+    }
   }
   if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Wishlist Target not found." });
 
@@ -332,6 +376,7 @@ export const libraryRouter = router({
     if (!ctx.collectionOwnerId) return {
       canEdit: false, items: [], page: 1, pageSize: input.pageSize, rarityOptions: [], total: 0,
       totalPages: 1, values: { owned: 0, paid: 0, wishlist: 0 }, counts: { owned: 0, total: 0, wishlist: 0 },
+      paidCompleteness: { knownCopyCount: 0, unknownCopyCount: 0, complete: true },
     };
     const includeSpend = Boolean(ctx.session);
     const allCards = await loadLibraryCards(ctx.collectionOwnerId, includeSpend);
@@ -501,19 +546,50 @@ export const libraryRouter = router({
   }),
 
   delete: authenticatedProcedure.input(z.object({ id: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    const [target] = await db.select().from(cardTargets).where(and(
+      eq(cardTargets.id, input.id), eq(cardTargets.ownerId, ctx.collectionOwnerId),
+    )).limit(1);
+    if (!target) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Wishlist Target not found." });
+    }
+    if (target.desiredQuantity === 0) {
+      throw new TRPCError({ code: "CONFLICT", message: "This card is not currently on your wishlist." });
+    }
     const printings = await db.select({ id: cardPrintings.id }).from(cardPrintings).where(and(
       eq(cardPrintings.ownerId, ctx.collectionOwnerId), eq(cardPrintings.targetId, input.id),
     ));
-    const copies = printings.length ? await db.select({ id: cardCopies.id }).from(cardCopies).where(and(
+    const copies = printings.length ? await db.select({
+      id: cardCopies.id,
+      status: cardCopies.status,
+    }).from(cardCopies).where(and(
       eq(cardCopies.ownerId, ctx.collectionOwnerId),
       inArray(cardCopies.printingId, printings.map((printing) => printing.id)),
     )) : [];
     if (copies.length) {
-      throw new TRPCError({ code: "CONFLICT", message: "This Target has Copy history and cannot be deleted. Void the relevant Records instead." });
+      const availableCopyCount = copies.filter((copy) => copy.status === "available").length;
+      await db.update(cardTargets).set({
+        desiredQuantity: 0,
+        chaseLevel: null,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(cardTargets.id, input.id), eq(cardTargets.ownerId, ctx.collectionOwnerId),
+      ));
+      await db.delete(targetWheelEntries).where(and(
+        eq(targetWheelEntries.targetId, input.id),
+        eq(targetWheelEntries.ownerId, ctx.collectionOwnerId),
+      ));
+      return {
+        id: input.id,
+        ok: true,
+        retainedOwned: availableCopyCount > 0,
+        ...(availableCopyCount > 0
+          ? { warning: "Removed from the wishlist. Owned Copies and their Record history were kept." }
+          : {}),
+      };
     }
     await db.delete(cardTargets).where(and(
       eq(cardTargets.id, input.id), eq(cardTargets.ownerId, ctx.collectionOwnerId),
     ));
-    return { ok: true };
+    return { id: input.id, ok: true, retainedOwned: false };
   }),
 });

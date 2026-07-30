@@ -267,6 +267,8 @@ export type PurchaseInput = {
   source: string;
   listingUrl: string;
   totalPence: number;
+  /** false means the amount is genuinely unknown, never a known £0. */
+  amountKnown?: boolean;
   notes: string;
 } & (
   | { kind: "card"; card: CardContentsInput }
@@ -284,6 +286,7 @@ export type OpeningInput = {
   sealedUnitId: string | null;
   source: string;
   totalPence: number;
+  amountKnown?: boolean;
   pulls: CardContentsInput[];
 };
 
@@ -300,13 +303,16 @@ export type RecordsDrafts = Partial<
   Record<"purchase" | "pack-opening" | "sale", unknown>
 >;
 
-export type DataSourceResult = { ok: true; id?: string } | { ok: false; message: string };
+export type DataSourceResult =
+  | { ok: true; id?: string; warning?: string }
+  | { ok: false; message: string };
 export type RecordDetailsUpdate = {
   title: string;
   date: string;
   source: string;
   listingUrl: string | null;
   amountPence: number;
+  amountKnown?: boolean;
   notes: string;
 };
 export type CardAttentionUpdate = {
@@ -354,8 +360,12 @@ export type RecordsDataSource = {
   mode: "preview" | "live";
   status: "loading" | "ready" | "error";
   errorMessage: string | null;
+  draftOwnerScope: string;
+  draftsHydrated: boolean;
+  draftRecoveryMessage: string | null;
   snapshot: RecordsSnapshot;
   drafts: RecordsDrafts;
+  refresh: () => Promise<void>;
   resolveTcgplayerProduct: (url: string) => Promise<ResolveProductResult>;
   searchLibraryCards: (query: string) => LibraryCardSuggestion[];
   createPurchase: (input: PurchaseInput) => Promise<DataSourceResult>;

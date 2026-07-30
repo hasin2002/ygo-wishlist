@@ -33,7 +33,11 @@ import {
   ensureEbayNotificationSubscriptions,
   getEbayNotificationSubscriptionStatus,
 } from "@/server/ebay-notification-service";
-import { adminProcedure, router } from "@/server/trpc";
+import {
+  getEbayCapabilityForSession,
+  requireEbayExternalCapability,
+} from "@/server/ebay-capabilities";
+import { authenticatedProcedure, router } from "@/server/trpc";
 
 const itemSpecificValue = z.string().trim().min(1).max(65);
 
@@ -91,28 +95,34 @@ function ebayFailure(error: unknown) {
 }
 
 export const ebayRouter = router({
-  status: adminProcedure.query(async ({ ctx }) => {
+  status: authenticatedProcedure.query(async ({ ctx }) => {
+    const capability = await getEbayCapabilityForSession(ctx.session);
+    if (ctx.session.user.role !== "admin") return { capability };
     const [connection, notifications] = await Promise.all([
       getEbayConnectionStatus(ctx.session.user.id),
       getEbayNotificationSubscriptionStatus(ctx.session.user.id),
     ]);
     return {
+      capability,
       configured: isEbayOAuthConfigured(),
       connection,
       imageArchiveConfigured: isListingImageArchiveConfigured(),
       notifications,
     };
   }),
-  eligibility: adminProcedure.input(z.object({ copyId: z.string().min(1) })).query(({ ctx, input }) =>
-    getEbayListingEligibility(ctx.session.user.id, input.copyId)),
-  listingStatus: adminProcedure.input(z.object({ copyId: z.string().min(1) })).query(async ({ ctx, input }) => {
+  eligibility: authenticatedProcedure.input(z.object({ copyId: z.string().min(1) })).query(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
+    return getEbayListingEligibility(ctx.session.user.id, input.copyId);
+  }),
+  listingStatus: authenticatedProcedure.input(z.object({ copyId: z.string().min(1) })).query(async ({ ctx, input }) => {
     const listing = await getLatestEbayListingForCopy(
       ctx.session.user.id,
       input.copyId,
     );
     return listing ? ebayListingStatusSummary(listing) : null;
   }),
-  refreshListingStatus: adminProcedure.input(z.object({ copyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+  refreshListingStatus: authenticatedProcedure.input(z.object({ copyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
     const listing = await getLatestEbayListingForCopy(
       ctx.session.user.id,
       input.copyId,
@@ -127,7 +137,8 @@ export const ebayRouter = router({
       throw ebayFailure(error);
     }
   }),
-  refreshListingStatusById: adminProcedure.input(z.object({ listingId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+  refreshListingStatusById: authenticatedProcedure.input(z.object({ listingId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
     const [listing] = await db.select({ id: ebayListings.id }).from(ebayListings).where(and(
       eq(ebayListings.id, input.listingId),
       eq(ebayListings.ownerId, ctx.collectionOwnerId),
@@ -142,35 +153,40 @@ export const ebayRouter = router({
       throw ebayFailure(error);
     }
   }),
-  repairNotifications: adminProcedure.mutation(async ({ ctx }) => {
+  repairNotifications: authenticatedProcedure.mutation(async ({ ctx }) => {
+    await requireEbayExternalCapability(ctx.session);
     try {
       return await ensureEbayNotificationSubscriptions(ctx.session.user.id);
     } catch (error) {
       throw ebayFailure(error);
     }
   }),
-  validate: adminProcedure.input(listingSchema).mutation(async ({ ctx, input }) => {
+  validate: authenticatedProcedure.input(listingSchema).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
     try {
       return await verifyEbayListing(ctx.session.user.id, input);
     } catch (error) {
       throw ebayFailure(error);
     }
   }),
-  publish: adminProcedure.input(listingSchema).mutation(async ({ ctx, input }) => {
+  publish: authenticatedProcedure.input(listingSchema).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
     try {
       return await publishEbayListing(ctx.session.user.id, input);
     } catch (error) {
       throw ebayFailure(error);
     }
   }),
-  validateLot: adminProcedure.input(lotListingSchema).mutation(async ({ ctx, input }) => {
+  validateLot: authenticatedProcedure.input(lotListingSchema).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
     try {
       return await verifyEbayLotListing(ctx.collectionOwnerId, input);
     } catch (error) {
       throw ebayFailure(error);
     }
   }),
-  publishLot: adminProcedure.input(lotListingSchema).mutation(async ({ ctx, input }) => {
+  publishLot: authenticatedProcedure.input(lotListingSchema).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
     try {
       return await publishEbayLotListing(ctx.collectionOwnerId, input);
     } catch (error) {
