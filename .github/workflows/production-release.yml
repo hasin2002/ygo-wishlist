@@ -48,9 +48,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           NODE_ENV: production
-        # Temporary production bootstrap: remove --adopt-current-schema after this
-        # successful release records the existing schema baseline.
-        run: npm run db:migrate:apply -- --confirm-configured-nonloopback-database --allow-github-actions-production --adopt-current-schema
+        run: npm run db:migrate:apply -- --confirm-configured-nonloopback-database --allow-github-actions-production
 
       - name: Deploy the migrated revision to Vercel production
         env:
