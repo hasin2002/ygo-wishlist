@@ -8,12 +8,20 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 const apply = process.argv.includes("--apply");
 const adopt = process.argv.includes("--adopt-current-schema");
 const confirmConfiguredDatabase = process.argv.includes("--confirm-configured-nonloopback-database");
+const allowGitHubActionsProduction = process.argv.includes("--allow-github-actions-production");
 const migrationsFolder = path.join(process.cwd(), "drizzle");
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required; it is never printed.");
 const databaseUrl = new URL(process.env.DATABASE_URL);
 const loopback = ["127.0.0.1", "::1", "localhost"].includes(databaseUrl.hostname);
-if (process.env.VERCEL || process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production") {
-  throw new Error("Refusing migration in a Vercel or production-marked environment.");
+const approvedGitHubActionsRelease = allowGitHubActionsProduction && process.env.GITHUB_ACTIONS === "true";
+if (allowGitHubActionsProduction && process.env.GITHUB_ACTIONS !== "true") {
+  throw new Error("--allow-github-actions-production is only valid inside GitHub Actions.");
+}
+if (process.env.VERCEL || process.env.VERCEL_ENV === "production") {
+  throw new Error("Refusing migration in a Vercel environment.");
+}
+if (process.env.NODE_ENV === "production" && !approvedGitHubActionsRelease) {
+  throw new Error("Refusing migration in a production-marked environment without the GitHub Actions release flag.");
 }
 if (apply && !loopback && !confirmConfiguredDatabase) {
   throw new Error("Refusing to apply to a configured non-loopback database without --confirm-configured-nonloopback-database.");

@@ -152,6 +152,33 @@ Keep schema mutation separate from the Vercel frontend build. The Vercel Build
 Command should run `npm run build`, not `npm run db:push`; run the schema command
 as a controlled release step with the intended production `DATABASE_URL`.
 
+### Production release workflow
+
+Production releases from `main` are controlled by
+`.github/workflows/production-release.yml`: it queues releases, applies Drizzle
+migrations first, then deploys the same revision to Vercel. Vercel's Git
+integration is disabled for `main` in `vercel.json` so it cannot deploy a new
+revision before its database migration. Preview branches remain on Vercel's
+normal Git deployment flow.
+
+The workflow's first merge is the transition to this release process: it does
+not introduce a new application schema dependency, and the committed
+`vercel.json` disables later automatic Git deployments from `main`. Before that
+merge, configure the protected GitHub `production` environment with:
+
+- `PRODUCTION_DATABASE_URL` secret — obtain or rotate this at the database
+  provider; Vercel Sensitive variables cannot be read back out for GitHub.
+- `VERCEL_TOKEN` secret — a Vercel token limited to deployment access for this
+  project.
+- `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` variables — the Vercel team and
+  project IDs used by the CLI in CI.
+
+Do not add these as repository-wide values, print them in logs, or use this
+workflow for preview/local migrations. A migration failure intentionally blocks
+the deployment. If a deployment fails after a successful migration, restore the
+last healthy Vercel deployment and ship a forward corrective migration rather
+than rolling the database back blindly.
+
 ## Scheduled eBay reconciliation
 
 Production checks unresolved eBay listings and retries failed notification work
