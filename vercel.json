@@ -1,4 +1,11 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "main": false,
+      "*": true
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/reconcile-ebay-listings",
