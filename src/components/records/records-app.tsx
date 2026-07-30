@@ -535,17 +535,13 @@ function RecordEditorDialog({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [activePanel, setActivePanel] = useState<"details" | "items">(initialPanel);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const editsCashflow = record.type === "purchase" || record.type === "sale" || record.type === "imported-acquisition";
   const editsListing = record.type === "purchase" || record.type === "imported-acquisition";
   const canMarkCostUnknown = !costOnly && (record.type === "purchase" || record.type === "imported-acquisition");
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   async function save() {
     const parsedAmount = editsCashflow && amountKnown ? parsePoundsToPence(amount) : 0;
@@ -586,19 +582,21 @@ function RecordEditorDialog({
     onClose();
   }
 
-  return (
-    <div aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" role="dialog">
-      <div className="max-h-[calc(100vh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100vh-3rem)]">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="record-editor-description" aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{costOnly ? "Add acquisition cost" : "Edit record"}</h2></div>
-          <button aria-label={backLabel || "Close record editor"} autoFocus className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{costOnly ? "Add acquisition cost" : "Edit record"}</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="record-editor-description">{costOnly ? "Add the acquisition cost to resolve this attention item." : "Edit this Record and its items without leaving the current view."}</p></div>
+          <button aria-label={backLabel || "Close record editor"} className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
         </div>
         {!costOnly ? <div className="border-b border-zinc-300 bg-white px-4 sm:px-6"><div className="grid grid-cols-2 rounded-t-lg border-x border-t border-zinc-300 bg-zinc-100 p-1"><button aria-pressed={activePanel === "details"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "details" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("details")} type="button">Record details</button><button aria-pressed={activePanel === "items"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "items" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("items")} type="button">Items ({record.lines.filter((line) => line.kind !== "bulk").reduce((sum, line) => sum + line.quantity, 0)})</button></div></div> : null}
         {activePanel === "details" ? <div className="grid gap-5 p-4 sm:p-6">
           <div><h3 className="font-bold">{costOnly ? record.title : "Record details"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{costOnly ? "Enter the full amount paid. Saving removes this item from Needs attention and includes it in your totals." : `Edit the shared information that identifies this ${recordTypeLabels[record.type].toLowerCase()}.`}</p></div>
           {error ? <div className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</div> : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            {costOnly ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input autoFocus className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></div></label> : <>
+            {costOnly ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></div></label> : <>
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label>
             <label><span className="text-sm font-bold text-zinc-700">Date <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDate(event.target.value)} type="date" value={date} /></label>
             <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Buyer or marketplace" : "Seller or source"} <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setRecordSource(event.target.value)} value={recordSource} /></label>
@@ -616,7 +614,8 @@ function RecordEditorDialog({
           <div className="flex flex-col-reverse gap-2 sm:flex-row"><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950" disabled={saving} onClick={onClose} type="button">{activePanel === "details" ? "Cancel" : "Close"}</button>{activePanel === "details" ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={save} type="button">{saving ? "Saving…" : costOnly ? "Save acquisition cost" : "Save details"}</button> : null}</div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -665,17 +664,15 @@ function CardAttentionDialog({
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const showTcgplayerUrl = !tcgplayerUrl;
   const showName = !target?.name;
   const showRarity = !target?.rarity;
   const showEdition = item.field === "edition";
   const showSetName = !printingSetName;
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   async function fetchDetails() {
     setFetching(true);
@@ -707,12 +704,14 @@ function CardAttentionDialog({
     onClose();
   }
 
-  return (
-    <div aria-labelledby="card-attention-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
-      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="card-attention-description" aria-labelledby="card-attention-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve attention</span><h2 className="mt-1 text-xl font-black" id="card-attention-title">Confirm card details</h2><p className="mt-1 text-sm font-medium text-zinc-500">Save the missing metadata once, and this item will leave the attention list.</p></div>
-          <button aria-label="Close card resolution" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve attention</span><h2 className="mt-1 text-xl font-black" id="card-attention-title">Confirm card details</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="card-attention-description">Save the missing metadata once, and this item will leave the attention list.</p></div>
+          <button aria-label="Close card resolution" className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
         </header>
         <div className="grid gap-4 p-4 sm:p-6">
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">Why this needs attention</strong><p className="mt-1">{item.detail}</p></div>
@@ -727,7 +726,8 @@ function CardAttentionDialog({
         </div>
         <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving || fetching} onClick={() => void save()} type="button">{saving ? "Saving…" : "Save resolved details"}</button></footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -744,18 +744,16 @@ function EbayCopyLinkAttentionDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const copy = item.copyId ? source.snapshot.copies.find((value) => value.id === item.copyId) : null;
   const target = item.targetId ? source.snapshot.targets.find((value) => value.id === item.targetId) : null;
   const printing = copy ? source.snapshot.printings.find((value) => value.id === copy.printingId) : null;
   const inventoryHref = copy && target
     ? inventoryCardDetailHref(target.id, defaultInventoryListState, copy.id)
     : null;
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   async function confirm() {
     if (!item.listingId) return;
@@ -768,12 +766,14 @@ function EbayCopyLinkAttentionDialog({
     onClose();
   }
 
-  return (
-    <div aria-labelledby="ebay-copy-link-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
-      <div className="w-full max-w-lg rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="ebay-copy-link-description" aria-labelledby="ebay-copy-link-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve eBay link</span><h2 className="mt-1 text-xl font-black" id="ebay-copy-link-title">Confirm physical Copy</h2><p className="mt-1 text-sm font-medium text-zinc-500">This confirms the Copy already saved on the historical listing. It does not record a Sale.</p></div>
-          <button aria-label="Close eBay Copy link resolution" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve eBay link</span><h2 className="mt-1 text-xl font-black" id="ebay-copy-link-title">Confirm physical Copy</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="ebay-copy-link-description">This confirms the Copy already saved on the historical listing. It does not record a Sale.</p></div>
+          <button aria-label="Close eBay Copy link resolution" className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
         </header>
         <div className="grid gap-4 p-4 sm:p-6">
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">{item.label}</strong><p className="mt-1">{item.detail}</p></div>
@@ -795,7 +795,8 @@ function EbayCopyLinkAttentionDialog({
         </div>
         <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={() => void confirm()} type="button">{saving ? "Confirming…" : "Confirm Copy link"}</button></footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

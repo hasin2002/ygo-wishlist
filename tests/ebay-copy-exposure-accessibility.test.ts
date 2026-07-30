@@ -6,6 +6,7 @@ const saleFormSource = readFileSync(new URL("../src/components/records/sale-form
 const exposureSource = readFileSync(new URL("../src/components/records/ebay-copy-exposure.tsx", import.meta.url), "utf8");
 const listingActionSource = readFileSync(new URL("../src/components/records/ebay-listing-action.tsx", import.meta.url), "utf8");
 const recordsAppSource = readFileSync(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8");
+const unavailableActionSource = readFileSync(new URL("../src/components/unavailable-action.tsx", import.meta.url), "utf8");
 const cardImagesSource = readFileSync(new URL("../src/components/records/card-inventory-images.tsx", import.meta.url), "utf8");
 const photoManagerSource = readFileSync(new URL("../src/components/records/card-photo-manager.tsx", import.meta.url), "utf8");
 const listingStatusSource = readFileSync(new URL("../src/components/records/ebay-listing-status.tsx", import.meta.url), "utf8");
@@ -32,23 +33,21 @@ test("offer history opens in an accessible dialog with named links", () => {
   assert.match(exposureSource, /opens in a new tab/);
 });
 
-test("listing history disables Copy removal with a no-layout-shift tooltip", () => {
+test("listing history disables Copy removal with a touch-accessible explanation", () => {
   assert.doesNotMatch(recordsAppSource, /Remove Copy unavailable/);
-  assert.match(recordsAppSource, /Why Remove Copy is unavailable/);
-  assert.match(recordsAppSource, /aria-describedby=\{`remove-copy-reason-/);
-  assert.match(recordsAppSource, /role="tooltip"/);
-  assert.match(recordsAppSource, /absolute right-0 top-full/);
-  assert.match(recordsAppSource, /absolute right-1 top-1\/2/);
-  assert.match(recordsAppSource, /group-hover:opacity-100 group-focus-within:opacity-100/);
-  assert.doesNotMatch(recordsAppSource, /border-r border-zinc-300/);
+  assert.match(recordsAppSource, /<UnavailableAction icon=\{Trash2\} label="Remove Copy"/);
+  assert.match(unavailableActionSource, /aria-controls=\{reasonId\}/);
+  assert.match(unavailableActionSource, /aria-expanded=\{reasonOpen\}/);
+  assert.match(unavailableActionSource, /hidden=\{!reasonOpen\}/);
+  assert.doesNotMatch(unavailableActionSource, /group-hover:opacity-100/);
   assert.doesNotMatch(recordsAppSource, /removalReasonCopyId/);
   assert.match(recordsAppSource, /selectedCopyRemoval\.reason/);
 });
 
 test("Copy actions stack at full width on mobile and keep the help control inside Remove Copy", () => {
   assert.match(recordsAppSource, /flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end/);
-  assert.match(recordsAppSource, /group relative min-w-0 w-full sm:w-auto/);
-  assert.match(recordsAppSource, /min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100/);
+  assert.match(unavailableActionSource, /group relative min-w-0 w-full sm:w-auto/);
+  assert.match(unavailableActionSource, /min-h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100/);
   assert.match(listingActionSource, /min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100/);
 });
 

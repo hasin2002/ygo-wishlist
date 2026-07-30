@@ -1547,14 +1547,14 @@ export function BinderV2App() {
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
+                className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
                 onClick={closeResetDialog}
                 type="button"
               >
                 Cancel
               </button>
               <button
-                className="rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
+                className="min-h-11 rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
                 disabled={clearAll.isPending}
                 onClick={clearBinder}
                 type="button"

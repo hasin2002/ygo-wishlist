@@ -1031,7 +1031,7 @@ export function WheelApp() {
             ) : null}
             <div className="mt-5 flex justify-end gap-2">
               <button
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-60"
+                className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-wait disabled:opacity-60"
                 disabled={resetting}
                 onClick={closeResetDialog}
                 type="button"
@@ -1039,7 +1039,7 @@ export function WheelApp() {
                 Cancel
               </button>
               <button
-                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
+                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#8a1f2d] bg-[#8a1f2d] px-3 py-2 text-sm font-bold text-white transition hover:bg-[#731925] disabled:cursor-wait disabled:opacity-60"
                 disabled={resetting}
                 onClick={reset}
                 type="button"
