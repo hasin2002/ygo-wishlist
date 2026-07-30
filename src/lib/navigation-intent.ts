@@ -18,6 +18,13 @@ const maximumHrefLength = 2_048;
 const disallowedCharacter = /[\\\u0000-\u001f\u007f]/;
 const encodedPathSeparator = /%(?:2f|5c)/i;
 
+/**
+ * Proxy overwrites this request-only header for every protected navigation.
+ * Server-side guards can therefore preserve the exact URL even when a stale
+ * session-shaped cookie caused Proxy to optimistically continue the request.
+ */
+export const protectedNavigationIntentHeader = "x-ygo-protected-navigation-intent";
+
 function isAllowedPathname(pathname: string) {
   return pathname === "/"
     || pathname === "/assign-chase"
@@ -79,6 +86,17 @@ export function loginHref(destination: string | NavigationIntent | null | undefi
     ? parseNavigationIntent(destination)
     : destination;
   return intent ? `/login?next=${encodeURIComponent(serializeNavigationIntent(intent))}` : "/login";
+}
+
+/**
+ * Build a sign-in URL from Proxy's request header, with a route-specific
+ * fallback for requests that did not pass through Proxy (such as unit tests).
+ */
+export function protectedLoginHref(
+  proxyIntent: string | null | undefined,
+  fallback: string | NavigationIntent,
+) {
+  return loginHref(parseNavigationIntent(proxyIntent) ?? fallback);
 }
 
 export function addTaskHref(taskPathname: "/wishlist/new" | "/records/new/purchase" | "/records/new/opening" | "/records/new/sale" | "/records/listings/new-lot", origin: string | NavigationIntent | null | undefined) {

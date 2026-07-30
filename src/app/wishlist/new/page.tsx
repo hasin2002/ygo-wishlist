@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AddWishlistApp } from "@/components/wishlist-app";
+import { protectedLoginHref } from "@/server/protected-login";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ export default async function AddWishlistPage() {
     : await (await import("@/server/session")).getCurrentSession();
 
   if (!session && !localPreviewReview) {
-    redirect("/login?next=/wishlist/new");
+    redirect(await protectedLoginHref("/wishlist/new"));
   }
 
   return <AddWishlistApp />;

@@ -6,6 +6,7 @@ import {
   loginHref,
   parseNavigationIntent,
   parseSaleReviewIntent,
+  protectedLoginHref,
   reviewSaleHref,
   safeNavigationHref,
   serializeNavigationIntent,
@@ -61,6 +62,16 @@ test("auth and Add helpers keep a safe origin while falling back conservatively"
 
   const current = currentNavigationHref("/", new URLSearchParams("status=wishlist&page=3"));
   assert.equal(current?.href, "/?status=wishlist&page=3");
+});
+
+test("a stale session-cookie handoff retains Proxy's exact safe return intent", () => {
+  const destination = "/records/inventory/cards/target-1?kind=cards&rarity=Ultra+Rare&page=3&copy=copy-1";
+  assert.equal(
+    protectedLoginHref(destination, "/records"),
+    `/login?next=${encodeURIComponent(destination)}`,
+  );
+  assert.equal(protectedLoginHref("https://example.test", "/records"), "/login?next=%2Frecords");
+  assert.equal(protectedLoginHref(null, "/records"), "/login?next=%2Frecords");
 });
 
 test("Review Sale uses only a bounded, non-control record ID", () => {
