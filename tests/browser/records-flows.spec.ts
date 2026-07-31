@@ -69,6 +69,25 @@ test("Purchase saves and refreshes Inventory", async ({ page }) => {
   await expect(page.getByText("Dark Magician", { exact: true }).first()).toBeVisible();
 });
 
+test("Inventory keeps a selected Copy cost separate from its three-card total", async ({ page }) => {
+  await page.goto("/records/inventory/cards/target-preview-dark-magician?copy=copy-preview-dark-1");
+
+  const cardDetails = page.locator("details");
+  await page.getByText("Card details", { exact: true }).click();
+  await expect(page.getByText("3-card total", { exact: true })).toBeVisible();
+  await expect(cardDetails).toContainText(/3-card total[\s\S]*Paid £42\.00/);
+  const acquisition = page.getByText("This Copy’s purchase cost:").locator("..");
+  await expect(acquisition).toHaveText(/This Copy’s purchase cost: £21\.00/);
+
+  const picker = page.getByRole("combobox", { name: "Physical Copy" });
+  await picker.click();
+  await page.getByRole("option", { name: /Copy 3 of 3/ }).click();
+
+  await expect(page).toHaveURL(/copy=copy-preview-dark-3/);
+  await expect(acquisition).toHaveText(/This Copy’s purchase cost: £0\.00/);
+  await expect(cardDetails).toContainText(/3-card total[\s\S]*Paid £42\.00/);
+});
+
 test("Purchase draft survives a reload and remains discoverable by its labelled form field", async ({ page }) => {
   await page.goto("/records/new/purchase");
   await chooseCardPurchase(page);

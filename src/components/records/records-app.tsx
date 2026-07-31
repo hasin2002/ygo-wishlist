@@ -51,6 +51,7 @@ import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
+import { ownedCardTotalLabel, paidCostSummary } from "@/lib/records/paid-cost-summary";
 import { parseSaleReviewIntent } from "@/lib/navigation-intent";
 import {
   recordImagePreviewsFor,
@@ -120,10 +121,17 @@ function formatDate(value: string) {
 }
 
 function recordAmount(record: RecordEntry) {
-  if (record.amountKnown === false) return "Cost unknown";
+  if (record.amountKnown === false) return "Unknown";
   if (record.type === "sale") return `+${formatCurrency(record.amountPence)}`;
   if (record.amountPence > 0) return `−${formatCurrency(record.amountPence)}`;
   return "No cashflow";
+}
+
+function recordAmountLabel(record: RecordEntry) {
+  if (record.type === "sale") return "Sale proceeds";
+  if (record.type === "purchase") return "Purchase total";
+  if (record.type === "pack-opening") return "Opening total";
+  return "Acquisition total";
 }
 
 export function PreviewBanner() {
@@ -282,7 +290,7 @@ function RecordRow({
               <RecordTypeBadge type={record.type} />
               {record.status === "void" ? (
                 <span className="rounded-md bg-rose-50 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.1em] text-rose-700">
-                  Void
+                  Voided
                 </span>
               ) : null}
               <span className="text-xs font-semibold text-zinc-500">{formatDate(record.date)}</span>
@@ -296,21 +304,24 @@ function RecordRow({
           </div>
         </div>
         <div className="flex shrink-0 items-center justify-between gap-3 sm:flex-col sm:items-end">
-          <p
-            className={`font-black tabular-nums ${
-              record.type === "sale"
-                ? "text-emerald-700"
-                : record.amountKnown === false
-                  ? "text-amber-700"
-                  : record.type === "purchase" && record.amountPence > 0
-                    ? "text-blue-700"
-                  : record.amountPence > 0
-                    ? "text-zinc-950"
-                    : "text-zinc-500"
-            }`}
-          >
-            {recordAmount(record)}
-          </p>
+          <div className="text-right">
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">{recordAmountLabel(record)}</p>
+            <p
+              className={`mt-0.5 font-black tabular-nums ${
+                record.type === "sale"
+                  ? "text-emerald-700"
+                  : record.amountKnown === false
+                    ? "text-amber-700"
+                    : record.type === "purchase" && record.amountPence > 0
+                      ? "text-blue-700"
+                      : record.amountPence > 0
+                      ? "text-zinc-950"
+                      : "text-zinc-500"
+              }`}
+            >
+              {recordAmount(record)}
+            </p>
+          </div>
           {actions}
         </div>
       </div>
@@ -628,7 +639,7 @@ function RecordEditorDialog({
           {record.status === "void" ? <div className="rounded-lg border border-zinc-300 bg-white px-4 py-8 text-center"><p className="font-bold">Restore this Record to edit its items</p><p className="mt-1 text-sm font-medium text-zinc-500">Voided inventory stays frozen so it cannot leak back into the active collection.</p></div> : <>{record.type === "sale" ? <SaleCopyItemsEditor record={record} source={source} /> : <RecordCardItemsEditor initialCardLineId={initialCardLineId} record={record} source={source} />}{record.lines.filter((line) => line.kind !== "card").map((line) => <NonCardLineEditor key={line.id} line={line} record={record} source={source} />)}</>}
         </div>}
         <div className="flex flex-col-reverse gap-3 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          {!costOnly ? <button className={`inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${record.status === "void" ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:border-emerald-700" : "border-rose-300 bg-rose-50 text-rose-800 hover:border-rose-700"}`} disabled={saving} onClick={changeStatus} type="button">{record.status === "void" ? "Restore record" : "Void record"}</button> : <span />}
+          {!costOnly ? <div><button className={`inline-flex min-h-11 items-center justify-center rounded-md border px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${record.status === "void" ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:border-emerald-700" : "border-rose-300 bg-rose-50 text-rose-800 hover:border-rose-700"}`} disabled={saving} onClick={changeStatus} type="button">{record.status === "void" ? "Restore record" : "Void record effects"}</button>{record.status === "void" ? <p className="mt-1 max-w-xs text-xs font-medium leading-4 text-zinc-500">Restoring reapplies this Record’s inventory and history effects.</p> : <p className="mt-1 max-w-xs text-xs font-medium leading-4 text-zinc-500">Voiding keeps this Record in History but removes its inventory and cashflow effects until restored.</p>}</div> : <span />}
           <div className="flex flex-col-reverse gap-2 sm:flex-row"><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950" disabled={saving} onClick={onClose} type="button">{activePanel === "details" ? "Cancel" : "Close"}</button>{activePanel === "details" ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={save} type="button">{saving ? "Saving…" : costOnly ? "Save acquisition cost" : "Save details"}</button> : null}</div>
         </div>
       </div>
@@ -1022,7 +1033,7 @@ function HistoryView() {
         </label>
         <label className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700">
           <input checked={includeVoid} className="size-4 accent-[#8a1f2d]" onChange={(event) => { setIncludeVoid(event.target.checked); setPage(1); }} type="checkbox" />
-          Show void
+          Show voided Records
         </label>
       </div>
       {message ? <p className="border-b border-zinc-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900" role="status">{message}</p> : null}
@@ -1039,7 +1050,7 @@ function HistoryView() {
                   type="button"
                 >
                   {record.status === "void" ? <RotateCcw className="size-3.5" /> : <Undo2 className="size-3.5" />}
-                  {record.status === "void" ? "Restore" : "Void"}
+                  {record.status === "void" ? "Restore" : "Void effects"}
                 </button>
               </div>
             }
@@ -1123,9 +1134,11 @@ function InventoryCardSummary({
 }) {
   const purchaseValue = knownPurchaseValueCount === 0
     ? "Unknown"
-    : unknownPurchaseValueCount > 0
-      ? `Known ${formatCurrency(purchaseValuePence)} · ${unknownPurchaseValueCount} cost${unknownPurchaseValueCount === 1 ? "" : "s"} unknown`
-      : formatCurrency(purchaseValuePence);
+    : paidCostSummary({
+      formattedKnownTotal: formatCurrency(purchaseValuePence),
+      knownCopyCount: knownPurchaseValueCount,
+      unknownCopyCount: unknownPurchaseValueCount,
+    });
   return (
     <section aria-labelledby="inventory-card-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
       <div className="grid gap-4 p-4 sm:grid-cols-[5rem_minmax(0,1fr)_auto] sm:items-center sm:p-5">
@@ -1156,7 +1169,7 @@ function InventoryCardSummary({
         <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-3 sm:px-5">
           <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity</dt><dd className="mt-1 font-bold text-zinc-800">{target.rarity}</dd></div>
           <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition</dt><dd className="mt-1 font-bold text-zinc-800">{target.edition}</dd></div>
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Purchase value</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div>
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{ownedCardTotalLabel(libraryStatus.ownedQuantity)}</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div>
         </dl>
       </details>
     </section>
@@ -1454,7 +1467,7 @@ function InventoryCardDetailContent({
                   </form>
 
                   <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} />
-                  <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
+                  <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p><p className="mt-2 text-sm font-bold text-zinc-800">This Copy’s purchase cost: <span className="tabular-nums">{selectedDetail.copy.allocationPence === null ? "unknown" : formatCurrency(selectedDetail.copy.allocationPence)}</span></p><p className="mt-1 text-xs font-medium leading-5 text-zinc-500">This is this physical Copy’s allocated share of its source Purchase, not the total for sibling Copies.</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
                 </article>
               </div>
             ) : (
@@ -1725,7 +1738,7 @@ function InventoryView() {
                   </span>
                   <span className="mt-1 block text-xs font-semibold text-zinc-500">Wanted {libraryStatus.wantedQuantity} · Owned {libraryStatus.ownedQuantity}{libraryStatus.wishlistRemainingQuantity ? ` · ${libraryStatus.wishlistRemainingQuantity} still wanted` : ""} · {copies.filter((copy) => copy.status === "sold").length} sold</span>
                   <span className="mt-2 block text-xs font-bold text-zinc-700"><span className="text-zinc-500">{ebayListings.heading}</span><span aria-hidden="true"> · </span><span>{ebayListings.summary}</span></span>
-                  {libraryStatus.ownedQuantity ? <span className="mt-1 block text-xs font-bold text-emerald-700">Purchase value {knownPurchaseValueCount === 0 ? "unknown" : unknownPurchaseValueCount > 0 ? `known ${formatCurrency(purchaseValuePence)} · ${unknownPurchaseValueCount} cost${unknownPurchaseValueCount === 1 ? "" : "s"} unknown` : formatCurrency(purchaseValuePence)}</span> : null}
+                  {libraryStatus.ownedQuantity ? <span className="mt-1 block text-xs font-bold text-emerald-700">{ownedCardTotalLabel(libraryStatus.ownedQuantity)} {knownPurchaseValueCount === 0 ? "unknown" : paidCostSummary({ formattedKnownTotal: formatCurrency(purchaseValuePence), knownCopyCount: knownPurchaseValueCount, unknownCopyCount: unknownPurchaseValueCount })}</span> : null}
                   <span className="mt-2 flex flex-wrap gap-1">
                     {printings.map((printing) => <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px] font-bold text-zinc-600" key={printing.id}>{printing.setCode}</span>)}
                   </span>

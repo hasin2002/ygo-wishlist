@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { allocatePence, allocatePenceAt } from "../src/lib/records/allocation.ts";
-import { paidCostSummary } from "../src/lib/records/paid-cost-summary.ts";
+import { ownedCardTotalLabel, paidCostSummary } from "../src/lib/records/paid-cost-summary.ts";
 import { ordinaryPurchaseCopyAllocations } from "../src/lib/records/purchase-accounting.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
@@ -100,7 +100,7 @@ test("ordinary Purchase allocation keeps known £0 distinct from unknown", () =>
 test("Library paid summary labels partial totals and preserves intentional zero", () => {
   assert.equal(
     paidCostSummary({ formattedKnownTotal: "£12.00", knownCopyCount: 2, unknownCopyCount: 1 }),
-    "Known paid £12.00 · 1 cost unknown",
+    "Known subtotal £12.00 · 1 cost unknown",
   );
   assert.equal(
     paidCostSummary({ formattedKnownTotal: "£0.00", knownCopyCount: 1, unknownCopyCount: 0 }),
@@ -110,6 +110,31 @@ test("Library paid summary labels partial totals and preserves intentional zero"
     paidCostSummary({ formattedKnownTotal: "£0.00", knownCopyCount: 0, unknownCopyCount: 2 }),
     "2 costs unknown",
   );
+  assert.equal(ownedCardTotalLabel(3), "3-card total");
+});
+
+test("value presentation keeps physical Copy costs separate from grouped card totals", () => {
+  const recordsApp = sourceFile("src/components/records/records-app.tsx");
+  const libraryApp = sourceFile("src/components/wishlist-app.tsx");
+  const wheelApp = sourceFile("src/components/wheel-app.tsx");
+
+  assert.match(recordsApp, /This Copy’s purchase cost:/);
+  assert.match(recordsApp, /ownedCardTotalLabel\(libraryStatus\.ownedQuantity\)/);
+  assert.doesNotMatch(recordsApp, /Purchase value/);
+  assert.match(libraryApp, /Owned market estimate/);
+  assert.match(libraryApp, /Known purchase subtotal/);
+  assert.match(wheelApp, /Record purchase/);
+  assert.match(wheelApp, /Known market subtotal/);
+});
+
+test("destructive actions state what remains unchanged", () => {
+  const recordsApp = sourceFile("src/components/records/records-app.tsx");
+  const binderApp = sourceFile("src/components/binder-v2-app.tsx");
+  const wheelApp = sourceFile("src/components/wheel-app.tsx");
+
+  assert.match(recordsApp, /removes its inventory and cashflow effects until restored/);
+  assert.match(binderApp, /physical\n\s+Copies, and Record history are not deleted or changed/);
+  assert.match(wheelApp, /does not record, remove, or change any\n\s+physical Copies, Purchases, or Library cards/);
 });
 
 test("amount entry keeps £0 separate from blank and malformed values", () => {

@@ -75,7 +75,7 @@ test("Library results expose Wanted and Owned below the image without a Deficit 
   assert.match(source, /\["Owned", card\.ownedQuantity\]/);
   assert.doesNotMatch(source, /\["Deficit", deficit\]/);
   assert.match(source, /data-library-media-column[\s\S]*?data-library-media[\s\S]*?<CollectionQuantitySummary card=\{card\} \/>/);
-  assert.match(source, /Value unknown · Unpriced/);
+  assert.match(source, /Market estimate unknown/);
   assert.doesNotMatch(source, /Show full details for/);
   assert.match(source, /function CardImagePreviewDialog/);
   assert.match(source, /aria-label=\{`Larger image of \$\{card\.name\}`\}/);
@@ -92,7 +92,7 @@ test("Library results expose Wanted and Owned below the image without a Deficit 
 
 test("Library cards keep a visible Wishlist or Owned identifier without a redundant paid label", () => {
   assert.match(source, /\{card\.status === "owned" \? "Owned" : "Wishlist"\}/);
-  assert.match(source, /card\.paidPriceText !== null \? normalizePaidPrice\(card\.paidPriceText\) : "Cost unknown"/);
+  assert.match(source, /paidCostSummary\(\{ formattedKnownTotal: card\.paidPriceText !== null \? normalizePaidPrice\(card\.paidPriceText\)/);
   assert.doesNotMatch(source, /`Known paid \$\{normalizePaidPrice\(card\.paidPriceText\)\}`/);
   assert.match(source, /data-library-metadata/);
   assert.match(source, /inline-flex h-7 items-center whitespace-nowrap[\s\S]*?text-xs font-black tabular-nums text-emerald-800/);
@@ -102,10 +102,10 @@ test("Library summary separates counts, estimated values, and recorded purchase 
   assert.match(source, /aria-label="Library summary"/);
   assert.match(source, /data-library-summary/);
   assert.match(source, />Tracked cards</);
-  assert.match(source, />Wishlist value</);
-  assert.match(source, />Owned value</);
-  assert.match(source, />Purchase cost</);
-  assert.match(source, /paidCompleteness\.unknownCopyCount[\s\S]*?cost[\s\S]*?missing/);
+  assert.match(source, />Wishlist market estimate</);
+  assert.match(source, />Owned market estimate</);
+  assert.match(source, />Known purchase subtotal</);
+  assert.match(source, /paidCompleteness\.unknownCopyCount[\s\S]*?cost[\s\S]*?unknown/);
   assert.doesNotMatch(source, /Known paid/);
 });
 
@@ -148,9 +148,9 @@ test("wishlist removal preserves owned Copies and only deletes a pure target", (
   assert.match(libraryRouterSource, /db\.delete\(targetWheelEntries\)/);
   assert.match(libraryRouterSource, /Owned Copies and their Record history were kept/);
   assert.match(source, /form\.desiredQuantity > 0[\s\S]*?Remove from wishlist/);
-  assert.match(source, /will have Wanted set to 0/);
-  assert.match(source, /owned[\s\S]*?Copies[\s\S]*?Record history will stay/);
-  assert.match(source, /will be removed from your wishlist\. Any Copy and Record history will stay/);
+  assert.match(source, /will no longer be wanted/);
+  assert.match(source, /owned[\s\S]*?Copies[\s\S]*?every Record stay unchanged/);
+  assert.match(source, /saved catalogue details will be deleted/);
   assert.doesNotMatch(source, /will be deleted because there are no owned physical Copies to keep/);
   assert.match(source, /function RemoveWishlistDialog[\s\S]*?return createPortal\(/);
   assert.match(source, /aria-describedby="remove-wishlist-description"/);

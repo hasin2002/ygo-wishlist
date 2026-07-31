@@ -72,7 +72,7 @@ type WheelSegment = {
 };
 function formatCurrency(value: number | null) {
   if (value === null) {
-    return "No estimate";
+    return "Market estimate unknown";
   }
 
   return new Intl.NumberFormat("en-GB", {
@@ -707,7 +707,7 @@ export function WheelApp() {
               <div className="mb-3 rounded-md border border-zinc-200 bg-zinc-50 p-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-zinc-700">
-                    Price filter
+                    Market estimate filter
                   </p>
                   {hasPriceFilter ? (
                     <button
@@ -782,7 +782,7 @@ export function WheelApp() {
                                 {chaseLabel(item)}
                               </span>
                               <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
-                                {formatCurrency(item.priceValue)}
+                                Market est. {formatCurrency(item.priceValue)}
                               </span>
                               <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
                                 {item.weight}x
@@ -890,18 +890,21 @@ export function WheelApp() {
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-500">
-                  Picked
+                  Picked cards
                 </p>
                 <p className="text-lg font-bold">{history.length}</p>
                 {history.length ? (
-                  <p className="text-xs font-bold text-zinc-500">
-                    Total{" "}
-                    <span className="text-zinc-950">
-                      {pickedEstimatedCount
-                        ? formatCurrency(pickedTotal)
-                        : "No estimates"}
-                    </span>
-                  </p>
+                  <>
+                    <p className="text-xs font-bold text-zinc-500">
+                      Known market subtotal{" "}
+                      <span className="text-zinc-950">
+                        {pickedEstimatedCount
+                          ? formatCurrency(pickedTotal)
+                          : "No market estimates"}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-[10px] font-semibold text-zinc-500">{pickedEstimatedCount} of {history.length} market estimates known</p>
+                  </>
                 ) : null}
               </div>
               <div className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-500">
@@ -941,7 +944,7 @@ export function WheelApp() {
                             #{item.entry.selectedOrder}
                           </span>
                           <span className="rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] font-bold text-zinc-500">
-                            {formatCurrency(item.priceValue)}
+                            Market est. {formatCurrency(item.priceValue)}
                           </span>
                           <a
                             aria-label={`Open eBay search for ${item.card.name}`}
@@ -954,10 +957,10 @@ export function WheelApp() {
                             <ExternalLink className="size-3" />
                           </a>
                           <button
-                            aria-label={`Add ${item.card.name} to owned cards`}
+                            aria-label={`Record a purchase for ${item.card.name}`}
                             className="relative inline-flex size-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 shadow-[0_1px_0_rgba(0,0,0,0.02)] transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:border-[#8a1f2d]/30 hover:bg-rose-50 hover:text-[#8a1f2d]"
                             onClick={() => openPurchaseSheet(item)}
-                            title="Add to owned"
+                            title="Record purchase"
                             type="button"
                           >
                             <ShoppingBag className="size-3" />
@@ -1018,8 +1021,9 @@ export function WheelApp() {
               Put every wishlist card back?
             </h2>
             <p className="mt-2 text-sm font-medium leading-6 text-zinc-600" id="reset-wheel-description">
-              This clears the picked history and rebuilds the wheel from your
-              current wishlist cards.
+              This clears only the Wheel’s picked history and rebuilds it from
+              your current Wishlist. It does not record, remove, or change any
+              physical Copies, Purchases, or Library cards.
             </p>
             {resetError ? (
               <div
@@ -1127,7 +1131,7 @@ export function WheelApp() {
                 type="button"
               >
                 <ShoppingBag className="size-4" />
-                Add to owned
+                Record purchase
               </button>
             </div>
           </div>

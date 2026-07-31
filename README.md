@@ -34,6 +34,12 @@ with their history. Use Records → Purchase when a card selected in the Wheel i
 acquired; the target is prefilled, but the Record still captures the real date,
 source, amount, and printing details.
 
+Money labels are deliberately scoped. A Library or Binder market estimate is a
+current guide price, never money paid or sale proceeds. A Purchase total belongs
+to its Record; each physical Copy retains its own allocated purchase cost. When
+some Copy costs are missing, summaries show a known subtotal rather than
+pretending the total is complete.
+
 The legacy `cards` table remains intact solely as migration input. The only
 temporary access is the authenticated, read-only `legacyCards` adapter that
 seeds the resettable Records preview while legacy rows remain. It has deprecation
@@ -203,7 +209,7 @@ npm run db:migrate:postgres
 
 ## Authentication setup
 
-The tracker and binder stay public and read-only. Wheel, spend, chase assignment,
+The Library catalogue and Binder stay public and read-only. Wheel, spend, chase assignment,
 and every edit require a username and password.
 
 After the database schema is updated, create the first account and assign the
