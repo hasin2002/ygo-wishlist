@@ -41,7 +41,7 @@ export default async function LoginPage({
               aria-hidden="true"
               className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5"
             />
-            Public tracker
+            Public Library
           </Link>
 
           <div className="mt-10 sm:mt-14">
@@ -55,8 +55,8 @@ export default async function LoginPage({
               Welcome back.
             </h1>
             <p className="mt-3 max-w-sm text-base font-medium leading-7 text-zinc-600">
-              Sign in to manage your private collection and keep your next pickup
-              in sight.
+              Sign in to manage your private Records, purchases, and collection
+              details.
             </p>
           </div>
 
