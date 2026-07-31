@@ -216,18 +216,23 @@ test("Library controls, pagination, and public commerce links remain usable", as
 test("global Add opens the dedicated Add to wishlist page form", async ({ page }) => {
   await mockLibrary(page, true);
   await page.setViewportSize({ width: 1024, height: 900 });
-  await page.goto("/");
+  const origin = "/?status=wishlist&page=2";
+  const destination = `/wishlist/new?origin=${encodeURIComponent(origin)}`;
+  await page.goto(origin);
 
   await page.getByRole("button", { name: "Add", exact: true }).click();
   const addWishlist = page.getByRole("menuitem", { name: /Add to wishlist/ });
-  await expect(addWishlist).toHaveAttribute("href", "/wishlist/new");
+  await expect(addWishlist).toHaveAttribute("href", destination);
   await addWishlist.click();
 
-  await expect(page).toHaveURL(/\/wishlist\/new$/);
+  await expect(page).toHaveURL(new URL(destination, page.url()).toString());
   await expect(page.getByRole("heading", { level: 1, name: "Add to wishlist" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add to wishlist" })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Back to Library" })).toHaveAttribute("href", "/");
+  const back = page.getByRole("link", { name: "Back to Library" });
+  await expect(back).toHaveAttribute("href", origin);
+  await back.click();
+  await expect(page).toHaveURL(new URL(origin, page.url()).toString());
 });
 
 test("Global Add and the rarity guide provide complete keyboard lifecycles", async ({ page }) => {

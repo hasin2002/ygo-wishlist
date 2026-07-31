@@ -39,6 +39,7 @@ import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import { useClientReady } from "@/lib/use-client-ready";
+import { taskReturnHref } from "@/lib/navigation-intent";
 import {
   collectionRefreshFailureMessage,
   useCollectionChange,
@@ -1385,6 +1386,8 @@ function AddCardForm({
 
 export function AddWishlistApp() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnHref = taskReturnHref(searchParams.get("origin"), "/");
   const [form, setForm] = useState(emptyForm);
   const collectionChanged = useCollectionChange();
   const create = trpc.library.create.useMutation();
@@ -1410,7 +1413,7 @@ export function AddWishlistApp() {
       } catch {
         // The target is saved. The destination performs a fresh query.
       }
-      router.replace("/");
+      router.replace(returnHref);
     } catch {
       // The mutation exposes its actionable error beside the form.
     }
@@ -1422,7 +1425,8 @@ export function AddWishlistApp() {
         <AppHeader title="Add to wishlist" />
         <Link
           className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-700 transition hover:text-[#8a1f2d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]"
-          href="/"
+          href={returnHref}
+          replace
         >
           <ArrowLeft aria-hidden className="size-4" />
           Back to Library

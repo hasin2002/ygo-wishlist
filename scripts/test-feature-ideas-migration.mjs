@@ -63,7 +63,7 @@ try {
       "select count(*)::int as count from drizzle.__drizzle_migrations",
     )).rows;
     assert.equal(present, false, "Feature Ideas table must be absent after migration history runs");
-    assert.equal(count, 4, "The empty database must apply migrations 0000 through 0003");
+    assert.equal(count, 5, "The empty database must apply migrations 0000 through 0004");
   } finally {
     await client.end();
   }

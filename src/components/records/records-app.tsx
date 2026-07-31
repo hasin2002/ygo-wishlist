@@ -51,6 +51,7 @@ import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
+import { parseSaleReviewIntent } from "@/lib/navigation-intent";
 import {
   recordImagePreviewsFor,
   type RecordImagePreview,
@@ -415,7 +416,7 @@ function RecordCardItemsEditor({
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Opened product</p>
             <h3 className="mt-1 font-black">{openedProduct.name}</h3>
-            <p className="mt-1 text-sm font-medium text-zinc-500">{openedProduct.edition ? `${openedProduct.edition} · ` : ""}This product is read-only here; edit the pulled cards below.</p>
+            <p className="mt-1 text-sm font-medium text-zinc-500">{openedProduct.edition ? `${openedProduct.edition} · ` : ""}{openedProduct.allocationPence === null || openedProduct.allocationPence === undefined ? "Cost unknown" : `Exact unit cost £${(openedProduct.allocationPence / 100).toFixed(2)}`} · This product is read-only here; edit the pulled cards below.</p>
           </div>
         </div>
       ) : null}
@@ -514,6 +515,7 @@ function RecordEditorDialog({
   onClose,
   onSaved,
   record,
+  reviewSale = false,
   source,
 }: {
   backLabel?: string;
@@ -523,6 +525,7 @@ function RecordEditorDialog({
   onClose: () => void;
   onSaved: (message: string) => void;
   record: RecordEntry;
+  reviewSale?: boolean;
   source: RecordsDataSource;
 }) {
   const [title, setTitle] = useState(record.title);
@@ -532,17 +535,31 @@ function RecordEditorDialog({
   const [amount, setAmount] = useState((record.amountPence / 100).toFixed(2));
   const [amountKnown, setAmountKnown] = useState(costOnly || record.amountKnown !== false);
   const [notes, setNotes] = useState(record.notes);
+  const [sealedAllocationOverrideConfirmed, setSealedAllocationOverrideConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [activePanel, setActivePanel] = useState<"details" | "items">(initialPanel);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useViewportOverlay<HTMLDivElement>({
+    initialFocusRef: closeButtonRef,
     isOpen: true,
     onClose,
   });
   const editsCashflow = record.type === "purchase" || record.type === "sale" || record.type === "imported-acquisition";
   const editsListing = record.type === "purchase" || record.type === "imported-acquisition";
   const canMarkCostUnknown = !costOnly && (record.type === "purchase" || record.type === "imported-acquisition");
-
+  const sealedUnitsForRecord = source.snapshot.sealedUnits.filter((unit) => unit.acquiredRecordId === record.id);
+  const hasSealedAllocationOverrides = sealedUnitsForRecord.some((unit) => unit.allocationMode === "override");
+  const hasOpenedSealedUnit = sealedUnitsForRecord.some((unit) => unit.openedRecordId);
+  const parsedChangedAmount = parsePoundsToPence(amount);
+  const changingSealedCost = hasSealedAllocationOverrides && (
+    !amountKnown || parsedChangedAmount !== record.amountPence
+  );
+  const dialogDescription = reviewSale
+    ? "Review this sale record and its exact physical Copies. You can correct its details or items before continuing."
+    : costOnly
+      ? "Add the acquisition cost to resolve this attention item."
+      : "Edit this Record and its items without leaving the current view.";
   async function save() {
     const parsedAmount = editsCashflow && amountKnown ? parsePoundsToPence(amount) : 0;
     if (editsCashflow && amountKnown && parsedAmount === null) {
@@ -560,6 +577,7 @@ function RecordEditorDialog({
       amountPence: editsCashflow ? parsedAmount ?? 0 : record.amountPence,
       amountKnown: editsCashflow ? amountKnown : record.amountKnown !== false,
       notes,
+      sealedAllocationOverrideConfirmed,
     });
     setSaving(false);
     if (!result.ok) {
@@ -588,19 +606,19 @@ function RecordEditorDialog({
     <div aria-describedby="record-editor-description" aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
       <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{costOnly ? "Add acquisition cost" : "Edit record"}</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="record-editor-description">{costOnly ? "Add the acquisition cost to resolve this attention item." : "Edit this Record and its items without leaving the current view."}</p></div>
-          <button aria-label={backLabel || "Close record editor"} className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{reviewSale ? "Review sale" : costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{reviewSale ? "Review sale" : costOnly ? "Add acquisition cost" : "Edit record"}</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="record-editor-description">{dialogDescription}</p></div>
+          <button aria-label={reviewSale ? "Close Review sale" : backLabel || "Close record editor"} className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} ref={closeButtonRef} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
         </div>
         {!costOnly ? <div className="border-b border-zinc-300 bg-white px-4 sm:px-6"><div className="grid grid-cols-2 rounded-t-lg border-x border-t border-zinc-300 bg-zinc-100 p-1"><button aria-pressed={activePanel === "details"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "details" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("details")} type="button">Record details</button><button aria-pressed={activePanel === "items"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "items" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("items")} type="button">Items ({record.lines.filter((line) => line.kind !== "bulk").reduce((sum, line) => sum + line.quantity, 0)})</button></div></div> : null}
         {activePanel === "details" ? <div className="grid gap-5 p-4 sm:p-6">
-          <div><h3 className="font-bold">{costOnly ? record.title : "Record details"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{costOnly ? "Enter the full amount paid. Saving removes this item from Needs attention and includes it in your totals." : `Edit the shared information that identifies this ${recordTypeLabels[record.type].toLowerCase()}.`}</p></div>
+          <div><h3 className="font-bold">{costOnly ? record.title : "Record details"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{reviewSale ? dialogDescription : costOnly ? "Enter the full amount paid. Saving removes this item from Needs attention and includes it in your totals." : `Edit the shared information that identifies this ${recordTypeLabels[record.type].toLowerCase()}.`}</p></div>
           {error ? <div className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</div> : null}
           <div className="grid gap-4 sm:grid-cols-2">
             {costOnly ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></div></label> : <>
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label>
             <label><span className="text-sm font-bold text-zinc-700">Date <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDate(event.target.value)} type="date" value={date} /></label>
             <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Buyer or marketplace" : "Seller or source"} <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setRecordSource(event.target.value)} value={recordSource} /></label>
-            {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 disabled:bg-zinc-100" disabled={!amountKnown} inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div>{canMarkCostUnknown ? <span className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-700"><input checked={!amountKnown} onChange={(event) => setAmountKnown(!event.target.checked)} type="checkbox" /> Cost unknown</span> : null}</label> : null}
+            {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 disabled:bg-zinc-100" disabled={!amountKnown} inputMode="decimal" min="0" onChange={(event) => { setAmount(event.target.value); setSealedAllocationOverrideConfirmed(false); }} step="0.01" type="number" value={amount} /></div>{canMarkCostUnknown ? <span className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-700"><input checked={!amountKnown} onChange={(event) => { setAmountKnown(!event.target.checked); setSealedAllocationOverrideConfirmed(false); }} type="checkbox" /> Cost unknown</span> : null}{changingSealedCost ? <span className="mt-3 block rounded-md border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-950">{hasOpenedSealedUnit ? <><strong className="block font-bold">Reviewed unit costs cannot be changed after opening</strong><span className="mt-1 block">Post-opening changes are blocked to preserve each opened unit’s historical cost.</span></> : <><strong className="block font-bold">Review the new exact-unit costs</strong><span className="mt-1 block">All units are still sealed, so you can confirm this cost change before opening any of them.</span><label className="mt-2 flex items-start gap-2 font-semibold"><input checked={sealedAllocationOverrideConfirmed} onChange={(event) => setSealedAllocationOverrideConfirmed(event.target.checked)} type="checkbox" />I reviewed the new exact-unit costs.</label></>}</span> : null}</label> : null}
             {editsListing ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Original listing <span className="font-medium text-zinc-400">(optional)</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="url" onChange={(event) => setListingUrl(event.target.value)} placeholder="https://…" type="url" value={listingUrl} /></label> : null}
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setNotes(event.target.value)} value={notes} /></label>
             </>}
@@ -923,6 +941,7 @@ function Overview() {
 
 function HistoryView() {
   const source = useRecordsDataSource();
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | RecordEntryType>("all");
   const [includeVoid, setIncludeVoid] = useState(true);
@@ -930,6 +949,10 @@ function HistoryView() {
   const [message, setMessage] = useState<string | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [changingRecordId, setChangingRecordId] = useState<string | null>(null);
+  const handledReviewId = useRef<string | null>(null);
+  const requestedReviewValue = searchParams.get("record");
+  const requestedReviewIntent = parseSaleReviewIntent(requestedReviewValue);
+  const requestedReviewId = requestedReviewIntent?.recordId ?? null;
   const records = source.snapshot.records.filter((record) => {
     if (type !== "all" && record.type !== type) return false;
     if (!includeVoid && record.status === "void") return false;
@@ -941,6 +964,33 @@ function HistoryView() {
   const currentPage = Math.min(page, pageCount);
   const visibleRecords = records.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const editingRecord = source.snapshot.records.find((record) => record.id === editingRecordId) ?? null;
+
+  useEffect(() => {
+    if (!requestedReviewValue || handledReviewId.current === requestedReviewValue) return;
+    const timeoutId = window.setTimeout(() => {
+      if (handledReviewId.current === requestedReviewValue) return;
+      handledReviewId.current = requestedReviewValue;
+      if (!requestedReviewId) {
+        setMessage("That Sale is no longer available in this collection.");
+        return;
+      }
+      const requestedRecord = source.snapshot.records.find((record) => record.id === requestedReviewId);
+      if (!requestedRecord || requestedRecord.type !== "sale") {
+        setMessage("That Sale is no longer available in this collection.");
+        return;
+      }
+
+      // A linked sale is authoritative over the transient History controls. It
+      // may be outside the current page or excluded by an in-progress filter.
+      const recordIndex = source.snapshot.records.findIndex((record) => record.id === requestedRecord.id);
+      setQuery("");
+      setType("all");
+      setIncludeVoid(true);
+      setPage(Math.floor(Math.max(recordIndex, 0) / 15) + 1);
+      setEditingRecordId(requestedRecord.id);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [requestedReviewId, requestedReviewValue, source.snapshot.records]);
 
   async function toggleRecordStatus(record: RecordEntry) {
     setChangingRecordId(record.id);
@@ -1008,7 +1058,7 @@ function HistoryView() {
         <div className="flex items-center gap-2"><button aria-label="Previous history page" className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white transition hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-40" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /></button><span>Page {currentPage} of {pageCount}</span><button aria-label="Next history page" className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white transition hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-40" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button"><ChevronRight className="size-4" /></button></div>
       </nav> : null}
     </section>
-    {editingRecord ? <RecordEditorDialog key={editingRecord.id} onClose={() => setEditingRecordId(null)} onSaved={setMessage} record={editingRecord} source={source} /> : null}
+    {editingRecord ? <RecordEditorDialog key={editingRecord.id} onClose={() => setEditingRecordId(null)} onSaved={setMessage} record={editingRecord} reviewSale={requestedReviewId === editingRecord.id} source={source} /> : null}
     </>
   );
 }

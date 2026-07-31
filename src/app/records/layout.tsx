@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { RecordsDataProvider } from "@/components/records/records-preview-provider";
+import { protectedLoginHref } from "@/server/protected-login";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ export default async function RecordsLayout({ children }: { children: React.Reac
     : await (await import("@/server/session")).getCurrentSession();
 
   if (!session && !localPreviewReview) {
-    redirect("/login?next=/records");
+    redirect(await protectedLoginHref("/records"));
   }
 
   return (
