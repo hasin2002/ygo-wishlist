@@ -239,6 +239,7 @@ test("Global Add and the rarity guide provide complete keyboard lifecycles", asy
   await mockLibrary(page, true);
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.goto("/");
+  await expect(page.locator("[data-library-card]")).toHaveCount(10);
 
   const add = page.getByRole("button", { name: "Add", exact: true });
   await add.focus();
