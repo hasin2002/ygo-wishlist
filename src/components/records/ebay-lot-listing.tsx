@@ -59,6 +59,7 @@ import {
   copyDisplayLabel,
   copyShortReference,
 } from "@/lib/records/copy-display";
+import { filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reconcileCopySelection } from "@/lib/records/copy-selection";
 import { trpc } from "@/trpc/client";
 import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
 import { taskReturnHref } from "@/lib/navigation-intent";
@@ -465,13 +466,20 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     [source.snapshot],
   );
 
-  const selected = candidates
-    .filter((item) => draft.copyIds.includes(item.copy.id))
-    .sort(
-      (a, b) =>
-        draft.copyIds.indexOf(a.copy.id) -
-        draft.copyIds.indexOf(b.copy.id),
-    );
+  const selection = useMemo(() => reconcileCopySelection(
+    draft.copyIds,
+    candidates.map((item) => ({
+      id: item.copy.id,
+      item,
+      reason: item.copy.status !== "available"
+        ? `Copy #${copyShortReference(item.copy.id)} is ${item.copy.status === "sold" ? "already sold" : "not available"}. Remove or replace it.`
+        : item.exposure?.action.disposition === "blocked"
+          ? `Copy #${copyShortReference(item.copy.id)} is blocked: ${item.exposure.action.reason}`
+          : null,
+    })),
+    mixedLotCopyBounds,
+  ), [candidates, draft.copyIds]);
+  const selected = selection.selected;
   const selectedById = new Map(
     selected.map((item) => [item.copy.id, item]),
   );
@@ -531,35 +539,10 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
         .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
-  const filtered = eligibleCandidates.filter(
-    ({ copy, exposure, printing, target }) => {
-      if (selectedOnly && !draft.copyIds.includes(copy.id)) return false;
-      if (rarity !== "all" && target.rarity !== rarity) return false;
-      const exposureLabel = exposure
-        ? ebayExposurePresentation(
-            exposure.aggregateState,
-            exposure.liveOfferCount,
-          ).label
-        : "exposure unavailable";
-      return [
-        target.name,
-        target.rarity,
-        target.edition,
-        printing.setCode,
-        printing.setName,
-        copy.condition,
-        copy.id,
-        exposureLabel,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query.trim().toLowerCase());
-    },
-  );
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
-  const resultStart = filtered.length ? (page - 1) * pageSize + 1 : 0;
-  const resultEnd = Math.min(page * pageSize, filtered.length);
+  const filtered = filterCopySelectionCandidates(eligibleCandidates, {
+    query, rarity, selectedIds: selection.selectedIds, selectedOnly,
+  });
+  const { currentPage, items: visible, pageCount, resultEnd, resultStart } = pageCopySelection(filtered, page, pageSize);
   const visibleFees =
     validation?.fees.filter(
       (fee) => Number.isFinite(fee.amount) && fee.amount !== 0,
@@ -591,6 +574,10 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   }
 
   function toggleCopy(copyId: string, checked: boolean) {
+    if (checked && selection.selectedIds.length >= mixedLotCopyBounds.max) {
+      setError("A mixed card lot can contain no more than 100 physical Copies. Remove or reorder selected Copies before adding another.");
+      return;
+    }
     if (
       !checked &&
       draft.photoAnchorCopyId === copyId &&
@@ -708,7 +695,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   async function uploadPhotos(files: File[]) {
     setUploadingPhotos(true);
     try {
-      const anchor = draft.photoAnchorCopyId ?? draft.copyIds[0];
+      const anchor = draft.photoAnchorCopyId ?? selection.selectedIds[0];
       if (!anchor) throw new Error("Choose Copies before adding photos.");
       const added = await Promise.all(
         files
@@ -830,7 +817,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
       total: selectedCandidates.length,
     });
     try {
-      const anchor = draft.photoAnchorCopyId ?? draft.copyIds[0];
+      const anchor = draft.photoAnchorCopyId ?? selection.selectedIds[0];
       if (!anchor) {
         throw new Error("Choose Copies before importing saved photos.");
       }
@@ -998,7 +985,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   async function preparePhotosForEbay() {
     const pendingPhotos = draft.photos.filter((photo) => !photo.ebayUrl);
     if (!pendingPhotos.length) return draft.photos;
-    const anchor = draft.photoAnchorCopyId ?? draft.copyIds[0];
+    const anchor = draft.photoAnchorCopyId ?? selection.selectedIds[0];
     if (!anchor) throw new Error("Choose Copies before preparing photos.");
 
     setPreparingPhotos(true);
@@ -1031,12 +1018,12 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
 
   function input(photos = draft.photos) {
     return {
-      copyIds: draft.copyIds,
+      copyIds: selection.selectedIds,
       categoryId: ebayLotCategory.id,
       cardConditionDescriptorValueId: "400010" as const,
       description: draft.description,
       dispatchTimeMax: 3,
-      imageDraftCopyId: draft.photoAnchorCopyId ?? draft.copyIds[0]!,
+      imageDraftCopyId: draft.photoAnchorCopyId ?? selection.selectedIds[0]!,
       images: photos.map(({ archiveKey, ebayUrl }) => ({
         archiveKey,
         ebayUrl,
@@ -1062,7 +1049,10 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   }
 
   function stepProblem() {
-    if (step === 1 && draft.copyIds.length < 2) {
+    if (step === 1 && selection.issues.length) {
+      return selection.issues[0]!.message;
+    }
+    if (step === 1 && !selection.valid) {
       return "Choose at least two eligible physical Copies.";
     }
     if (
@@ -1196,14 +1186,26 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   <div>
                     <strong>{selected.length} {selected.length === 1 ? "copy" : "copies"} selected</strong>
                     <span className="mt-0.5 block text-sm font-medium text-zinc-500">
-                      {selected.length >= 2 ? "Selection complete" : "Choose at least two copies to continue"}
+                      {selection.valid ? "Selection complete" : selection.issues.length ? "Remove or replace the unavailable selected Copy" : "Choose at least two copies to continue"}
                     </span>
                   </div>
-                  <span className={`inline-flex min-h-9 w-fit items-center gap-2 rounded-full px-3 text-sm font-bold ${selected.length >= 2 ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
-                    {selected.length >= 2 ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
-                    {selected.length >= 2 ? "Ready to continue" : `${2 - selected.length} more required`}
+                  <span className={`inline-flex min-h-9 w-fit items-center gap-2 rounded-full px-3 text-sm font-bold ${selection.valid ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
+                    {selection.valid ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
+                    {selection.valid ? "Ready to continue" : selection.issues.length ? "Needs attention" : `${Math.max(0, 2 - selected.length)} more required`}
                   </span>
                 </div>
+
+                {selection.issues.length ? (
+                  <div aria-live="assertive" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+                    <strong className="block">Selected Copies need attention</strong>
+                    <ul className="mt-2 grid gap-2">
+                      {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? index}`}>
+                        <span>{issue.message}</span>
+                        {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => toggleCopy(issue.copyId!, false)} type="button">Remove</button> : null}
+                      </li>)}
+                    </ul>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
                   <label>
@@ -1258,7 +1260,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                 <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
                   {visible.map(
                     ({ copy, exposure, imageUrl, printing, target }, index) => {
-                      const chosen = draft.copyIds.includes(copy.id);
+                      const chosen = selection.selectedIds.includes(copy.id);
                       const exposurePresentation = exposure
                         ? ebayExposurePresentation(
                             exposure.aggregateState,
@@ -1354,7 +1356,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   >
                     <button
                       className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3"
-                      disabled={page <= 1}
+                      disabled={currentPage <= 1}
                       onClick={() =>
                         setPage((current) => current - 1)
                       }
@@ -1367,11 +1369,11 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                       Previous
                     </button>
                     <span className="shrink-0 text-xs font-bold text-zinc-600 sm:text-sm">
-                      Page {page} of {pageCount}
+                      Page {currentPage} of {pageCount}
                     </span>
                     <button
                       className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3"
-                      disabled={page >= pageCount}
+                      disabled={currentPage >= pageCount}
                       onClick={() =>
                         setPage((current) => current + 1)
                       }
@@ -1733,7 +1735,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                 reordering={reorderingPhotos}
                 secondaryAction={{
                   controls: "saved-copy-photo-picker-dialog",
-                  disabled: !draft.copyIds[0] || photoBusy || draft.photos.length >= 12,
+                  disabled: !selection.selectedIds[0] || photoBusy || draft.photos.length >= 12,
                   expanded: savedPhotoPickerOpen,
                   hasPopup: "dialog",
                   icon: Images,
@@ -2198,7 +2200,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
           confirmDisabled={!validation?.readyToPublish}
           finalLabel="Publish quantity 1 lot"
           nextDisabled={
-            (step === 1 && draft.copyIds.length < 2) ||
+            (step === 1 && !selection.valid) ||
             (step === 2 && photoBusy)
           }
           onBack={() => {

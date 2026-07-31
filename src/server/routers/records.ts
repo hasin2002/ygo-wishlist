@@ -52,6 +52,7 @@ import {
 } from "@/server/ebay-listing-composition";
 import { listEbayListingsWorkspace } from "@/server/records/ebay-listings-workspace";
 import { requireEbayExternalCapability } from "@/server/ebay-capabilities";
+import { CopySelectionError, lockReconciledCopies } from "@/server/records/copy-selection";
 import {
   compatiblePrintingIdentity,
   conflictsWithPrintingIdentity,
@@ -169,7 +170,7 @@ const saleSchema = z.object({
   source: z.string().trim().min(1).max(120),
   netProceedsPence: z.number().int().nonnegative(),
   notes: z.string().trim().max(4_000),
-  copyIds: z.array(z.string().min(1)).min(1),
+  copyIds: z.array(z.string().min(1)).min(1).max(100),
 });
 const recordMutationIdentitySchema = z.object({
   recordId: z.string().min(1),
@@ -1401,13 +1402,12 @@ export const recordsRouter = router({
     }
 
     await db.transaction(async (tx) => {
-      const copies = await tx.select().from(cardCopies).where(and(
-        eq(cardCopies.ownerId, ownerId), inArray(cardCopies.id, uniqueCopyIds),
-      )).for("update");
-      if (copies.length !== uniqueCopyIds.length || copies.some((copy) => (
-        copy.status !== "available" || copy.soldRecordId !== null
-      ))) {
-        conflict("One or more selected Copies are no longer available. Refresh and review the Sale.");
+      let copies;
+      try {
+        copies = await lockReconciledCopies(tx, ownerId, input.copyIds);
+      } catch (error) {
+        if (error instanceof CopySelectionError) conflict(`${error.message} The Sale has not been saved.`);
+        throw error;
       }
       let normalizedPaidLineIds: string[] | null = null;
       if (unresolvedListings.length && compositionSchemaReady) {
