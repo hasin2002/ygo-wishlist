@@ -415,7 +415,7 @@ function RecordCardItemsEditor({
           <div className="min-w-0">
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Opened product</p>
             <h3 className="mt-1 font-black">{openedProduct.name}</h3>
-            <p className="mt-1 text-sm font-medium text-zinc-500">{openedProduct.edition ? `${openedProduct.edition} · ` : ""}This product is read-only here; edit the pulled cards below.</p>
+            <p className="mt-1 text-sm font-medium text-zinc-500">{openedProduct.edition ? `${openedProduct.edition} · ` : ""}{openedProduct.allocationPence === null || openedProduct.allocationPence === undefined ? "Cost unknown" : `Exact unit cost £${(openedProduct.allocationPence / 100).toFixed(2)}`} · This product is read-only here; edit the pulled cards below.</p>
           </div>
         </div>
       ) : null}
@@ -534,6 +534,7 @@ function RecordEditorDialog({
   const [amount, setAmount] = useState((record.amountPence / 100).toFixed(2));
   const [amountKnown, setAmountKnown] = useState(costOnly || record.amountKnown !== false);
   const [notes, setNotes] = useState(record.notes);
+  const [sealedAllocationOverrideConfirmed, setSealedAllocationOverrideConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [activePanel, setActivePanel] = useState<"details" | "items">(initialPanel);
@@ -545,6 +546,13 @@ function RecordEditorDialog({
   const dialogDescription = reviewSale
     ? "Review this sale record and its exact physical Copies. You can correct its details or items before continuing."
     : null;
+  const sealedUnitsForRecord = source.snapshot.sealedUnits.filter((unit) => unit.acquiredRecordId === record.id);
+  const hasSealedAllocationOverrides = sealedUnitsForRecord.some((unit) => unit.allocationMode === "override");
+  const hasOpenedSealedUnit = sealedUnitsForRecord.some((unit) => unit.openedRecordId);
+  const parsedChangedAmount = parsePoundsToPence(amount);
+  const changingSealedCost = hasSealedAllocationOverrides && (
+    !amountKnown || parsedChangedAmount !== record.amountPence
+  );
 
   useEffect(() => {
     if (reviewSale) return;
@@ -625,6 +633,7 @@ function RecordEditorDialog({
       amountPence: editsCashflow ? parsedAmount ?? 0 : record.amountPence,
       amountKnown: editsCashflow ? amountKnown : record.amountKnown !== false,
       notes,
+      sealedAllocationOverrideConfirmed,
     });
     setSaving(false);
     if (!result.ok) {
@@ -663,7 +672,7 @@ function RecordEditorDialog({
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label>
             <label><span className="text-sm font-bold text-zinc-700">Date <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDate(event.target.value)} type="date" value={date} /></label>
             <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Buyer or marketplace" : "Seller or source"} <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setRecordSource(event.target.value)} value={recordSource} /></label>
-            {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 disabled:bg-zinc-100" disabled={!amountKnown} inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} step="0.01" type="number" value={amount} /></div>{canMarkCostUnknown ? <span className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-700"><input checked={!amountKnown} onChange={(event) => setAmountKnown(!event.target.checked)} type="checkbox" /> Cost unknown</span> : null}</label> : null}
+            {editsCashflow ? <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Net proceeds" : "All-in amount paid"}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 disabled:bg-zinc-100" disabled={!amountKnown} inputMode="decimal" min="0" onChange={(event) => { setAmount(event.target.value); setSealedAllocationOverrideConfirmed(false); }} step="0.01" type="number" value={amount} /></div>{canMarkCostUnknown ? <span className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-700"><input checked={!amountKnown} onChange={(event) => { setAmountKnown(!event.target.checked); setSealedAllocationOverrideConfirmed(false); }} type="checkbox" /> Cost unknown</span> : null}{changingSealedCost ? <span className="mt-3 block rounded-md border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-950">{hasOpenedSealedUnit ? <><strong className="block font-bold">Reviewed unit costs cannot be changed after opening</strong><span className="mt-1 block">Post-opening changes are blocked to preserve each opened unit’s historical cost.</span></> : <><strong className="block font-bold">Review the new exact-unit costs</strong><span className="mt-1 block">All units are still sealed, so you can confirm this cost change before opening any of them.</span><label className="mt-2 flex items-start gap-2 font-semibold"><input checked={sealedAllocationOverrideConfirmed} onChange={(event) => setSealedAllocationOverrideConfirmed(event.target.checked)} type="checkbox" />I reviewed the new exact-unit costs.</label></>}</span> : null}</label> : null}
             {editsListing ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Original listing <span className="font-medium text-zinc-400">(optional)</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="url" onChange={(event) => setListingUrl(event.target.value)} placeholder="https://…" type="url" value={listingUrl} /></label> : null}
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Notes <span className="font-medium text-zinc-400">(optional)</span></span><textarea className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setNotes(event.target.value)} value={notes} /></label>
             </>}

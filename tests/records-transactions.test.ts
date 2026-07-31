@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { eq } from "drizzle-orm";
 import { db } from "../src/db/index.ts";
@@ -12,6 +16,7 @@ import {
   ebayListings,
   recordEntries,
   recordLines,
+  sealedUnits,
   sessions,
   targetWheelEntries,
   users,
@@ -160,6 +165,79 @@ test("authenticated purchase commits exact Copies and projects the same money in
   assert.equal(cards.length, 1);
   assert.equal(cards[0]?.ownedQuantity, 2);
   assert.equal(cards[0]?.paidPriceText, "£1.01");
+});
+
+test("reviewed sealed-unit reconciliation is a timestamp-stable repeated apply", async () => {
+  const purchase = await records.createPurchase({
+    kind: "sealed",
+    recordName: "Three reconciled sealed units",
+    date: "2026-07-29",
+    source: "Local card shop",
+    listingUrl: "",
+    notes: "repeated reconciliation coverage",
+    totalPence: 101,
+    product: {
+      imageUrl: null,
+      name: "Reconciliation Test Box",
+      edition: "1st Edition",
+      metadataNeedsAttention: false,
+      quantity: 3,
+      rarity: "Sealed",
+      setCode: "TEST-BOX",
+      setName: "Reconciliation Test",
+      tcgplayerUrl: "https://www.tcgplayer.com/product/987654/reconciliation-test-box",
+    },
+  });
+  const units = (await db.select().from(sealedUnits).where(eq(sealedUnits.acquiredRecordId, purchase.id)))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  assert.equal(units.length, 3);
+
+  const planDirectory = await mkdtemp(path.join(tmpdir(), "sealed-unit-reconciliation-"));
+  const planPath = path.join(planDirectory, "reviewed-plan.json");
+  await writeFile(planPath, JSON.stringify({
+    allocations: [{
+      ownerId,
+      recordId: purchase.id,
+      units: units.map((unit) => ({
+        id: unit.id,
+        allocationPence: unit.allocationPence,
+      })),
+    }],
+  }));
+
+  const runReconciliation = () => spawnSync(process.execPath, [
+    "scripts/reconcile-sealed-unit-cost-allocations.mjs",
+    "--apply",
+    "--confirm-reviewed-sealed-unit-plan",
+    `--reviewed-plan=${planPath}`,
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: process.env,
+  });
+  const timestamps = async () => ({
+    line: (await db.select({ updatedAt: recordLines.updatedAt }).from(recordLines)
+      .where(eq(recordLines.recordId, purchase.id)))[0]?.updatedAt.getTime(),
+    units: (await db.select({ id: sealedUnits.id, updatedAt: sealedUnits.updatedAt }).from(sealedUnits)
+      .where(eq(sealedUnits.acquiredRecordId, purchase.id)))
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((unit) => unit.updatedAt.getTime()),
+  });
+
+  try {
+    const first = runReconciliation();
+    assert.equal(first.status, 0, first.stderr);
+    assert.match(first.stdout, /"idempotent": true/);
+    const afterFirst = await timestamps();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = runReconciliation();
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /"idempotent": true/);
+    assert.deepEqual(await timestamps(), afterFirst, "an unchanged repeated apply must not touch updated_at");
+  } finally {
+    await rm(planDirectory, { force: true, recursive: true });
+  }
 });
 
 test("wishlist removal deletes a pure target but preserves owned Copies and Records", async () => {
