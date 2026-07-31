@@ -188,6 +188,9 @@ export type SealedUnit = {
   status: "sealed" | "opened" | "void";
   acquiredRecordId: string;
   openedRecordId: string | null;
+  /** Exact unit cost from its source Purchase line; null is genuinely unknown. */
+  allocationPence?: number | null;
+  allocationMode?: "equal" | "override";
 };
 
 export type BulkLot = {
@@ -272,7 +275,12 @@ export type PurchaseInput = {
   notes: string;
 } & (
   | { kind: "card"; card: CardContentsInput }
-  | { kind: "sealed"; product: ProductIdentityInput & { quantity: number } }
+  | { kind: "sealed"; product: ProductIdentityInput & {
+    quantity: number;
+    /** Optional reviewed unequal exact-unit costs, in displayed unit order. */
+    unitAllocations?: number[];
+    unitAllocationsReviewed?: boolean;
+  } }
   | { kind: "bulk"; cards: CardContentsInput[]; totalCardCount: number }
   | { kind: "supply"; category: SupplyCategory; otherName: string; quantity: number }
 );
@@ -314,6 +322,8 @@ export type RecordDetailsUpdate = {
   amountPence: number;
   amountKnown?: boolean;
   notes: string;
+  /** Confirms a pre-opening replacement of reviewed unequal sealed-unit costs. */
+  sealedAllocationOverrideConfirmed?: boolean;
 };
 export type CardAttentionUpdate = {
   targetId: string;

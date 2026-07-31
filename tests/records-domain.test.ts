@@ -6,7 +6,7 @@ import { paidCostSummary } from "../src/lib/records/paid-cost-summary.ts";
 import { ordinaryPurchaseCopyAllocations } from "../src/lib/records/purchase-accounting.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
-import { applyPurchase, changeRecordStatus, createPreviewSnapshot, deleteWishlistTarget, removeCardCopy, replaceRecordCards, updateCardCopy, updateRecordDetails, updateRecordLine } from "../src/lib/records/preview-data.ts";
+import { applyOpening, applyPurchase, changeRecordStatus, createPreviewSnapshot, deleteWishlistTarget, removeCardCopy, replaceRecordCards, updateCardCopy, updateRecordDetails, updateRecordLine } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
 
 function twoCopyPurchase(): RecordsSnapshot {
@@ -199,6 +199,80 @@ test("preview bulk edits and Copy removal do not turn an unknown cost into £0",
   const removed = removeCardCopy(resized.next, resized.next.copies.find((copy) => copy.acquiredRecordId === record.id)!.id);
   assert.equal(removed.result.ok, true);
   assert.equal(removed.next.records.find((item) => item.id === record.id)?.lines.find((line) => line.id === cardLine.id)?.allocationPence, null);
+});
+
+test("preview sealed Purchase edits preserve exact-unit cost history", () => {
+  const created = applyPurchase(createPreviewSnapshot([]), {
+    kind: "sealed",
+    recordName: "Three sealed units",
+    date: "2026-07-29",
+    source: "Card shop",
+    listingUrl: "",
+    totalPence: 100,
+    amountKnown: true,
+    notes: "",
+    product: {
+      tcgplayerUrl: "https://www.tcgplayer.com/product/1/example",
+      name: "Example sealed product",
+      imageUrl: null,
+      edition: "1st Edition",
+      rarity: "Ultra Rare",
+      setName: "Example set",
+      setCode: "EX-001",
+      metadataNeedsAttention: false,
+      quantity: 3,
+    },
+  });
+  assert.equal(created.result.ok, true);
+  const purchase = created.next.records[0]!;
+  const line = purchase.lines[0]!;
+
+  const resized = updateRecordLine(created.next, purchase.id, line.id, {
+    name: line.name, quantity: 2, detail: line.detail ?? "", edition: "1st Edition",
+  });
+  assert.equal(resized.result.ok, true);
+  const resizedUnits = resized.next.sealedUnits.filter((unit) => unit.acquiredRecordId === purchase.id);
+  assert.equal(resizedUnits.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0), 100);
+  assert.deepEqual(resizedUnits.map((unit) => unit.allocationMode), ["equal", "equal"]);
+  assert.deepEqual(resizedUnits.map((unit) => unit.allocationPence).sort((left, right) => (left ?? 0) - (right ?? 0)), [50, 50]);
+
+  const opened = applyOpening(resized.next, {
+    useTrackedStock: true,
+    sealedUnitId: resizedUnits[0]!.id,
+    recordName: "Opened one",
+    date: "2026-07-30",
+    source: "Collection",
+    amountKnown: true,
+    totalPence: 0,
+    notes: "",
+    product: {
+      tcgplayerUrl: "https://www.tcgplayer.com/product/1/example",
+      name: "Example sealed product",
+      imageUrl: null,
+      edition: "1st Edition",
+      rarity: "Ultra Rare",
+      setName: "Example set",
+      setCode: "EX-001",
+      metadataNeedsAttention: false,
+    },
+    pulls: [],
+  });
+  assert.equal(opened.result.ok, true);
+  const blockedQuantity = updateRecordLine(opened.next, purchase.id, line.id, {
+    name: line.name, quantity: 3, detail: line.detail ?? "", edition: "1st Edition",
+  });
+  assert.equal(blockedQuantity.result.ok, false);
+  assert.equal(blockedQuantity.next, opened.next);
+  const blockedIdentity = updateRecordLine(opened.next, purchase.id, line.id, {
+    name: "Different product", quantity: 2, detail: line.detail ?? "", edition: "1st Edition",
+  });
+  assert.equal(blockedIdentity.result.ok, false);
+  const blockedCost = updateRecordDetails(opened.next, purchase.id, {
+    title: purchase.title, date: purchase.date, source: purchase.source, listingUrl: null,
+    amountPence: 101, amountKnown: true, notes: purchase.notes,
+  });
+  assert.equal(blockedCost.result.ok, false);
+  assert.equal(blockedCost.next, opened.next);
 });
 
 test("sold Copy provenance keeps its Purchase allocation through an edit and Sale void/restore", () => {
