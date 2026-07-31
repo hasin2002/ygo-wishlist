@@ -81,19 +81,19 @@ test("Library cards stay dense and usable from phone through wide desktop", asyn
   const imageButton = page.getByRole("button", { name: `Open larger image of ${longCardName}` });
   await expect(imageButton).toBeVisible();
   await expect(page.getByText("No image", { exact: true })).toBeVisible();
-  await expect(page.getByText("Value unknown · Unpriced", { exact: true })).toBeVisible();
+  await expect(page.getByText("Market estimate unknown", { exact: true })).toBeVisible();
   await expect(page.locator('[data-library-quantity-summary][aria-label="Wanted 3, owned 1"]')).toBeVisible();
   await expect(page.locator('[data-library-quantity-summary][aria-label="Wanted 2, owned 4"]')).toBeVisible();
   await expect(page.getByText("Deficit", { exact: true })).toHaveCount(0);
   const summary = page.locator("[data-library-summary]");
   await expect(summary.getByText("Tracked cards", { exact: true })).toBeVisible();
-  await expect(summary.getByText("Wishlist value", { exact: true })).toBeVisible();
+  await expect(summary.getByText("Wishlist market estimate", { exact: true })).toBeVisible();
   await expect(summary.getByText("£26,428", { exact: true })).toBeVisible();
-  await expect(summary.getByText("Owned value", { exact: true })).toBeVisible();
+  await expect(summary.getByText("Owned market estimate", { exact: true })).toBeVisible();
   await expect(summary.getByText("£1,571", { exact: true })).toBeVisible();
-  await expect(summary.getByText("Purchase cost", { exact: true })).toBeVisible();
+  await expect(summary.getByText("Known purchase subtotal", { exact: true })).toBeVisible();
   await expect(summary.getByText("£756", { exact: true })).toBeVisible();
-  await expect(summary.getByText("27 costs missing", { exact: true })).toBeVisible();
+  await expect(summary.getByText("27 costs unknown", { exact: true })).toBeVisible();
   const rarityGuideButton = page.getByRole("button", { name: "View rarity abbreviation guide" });
   const refreshButton = page.getByRole("button", { name: "Refresh current UK eBay estimates for all cards" });
   const [rarityGuideBox, refreshBox] = await Promise.all([
@@ -155,6 +155,7 @@ test("Library cards stay dense and usable from phone through wide desktop", asyn
   await imageDialog.click({ position: { x: 2, y: 2 } });
   await expect(imageDialog).toBeHidden();
   await expect(imageButton).toBeFocused();
+  await page.mouse.move(0, 0);
   const phoneRows = await page.locator("[data-library-card]").evaluateAll((elements) => (
     elements.map((element) => Math.round(element.getBoundingClientRect().height))
   ));
@@ -171,11 +172,15 @@ test("Library cards stay dense and usable from phone through wide desktop", asyn
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.getByRole("button", { name: "Collapse navigation" }).click();
   await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
+  await page.mouse.move(1365, 899);
+  await page.waitForTimeout(200);
   await screenshotLibrary(page, testInfo, "library-density-laptop-1366");
   await expectGridColumns(page, 5);
   await expectCompleteDesktopRows(page, 5, 2);
 
   await page.setViewportSize({ width: 1728, height: 1000 });
+  await page.mouse.move(1727, 999);
+  await page.waitForTimeout(200);
   await screenshotLibrary(page, testInfo, "library-density-wide-1728");
   await expectGridColumns(page, 5);
   await expectCompleteDesktopRows(page, 5, 2);
@@ -219,6 +224,7 @@ test("global Add opens the dedicated Add to wishlist page form", async ({ page }
   const origin = "/?status=wishlist&page=2";
   const destination = `/wishlist/new?origin=${encodeURIComponent(origin)}`;
   await page.goto(origin);
+  await expect(page.locator("[data-library-card]")).toHaveCount(10);
 
   await page.getByRole("button", { name: "Add", exact: true }).click();
   const addWishlist = page.getByRole("menuitem", { name: /Add to wishlist/ });
@@ -313,9 +319,9 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await page.screenshot({ path: testInfo.outputPath("library-edit-card-desktop.png") });
 
   await editDialog.getByRole("button", { name: "Remove from wishlist" }).click();
-  const removalDialog = page.getByRole("alertdialog", { name: "Remove from wishlist?" });
+  const removalDialog = page.getByRole("alertdialog", { name: "Remove this Library card?" });
   await expect(removalDialog).toBeVisible();
-  await expect(removalDialog.getByText(/owned Copy and all Record history will stay/)).toBeVisible();
+  await expect(removalDialog.getByText(/owned Copy and every Record remains unchanged/)).toBeVisible();
   await expect(removalDialog.getByRole("button", { name: "Cancel" })).toBeFocused();
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(removalDialog).toBeHidden();
@@ -328,7 +334,7 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await expect(editDialog).toBeVisible();
   await expect(editDialog.getByRole("button", { name: "Remove from wishlist" })).toBeVisible();
   await editDialog.getByRole("button", { name: "Remove from wishlist" }).click();
-  await expect(removalDialog.getByText(/Wanted set to 0.*4 owned Copies.*Record history will stay/)).toBeVisible();
+  await expect(removalDialog.getByText(/will no longer be wanted.*4 owned Copies.*every Record remains unchanged/)).toBeVisible();
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await editDialog.getByRole("button", { name: "Cancel" }).click();
 

@@ -304,12 +304,12 @@ function buildPageElement({
 
   const ownedValue = document.createElement("span");
   ownedValue.className = "is-owned";
-  ownedValue.textContent = `Owned ${formatMoney(totals.owned)}`;
+  ownedValue.textContent = `Owned est. ${formatMoney(totals.owned)}`;
   footer.appendChild(ownedValue);
 
   const wishlistValue = document.createElement("span");
   wishlistValue.className = "is-wishlist";
-  wishlistValue.textContent = `Wishlist ${formatMoney(totals.wishlist)}`;
+  wishlistValue.textContent = `Wishlist est. ${formatMoney(totals.wishlist)}`;
   footer.appendChild(wishlistValue);
 
   page.appendChild(footer);
@@ -329,10 +329,10 @@ function PageValuePills({
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-emerald-700">
-        Owned {formatMoney(owned)}
+        Owned est. {formatMoney(owned)}
       </span>
       <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-black uppercase leading-none tracking-[0.08em] text-rose-700">
-        Wishlist {formatMoney(wishlist)}
+        Wishlist est. {formatMoney(wishlist)}
       </span>
     </div>
   );
@@ -1542,8 +1542,8 @@ export function BinderV2App() {
               Clear all slots?
             </h2>
             <p className="mt-2 text-sm font-medium leading-6 text-zinc-600" id="reset-binder-description">
-              This removes every card from the binder layout. Your tracked cards
-              stay in the wishlist and owned lists.
+              This clears every Binder placement. Your Library cards, physical
+              Copies, and Record history are not deleted or changed.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button

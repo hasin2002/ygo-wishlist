@@ -40,6 +40,7 @@ import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import { useClientReady } from "@/lib/use-client-ready";
 import { taskReturnHref } from "@/lib/navigation-intent";
+import { paidCostSummary } from "@/lib/records/paid-cost-summary";
 import {
   collectionRefreshFailureMessage,
   useCollectionChange,
@@ -145,9 +146,9 @@ const priceSignalFilterOptions: {
   label: string;
   hint: string;
 }[] = [
-  { value: "estimated", label: "Has estimate", hint: "Manual or eBay price" },
-  { value: "unpriced", label: "No estimate", hint: "Missing market price" },
-  { value: "paid", label: "Has paid", hint: "Owned cost saved" },
+  { value: "estimated", label: "Has estimate", hint: "Manual or eBay market estimate" },
+  { value: "unpriced", label: "No estimate", hint: "Missing market estimate" },
+  { value: "paid", label: "Has paid", hint: "Owned purchase cost saved" },
 ];
 
 const chaseFilterOptions: { value: ChaseFilter; label: string; hint: string }[] = [
@@ -502,7 +503,7 @@ function EditCardModal({
 
           <div className={`grid gap-4 md:col-span-2 sm:grid-cols-2 ${form.desiredQuantity > 0 ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
             <label className="block">
-              <span className="text-sm font-medium text-zinc-700">Manual market price</span>
+              <span className="text-sm font-medium text-zinc-700">Manual market estimate</span>
               <input
                 className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
                 onChange={(event) =>
@@ -516,7 +517,7 @@ function EditCardModal({
               />
               {form.priceText ? (
                 <span className="mt-1 block text-xs font-medium text-zinc-500">
-                  eBay estimate: {form.priceText}
+                  Current eBay market estimate: {form.priceText}
                 </span>
               ) : null}
             </label>
@@ -749,15 +750,15 @@ function RemoveWishlistDialog({
           <Trash2 aria-hidden="true" className="size-5" />
         </span>
         <h2 className="mt-4 text-xl font-black" id="remove-wishlist-title">
-          Remove from wishlist?
+          Remove this Library card?
         </h2>
         <p
           className="mt-2 text-sm font-medium leading-6 text-zinc-600"
           id="remove-wishlist-description"
         >
           {card.ownedQuantity > 0
-            ? `${card.name} will have Wanted set to 0. Its ${card.ownedQuantity} owned ${card.ownedQuantity === 1 ? "Copy" : "Copies"} and all Record history will stay.`
-            : `${card.name} will be removed from your wishlist. Any Copy and Record history will stay.`}
+            ? `${card.name} will no longer be wanted. Its ${card.ownedQuantity} owned ${card.ownedQuantity === 1 ? "Copy" : "Copies"} and every Record remains unchanged.`
+            : `${card.name} and its saved catalogue details will be deleted. It has no physical Copy or Record history to delete.`}
         </p>
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button
@@ -776,7 +777,7 @@ function RemoveWishlistDialog({
             type="button"
           >
             {pending ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
-            Remove
+            Remove card
           </button>
         </div>
       </section>
@@ -1283,7 +1284,7 @@ function AddCardForm({
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="block">
             <span className="text-sm font-medium text-zinc-700">
-              Manual market price
+              Manual market estimate
             </span>
           <input
             className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
@@ -2015,7 +2016,7 @@ export function WishlistApp() {
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold">Cards</h2>
                 <p className="mt-1 text-sm font-medium text-zinc-500">
-                  Browse wishlist targets and current cards. Use Records for purchases, pulls, and sales.
+                  Browse your card catalogue. Market estimates are not purchase or sale totals; use Records for purchases, pulls, and sales.
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -2054,24 +2055,24 @@ export function WishlistApp() {
                 </dd>
               </div>
               <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
-                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Wishlist value</dt>
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Wishlist market estimate</dt>
                 <dd className="mt-1 text-xl font-black leading-none tabular-nums text-[#8a1f2d]">{formatCurrency(values.wishlist)}</dd>
                 <dd className="mt-1 text-xs font-semibold text-zinc-500">{counts.wishlist} wanted</dd>
               </div>
               <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
-                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Owned value</dt>
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Owned market estimate</dt>
                 <dd className="mt-1 text-xl font-black leading-none tabular-nums text-[#196047]">{formatCurrency(values.owned)}</dd>
                 <dd className="mt-1 text-xs font-semibold text-zinc-500">{counts.owned} owned</dd>
               </div>
               {canEdit ? (
                 <div className="min-w-0 bg-zinc-50 px-3 py-2.5">
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Purchase cost</dt>
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-zinc-500">Known purchase subtotal</dt>
                   <dd className="mt-1 text-xl font-black leading-none tabular-nums text-emerald-700">
                     {paidCompleteness.knownCopyCount > 0 ? formatCurrency(values.paid) : "—"}
                   </dd>
                   <dd className="mt-1 text-xs font-semibold text-zinc-500">
                     {paidCompleteness.unknownCopyCount > 0
-                      ? `${paidCompleteness.unknownCopyCount} cost${paidCompleteness.unknownCopyCount === 1 ? "" : "s"} missing`
+                      ? `${paidCompleteness.unknownCopyCount} cost${paidCompleteness.unknownCopyCount === 1 ? "" : "s"} unknown`
                       : paidCompleteness.knownCopyCount > 0
                         ? `${paidCompleteness.knownCopyCount} cost${paidCompleteness.knownCopyCount === 1 ? "" : "s"} recorded`
                         : "No costs recorded"}
@@ -2268,24 +2269,25 @@ export function WishlistApp() {
                         <div className="grid gap-2">
                           {(card.marketPriceText || card.priceText) ? (
                             <div className="min-w-0">
+                              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">Market estimate</p>
                               <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
                                 <span className="text-lg font-extrabold leading-none tabular-nums text-zinc-950 sm:text-xl">
                                   {card.marketPriceText ?? card.priceText}
                                 </span>
                                 {card.marketPriceText ? (
                                   <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">
-                                    Manual
+                                    Manual estimate
                                   </span>
                                 ) : null}
                               </div>
                               {card.marketPriceText && card.priceText ? (
                                 <p className="mt-1 truncate text-xs font-semibold text-zinc-500">
-                                  eBay estimate {card.priceText}
+                                  eBay market estimate {card.priceText}
                                 </p>
                               ) : null}
                             </div>
                           ) : (
-                            <p className="text-xs font-bold text-zinc-500">Value unknown · Unpriced</p>
+                            <p className="text-xs font-bold text-zinc-500">Market estimate unknown</p>
                           )}
 
                           <div className="flex flex-wrap items-center gap-1.5" data-library-metadata>
@@ -2304,7 +2306,7 @@ export function WishlistApp() {
                             ) : null}
                             {card.status === "owned" && (card.paidPriceText !== null || (card.paidPriceCompleteness?.unknownCopyCount ?? 0) > 0) ? (
                               <span className="inline-flex h-7 items-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-xs font-black tabular-nums text-emerald-800">
-                                {card.paidPriceText !== null ? normalizePaidPrice(card.paidPriceText) : "Cost unknown"}{(card.paidPriceCompleteness?.unknownCopyCount ?? 0) > 0 ? ` · ${card.paidPriceCompleteness!.unknownCopyCount} cost${card.paidPriceCompleteness!.unknownCopyCount === 1 ? "" : "s"} unknown` : ""}
+                                {paidCostSummary({ formattedKnownTotal: card.paidPriceText !== null ? normalizePaidPrice(card.paidPriceText) : "£0.00", knownCopyCount: card.paidPriceText !== null ? Math.max(1, card.paidPriceCompleteness?.knownCopyCount ?? 1) : 0, unknownCopyCount: card.paidPriceCompleteness?.unknownCopyCount ?? 0 })}
                               </span>
                             ) : null}
                             {card.status === "owned" && card.purchaseMonth ? (

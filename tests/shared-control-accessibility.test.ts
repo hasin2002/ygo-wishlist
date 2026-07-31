@@ -85,6 +85,11 @@ test("unavailable action explanations are touch-accessible toggles", () => {
 });
 
 test("Records editor and attention dialogs reuse the viewport overlay lifecycle", () => {
+  assert.match(recordsApp, /function RecordStatusConfirmationDialog[\s\S]*?useViewportOverlay<HTMLDivElement>/);
+  assert.match(recordsApp, /function RecordStatusConfirmationDialog[\s\S]*?return createPortal\([\s\S]*?document\.body/);
+  assert.match(recordsApp, /role="alertdialog"/);
+  assert.match(recordsApp, /aria-busy=\{busy\}/);
+  assert.match(recordsApp, /if \(busy\) return/);
   assert.match(recordsApp, /function RecordEditorDialog[\s\S]*?useViewportOverlay<HTMLDivElement>/);
   assert.match(recordsApp, /function CardAttentionDialog[\s\S]*?useViewportOverlay<HTMLDivElement>/);
   assert.match(recordsApp, /function EbayCopyLinkAttentionDialog[\s\S]*?useViewportOverlay<HTMLDivElement>/);

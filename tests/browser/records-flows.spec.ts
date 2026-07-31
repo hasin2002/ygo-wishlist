@@ -69,6 +69,93 @@ test("Purchase saves and refreshes Inventory", async ({ page }) => {
   await expect(page.getByText("Dark Magician", { exact: true }).first()).toBeVisible();
 });
 
+test("Inventory keeps a selected Copy cost separate from its three-card total", async ({ page }) => {
+  await page.goto("/records/inventory/cards/target-preview-dark-magician?copy=copy-preview-dark-1");
+
+  const cardDetails = page.locator("details");
+  await page.getByText("Card details", { exact: true }).click();
+  await expect(page.getByText("3-card total", { exact: true })).toBeVisible();
+  await expect(cardDetails).toContainText(/3-card total[\s\S]*Paid £75\.00/);
+  const acquisition = page.getByText("This Copy’s cost:").locator("..");
+  await expect(acquisition).toHaveText(/This Copy’s cost: £25\.00/);
+
+  const picker = page.getByRole("combobox", { name: "Physical Copy" });
+  await picker.click();
+  await page.getByRole("option", { name: /Copy 2 of 3/ }).click();
+
+  await expect(page).toHaveURL(/copy=copy-preview-dark-2/);
+  await expect(acquisition).toHaveText(/This Copy’s cost: £25\.00/);
+  await expect(cardDetails).toContainText(/3-card total[\s\S]*Paid £75\.00/);
+});
+
+test("Inventory identifies an unknown selected Copy without hiding the partial aggregate", async ({ page }) => {
+  await page.goto("/records/inventory/cards/target-preview-blue-eyes-partial?copy=copy-preview-partial-3");
+
+  const cardDetails = page.locator("details");
+  await page.getByText("Card details", { exact: true }).click();
+  await expect(cardDetails).toContainText(/3-card total[\s\S]*Known subtotal £50\.00 · 1 cost unknown/);
+  await expect(page.getByText("This Copy’s cost:").locator("..")).toHaveText(
+    /This Copy’s cost: unknown/,
+  );
+  await expect(page.getByRole("combobox", { name: "Physical Copy" })).toHaveValue(/Copy 3 of 3/);
+});
+
+test("Wishlist-only detail never presents a zero-card cost total", async ({ page }) => {
+  await page.goto("/records/inventory/cards/target-preview-ash-blossom");
+
+  const cardDetails = page.locator("details");
+  await page.getByText("Card details", { exact: true }).click();
+  await expect(cardDetails.getByText("No owned Copies", { exact: true })).toBeVisible();
+  await expect(cardDetails.getByText(/0-card total/)).toHaveCount(0);
+});
+
+test("History and editor status actions confirm effects before mutating", async ({ page }) => {
+  await page.goto("/records/history");
+
+  const row = page.locator("article").filter({ hasText: "Three-card allocation review" });
+  const historyTrigger = row.getByRole("button", { name: "Void effects" });
+  await historyTrigger.click();
+  const confirmation = page.getByRole("alertdialog", { name: "Void this Record’s effects?" });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toHaveAttribute("aria-modal", "true");
+  await expect(confirmation.getByText(/stays visible in History and is not deleted/)).toBeVisible();
+  await expect(confirmation.getByText(/inventory and cashflow effects are removed until you restore it/)).toBeVisible();
+  expect(await confirmation.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  await expect(confirmation.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await expect(row.getByText("Voided", { exact: true })).toHaveCount(0);
+
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(historyTrigger).toBeFocused();
+
+  await historyTrigger.click();
+  await confirmation.click({ position: { x: 2, y: 2 } });
+  await expect(confirmation).toBeHidden();
+  await expect(historyTrigger).toBeFocused();
+
+  await historyTrigger.click();
+  await confirmation.getByRole("button", { name: "Void effects" }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(row.getByText("Voided", { exact: true })).toBeVisible();
+
+  const restoreTrigger = row.getByRole("button", { name: "Restore" });
+  await restoreTrigger.click();
+  const restoreConfirmation = page.getByRole("alertdialog", { name: "Restore this Record’s effects?" });
+  await expect(restoreConfirmation.getByText(/stays in History.*reapplies its inventory and cashflow effects/)).toBeVisible();
+  await restoreConfirmation.getByRole("button", { name: "Restore effects" }).click();
+  await expect(row.getByText("Voided", { exact: true })).toHaveCount(0);
+
+  await row.getByRole("button", { name: /Edit Three-card allocation review/ }).click();
+  const editor = page.getByRole("dialog", { name: "Edit record" });
+  const editorStatusTrigger = editor.getByRole("button", { name: "Void record effects" });
+  await editorStatusTrigger.click();
+  await expect(confirmation).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeHidden();
+  await expect(editorStatusTrigger).toBeFocused();
+  await expect(editor).toBeVisible();
+});
+
 test("Purchase draft survives a reload and remains discoverable by its labelled form field", async ({ page }) => {
   await page.goto("/records/new/purchase");
   await chooseCardPurchase(page);
