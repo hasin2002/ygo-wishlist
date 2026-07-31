@@ -59,6 +59,7 @@ import {
   copyDisplayLabel,
   copyShortReference,
 } from "@/lib/records/copy-display";
+import { copySelectionAvailabilityReason, copySelectionValidationFingerprint, copySelectionValidationIsCurrent, filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reanchorCopySelectionPhotos, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import { trpc } from "@/trpc/client";
 import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
 import { taskReturnHref } from "@/lib/navigation-intent";
@@ -408,11 +409,13 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const setDraft = lifecycle.setData;
   const [step, setStep] = useState(1);
   const [query, setQuery] = useState("");
+  const [condition, setCondition] = useState("all");
   const [rarity, setRarity] = useState("all");
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<EbayVerification | null>(null);
+  const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [arrangeAnnouncement, setArrangeAnnouncement] = useState("");
@@ -435,6 +438,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const [preparingPhotos, setPreparingPhotos] = useState(false);
   const [removingPhotoId, setRemovingPhotoId] = useState<string | null>(null);
   const [reorderingPhotos, setReorderingPhotos] = useState(false);
+  const [movingPhotoAnchor, setMovingPhotoAnchor] = useState(false);
   const validate = trpc.ebay.validateLot.useMutation();
   const publish = trpc.ebay.publishLot.useMutation();
 
@@ -465,13 +469,16 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     [source.snapshot],
   );
 
-  const selected = candidates
-    .filter((item) => draft.copyIds.includes(item.copy.id))
-    .sort(
-      (a, b) =>
-        draft.copyIds.indexOf(a.copy.id) -
-        draft.copyIds.indexOf(b.copy.id),
-    );
+  const selection = useMemo(() => reconcileCopySelection(
+    draft.copyIds,
+    candidates.map((item) => ({
+      id: item.copy.id,
+      item,
+      reason: copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }),
+    })),
+    mixedLotCopyBounds,
+  ), [candidates, draft.copyIds]);
+  const selected = selection.selected;
   const selectedById = new Map(
     selected.map((item) => [item.copy.id, item]),
   );
@@ -519,11 +526,21 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const effectivePrice = draft.priceOrigin === "estimate"
     ? estimatedPriceText
     : draft.price;
-  const eligibleCandidates = candidates.filter(
-    ({ copy, exposure }) =>
-      copy.status === "available" &&
-      exposure?.action.disposition !== "blocked",
+  const currentValidationFingerprint = copySelectionValidationFingerprint(
+    selection,
+    input(),
   );
+  const currentValidation = validatedFingerprint === currentValidationFingerprint
+    ? validation
+    : null;
+  const validationIsCurrent = Boolean(currentValidation?.readyToPublish) && copySelectionValidationIsCurrent({
+    currentFingerprint: currentValidationFingerprint,
+    selection,
+    validatedFingerprint,
+  });
+  const eligibleCandidates = candidates.filter(({ copy, exposure }) => (
+    copySelectionAvailabilityReason({ copyId: copy.id, exposure, status: copy.status }) === null
+  ));
   const rarityOptions = Array.from(
     new Set(
       eligibleCandidates
@@ -531,37 +548,18 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
         .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
-  const filtered = eligibleCandidates.filter(
-    ({ copy, exposure, printing, target }) => {
-      if (selectedOnly && !draft.copyIds.includes(copy.id)) return false;
-      if (rarity !== "all" && target.rarity !== rarity) return false;
-      const exposureLabel = exposure
-        ? ebayExposurePresentation(
-            exposure.aggregateState,
-            exposure.liveOfferCount,
-          ).label
-        : "exposure unavailable";
-      return [
-        target.name,
-        target.rarity,
-        target.edition,
-        printing.setCode,
-        printing.setName,
-        copy.condition,
-        copy.id,
-        exposureLabel,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query.trim().toLowerCase());
-    },
-  );
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
-  const resultStart = filtered.length ? (page - 1) * pageSize + 1 : 0;
-  const resultEnd = Math.min(page * pageSize, filtered.length);
+  const conditionOptions = Array.from(
+    new Set(eligibleCandidates.map((item) => item.copy.condition)),
+  ).sort((left, right) => left.localeCompare(right));
+  const filtered = filterCopySelectionCandidates(eligibleCandidates, {
+    condition, query, rarity, selectedIds: selection.selectedIds, selectedOnly,
+    searchTerms: (item) => item.exposure
+      ? [ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount).label, ebayExposureSummary(item.exposure)]
+      : ["exposure unavailable"],
+  });
+  const { currentPage, items: visible, pageCount, resultEnd, resultStart } = pageCopySelection(filtered, page, pageSize);
   const visibleFees =
-    validation?.fees.filter(
+    currentValidation?.fees.filter(
       (fee) => Number.isFinite(fee.amount) && fee.amount !== 0,
     ) ?? [];
   const photoAnchor = draft.photoAnchorCopyId
@@ -574,7 +572,8 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     savedPhotosLoading ||
     clearingSelection ||
     removingPhotoId !== null ||
-    reorderingPhotos;
+    reorderingPhotos ||
+    movingPhotoAnchor;
   const availablePhotoSlots = Math.max(0, 12 - draft.photos.length);
 
   function updateDraft(next: Partial<Draft>) {
@@ -590,25 +589,59 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     });
   }
 
-  function toggleCopy(copyId: string, checked: boolean) {
+  async function toggleCopy(copyId: string, checked: boolean) {
+    if (checked && selection.selectedIds.length >= mixedLotCopyBounds.max) {
+      setError("A mixed card lot can contain no more than 100 physical Copies. Remove or reorder selected Copies before adding another.");
+      return;
+    }
+    let photoAnchorCopyId = draft.photoAnchorCopyId;
+    let photos = draft.photos;
     if (
       !checked &&
       draft.photoAnchorCopyId === copyId &&
       draft.photos.length
     ) {
-      setError(
-        "Remove the lot photos before removing their anchor Copy from this manifest.",
-      );
-      return;
+      const replacementCopyId = selection.selectedIds.find((id) => id !== copyId);
+      if (!replacementCopyId) {
+        setError("Choose a replacement Copy before removing the photo anchor. Your staged lot photos are being kept safe.");
+        return;
+      }
+      setMovingPhotoAnchor(true);
+      try {
+        const response = await fetch("/api/ebay/image", {
+          body: JSON.stringify({
+            archiveKeys: draft.photos.map((photo) => photo.archiveKey),
+            fromCopyId: copyId,
+            toCopyId: replacementCopyId,
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "PATCH",
+        });
+        const result = await response.json() as {
+          message?: string;
+          photos?: Array<{ archiveKey: string; previousArchiveKey: string; previewUrl: string }>;
+        };
+        const movedPhotos = result.photos
+          ? reanchorCopySelectionPhotos(draft.photos, result.photos)
+          : null;
+        if (!response.ok || !movedPhotos) {
+          throw new Error(result.message || "Listing photos could not be moved safely.");
+        }
+        photos = movedPhotos;
+        photoAnchorCopyId = replacementCopyId;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Listing photos could not be moved safely.");
+        return;
+      } finally {
+        setMovingPhotoAnchor(false);
+      }
     }
     updateDraft({
       copyIds: checked
         ? Array.from(new Set([...draft.copyIds, copyId]))
         : draft.copyIds.filter((id) => id !== copyId),
-      photoAnchorCopyId:
-        !checked && draft.photoAnchorCopyId === copyId
-          ? null
-          : draft.photoAnchorCopyId,
+      photoAnchorCopyId,
+      photos,
     });
     setError(null);
   }
@@ -708,7 +741,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   async function uploadPhotos(files: File[]) {
     setUploadingPhotos(true);
     try {
-      const anchor = draft.photoAnchorCopyId ?? draft.copyIds[0];
+      const anchor = draft.photoAnchorCopyId ?? selection.selectedIds[0];
       if (!anchor) throw new Error("Choose Copies before adding photos.");
       const added = await Promise.all(
         files
@@ -830,7 +863,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
       total: selectedCandidates.length,
     });
     try {
-      const anchor = draft.photoAnchorCopyId ?? draft.copyIds[0];
+      const anchor = draft.photoAnchorCopyId ?? selection.selectedIds[0];
       if (!anchor) {
         throw new Error("Choose Copies before importing saved photos.");
       }
@@ -998,7 +1031,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   async function preparePhotosForEbay() {
     const pendingPhotos = draft.photos.filter((photo) => !photo.ebayUrl);
     if (!pendingPhotos.length) return draft.photos;
-    const anchor = draft.photoAnchorCopyId ?? draft.copyIds[0];
+    const anchor = draft.photoAnchorCopyId ?? selection.selectedIds[0];
     if (!anchor) throw new Error("Choose Copies before preparing photos.");
 
     setPreparingPhotos(true);
@@ -1031,12 +1064,12 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
 
   function input(photos = draft.photos) {
     return {
-      copyIds: draft.copyIds,
+      copyIds: selection.selectedIds,
       categoryId: ebayLotCategory.id,
       cardConditionDescriptorValueId: "400010" as const,
       description: draft.description,
       dispatchTimeMax: 3,
-      imageDraftCopyId: draft.photoAnchorCopyId ?? draft.copyIds[0]!,
+      imageDraftCopyId: draft.photoAnchorCopyId ?? selection.selectedIds[0]!,
       images: photos.map(({ archiveKey, ebayUrl }) => ({
         archiveKey,
         ebayUrl,
@@ -1061,9 +1094,17 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     };
   }
 
+  const lateSelectionProblem = step > 1
+    ? selection.issues[0]?.message
+      ?? (!selection.valid ? "This lot no longer has 2–100 eligible physical Copies. Review the Copy selection." : null)
+    : null;
+
   function stepProblem() {
-    if (step === 1 && draft.copyIds.length < 2) {
-      return "Choose at least two eligible physical Copies.";
+    if (selection.issues.length) {
+      return selection.issues[0]!.message;
+    }
+    if (!selection.valid) {
+      return "Choose 2–100 eligible physical Copies.";
     }
     if (
       step === 2 &&
@@ -1092,9 +1133,13 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     if (step === 2) {
       try {
         const photos = await preparePhotosForEbay();
-        setValidation(await validate.mutateAsync(input(photos)));
+        const request = input(photos);
+        const fingerprint = copySelectionValidationFingerprint(selection, request);
+        setValidation(await validate.mutateAsync(request));
+        setValidatedFingerprint(fingerprint);
       } catch (reason) {
         setValidation(null);
+        setValidatedFingerprint(null);
         const message = reason instanceof Error
           ? reason.message
           : "eBay validation failed.";
@@ -1110,7 +1155,19 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   }
 
   async function confirm() {
-    if (!validation?.readyToPublish || publishActionRef.current) return;
+    const problem = stepProblem();
+    if (problem) {
+      setValidation(null);
+      setValidatedFingerprint(null);
+      setError(problem);
+      return;
+    }
+    if (!validationIsCurrent || publishActionRef.current) {
+      setValidation(null);
+      setValidatedFingerprint(null);
+      setError("This lot changed after eBay validation. Validate the current Copies and listing details again.");
+      return;
+    }
     publishActionRef.current = true;
     setPublishing(true);
     setError(null);
@@ -1170,6 +1227,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
           lifecycle.discard();
           setStep(1);
           setValidation(null);
+          setValidatedFingerprint(null);
         }}
         recoveryMessage={lifecycle.recoveryMessage}
         restored={lifecycle.restored}
@@ -1180,10 +1238,23 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
         step={step}
       />
 
+      {lateSelectionProblem ? (
+        <div aria-live="assertive" className="flex flex-col gap-3 rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm font-medium text-rose-950 sm:flex-row sm:items-center sm:justify-between">
+          <span>{lateSelectionProblem} Your title, description, price, and staged photos are still saved.</span>
+          <button
+            className="min-h-11 shrink-0 rounded-md border border-rose-300 bg-white px-3 font-bold"
+            onClick={() => setStep(1)}
+            type="button"
+          >
+            Review Copy selection
+          </button>
+        </div>
+      ) : null}
+
       {step === 1 ? (
         <StepPanel step={step}>
           <FormSection
-            description="Select every physical Copy the buyer will receive, then arrange the exact order used in the listing."
+            description="Select 2–100 physical Copies the buyer will receive, then arrange the exact order used in the listing."
             number={1}
             title="Choose Copies"
           >
@@ -1196,16 +1267,31 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   <div>
                     <strong>{selected.length} {selected.length === 1 ? "copy" : "copies"} selected</strong>
                     <span className="mt-0.5 block text-sm font-medium text-zinc-500">
-                      {selected.length >= 2 ? "Selection complete" : "Choose at least two copies to continue"}
+                      {selection.valid ? "Selection complete" : selection.issues.length ? "Remove or replace the unavailable selected Copy" : "Choose 2–100 Copies to continue"}
                     </span>
                   </div>
-                  <span className={`inline-flex min-h-9 w-fit items-center gap-2 rounded-full px-3 text-sm font-bold ${selected.length >= 2 ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
-                    {selected.length >= 2 ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
-                    {selected.length >= 2 ? "Ready to continue" : `${2 - selected.length} more required`}
+                  <span className={`inline-flex min-h-9 w-fit items-center gap-2 rounded-full px-3 text-sm font-bold ${selection.valid ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
+                    {selection.valid ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
+                    {selection.valid ? "Ready to continue" : selection.issues.length ? "Needs attention" : `${Math.max(0, 2 - selected.length)} more required`}
                   </span>
                 </div>
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
+                {selection.issues.length ? (
+                  <div aria-live="assertive" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+                    <strong className="block">Selected Copies need attention</strong>
+                    <ul className="mt-2 grid gap-2">
+                      {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? "selection"}:${index}`}>
+                        <span>{issue.message}</span>
+                        {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => {
+                          if (issue.code === "duplicate") updateDraft({ copyIds: removeDuplicateCopySelectionId(draft.copyIds, issue.copyId!) });
+                          else toggleCopy(issue.copyId!, false);
+                        }} type="button">{issue.code === "duplicate" ? "Remove duplicate" : "Remove"}</button> : null}
+                      </li>)}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.3fr)_minmax(180px,0.35fr)_auto] lg:items-end">
                   <label>
                     <span className="text-sm font-bold text-zinc-700">Search cards</span>
                     <div className="relative mt-1">
@@ -1221,6 +1307,20 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                         value={query}
                       />
                     </div>
+                  </label>
+                  <label>
+                    <span className="text-sm font-bold text-zinc-700">Condition</span>
+                    <select
+                      className={fieldClass}
+                      onChange={(event) => {
+                        setCondition(event.target.value);
+                        setPage(1);
+                      }}
+                      value={condition}
+                    >
+                      <option value="all">All conditions</option>
+                      {conditionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
                   </label>
                   <label>
                     <span className="text-sm font-bold text-zinc-700">Rarity</span>
@@ -1258,7 +1358,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                 <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
                   {visible.map(
                     ({ copy, exposure, imageUrl, printing, target }, index) => {
-                      const chosen = draft.copyIds.includes(copy.id);
+                      const chosen = selection.selectedIds.includes(copy.id);
                       const exposurePresentation = exposure
                         ? ebayExposurePresentation(
                             exposure.aggregateState,
@@ -1336,6 +1436,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                       className="mt-2 min-h-11 rounded-md px-3 text-sm font-bold text-[#8a1f2d] hover:bg-rose-50"
                       onClick={() => {
                         setQuery("");
+                        setCondition("all");
                         setRarity("all");
                         setSelectedOnly(false);
                         setPage(1);
@@ -1354,7 +1455,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   >
                     <button
                       className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3"
-                      disabled={page <= 1}
+                      disabled={currentPage <= 1}
                       onClick={() =>
                         setPage((current) => current - 1)
                       }
@@ -1367,11 +1468,11 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                       Previous
                     </button>
                     <span className="shrink-0 text-xs font-bold text-zinc-600 sm:text-sm">
-                      Page {page} of {pageCount}
+                      Page {currentPage} of {pageCount}
                     </span>
                     <button
                       className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3"
-                      disabled={page >= pageCount}
+                      disabled={currentPage >= pageCount}
                       onClick={() =>
                         setPage((current) => current + 1)
                       }
@@ -1733,7 +1834,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                 reordering={reorderingPhotos}
                 secondaryAction={{
                   controls: "saved-copy-photo-picker-dialog",
-                  disabled: !draft.copyIds[0] || photoBusy || draft.photos.length >= 12,
+                  disabled: !selection.selectedIds[0] || photoBusy || draft.photos.length >= 12,
                   expanded: savedPhotoPickerOpen,
                   hasPopup: "dialog",
                   icon: Images,
@@ -2038,12 +2139,12 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   <div className="flex items-start gap-3">
                     <span
                       className={`grid size-10 shrink-0 place-items-center rounded-full ${
-                        validation?.readyToPublish
+                        currentValidation?.readyToPublish
                           ? "bg-emerald-50 text-emerald-700"
                           : "bg-rose-50 text-rose-700"
                       }`}
                     >
-                      {validation?.readyToPublish ? (
+                      {currentValidation?.readyToPublish ? (
                         <CheckCircle2
                           aria-hidden="true"
                           className="size-5"
@@ -2061,22 +2162,22 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                       </p>
                       <h3
                         className={`mt-1 font-black ${
-                          validation?.readyToPublish
+                          currentValidation?.readyToPublish
                             ? "text-emerald-800"
                             : "text-rose-800"
                         }`}
                         id="ebay-check-title"
                       >
-                        {validation?.readyToPublish
+                        {currentValidation?.readyToPublish
                           ? "Ready to publish"
                           : "Changes required"}
                       </h3>
                     </div>
                   </div>
 
-                  {validation?.errors.length ? (
+                  {currentValidation?.errors.length ? (
                     <ul className="mt-4 grid gap-2">
-                      {validation.errors.map((validationError, index) => (
+                      {currentValidation.errors.map((validationError, index) => (
                         <li
                           className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium leading-5 text-rose-950"
                           key={`${validationError.code}-${index}`}
@@ -2096,7 +2197,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                     </ul>
                   ) : (
                     <p className="mt-4 text-sm font-medium leading-5 text-zinc-600">
-                      {validation?.readyToPublish
+                      {currentValidation?.readyToPublish
                         ? "eBay accepted the listing details and returned no validation messages."
                         : "Go back, review the listing details, and validate again."}
                     </p>
@@ -2195,10 +2296,10 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
 
       {!publishedUrl ? (
         <WizardActions
-          confirmDisabled={!validation?.readyToPublish}
+          confirmDisabled={!validationIsCurrent}
           finalLabel="Publish quantity 1 lot"
           nextDisabled={
-            (step === 1 && draft.copyIds.length < 2) ||
+            !selection.valid ||
             (step === 2 && photoBusy)
           }
           onBack={() => {

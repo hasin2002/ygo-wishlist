@@ -26,7 +26,8 @@ test("Wheel, reset, and mixed-lot publish stay guarded through projection propag
   assert.match(wheel, /setResetWarning\(collectionRefreshFailureMessage\(error\)\)/);
 
   const lot = source("src/components/records/ebay-lot-listing.tsx");
-  assert.match(lot, /if \(!validation\?\.readyToPublish \|\| publishActionRef\.current\) return/);
+  assert.match(lot, /if \(!validationIsCurrent \|\| publishActionRef\.current\)/);
+  assert.match(lot, /This lot changed after eBay validation[\s\S]*return/);
   assert.match(lot, /publishActionRef\.current = true;[\s\S]*await collectionChanged\("listing"\)[\s\S]*publishActionRef\.current = false/);
   assert.match(lot, /publish\.isPending \|\|[\s\S]*publishing/);
   assert.match(lot, /setPublishedUrl\(result\.listingUrl\)[\s\S]*lifecycle\.discard\(\)/);

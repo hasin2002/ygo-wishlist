@@ -136,6 +136,33 @@ export async function deleteListingImageDraft(ownerId: string, copyId: string, k
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
+/** Copies a private draft beneath another owned Copy without dropping the source. */
+export async function transferListingImageDraft({
+  fromCopyId,
+  key,
+  ownerId,
+  toCopyId,
+}: {
+  fromCopyId: string;
+  key: string;
+  ownerId: string;
+  toCopyId: string;
+}) {
+  assertDraftKey(ownerId, fromCopyId, key);
+  const fileName = key.split("/").at(-1);
+  if (!fileName) throw new Error("The archived listing photo has an invalid key.");
+  const { bucket, client: s3 } = configuration();
+  const destinationKey = `${draftPrefix(ownerId, toCopyId)}/${crypto.randomUUID()}-${fileName}`;
+  await s3.send(new CopyObjectCommand({
+    Bucket: bucket,
+    CopySource: copySource(bucket, key),
+    Key: destinationKey,
+    MetadataDirective: "COPY",
+    TaggingDirective: "COPY",
+  }));
+  return destinationKey;
+}
+
 export async function copyListingImageDraftsToArchive({
   copyId,
   draftKeys,

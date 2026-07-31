@@ -272,6 +272,9 @@ test("Sale flow selects one exact physical Copy and reaches a reviewable confirm
   await page.getByLabel(/Marketplace or buyer/).fill("Browser buyer");
   await page.getByLabel(/Net proceeds/).fill("2.50");
   await page.getByRole("button", { name: "Continue" }).click();
+  const condition = page.getByLabel("Condition");
+  await expect(condition).toBeVisible();
+  await expect(condition.getByRole("option", { name: "All conditions" })).toHaveCount(1);
   const copy = page.getByRole("radio", { name: /Select .*Copy/i }).first();
   await expect(copy).toBeVisible();
   // The radio is deliberately screen-reader-only; its labelled card is the pointer target.

@@ -45,6 +45,7 @@ import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
 import { taskReturnHref } from "@/lib/navigation-intent";
 import { hasFields, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
 import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
+import { copySelectionAvailabilityReason, filterCopySelectionCandidates, pageCopySelection, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import type {
   CardCopy,
   CardPrinting,
@@ -190,18 +191,18 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [query, setQuery] = useState("");
+  const [condition, setCondition] = useState("all");
   const [rarity, setRarity] = useState("all");
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [photoSummaries, setPhotoSummaries] = useState<Record<string, CopyPhotoSummary>>({});
 
-  const availableCopies = useMemo<AvailableCopy[]>(() => {
+  const allCopies = useMemo<AvailableCopy[]>(() => {
     const printings = new Map(source.snapshot.printings.map((printing) => [printing.id, printing]));
     const targets = new Map(source.snapshot.targets.map((target) => [target.id, target]));
     const exposures = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
 
     return source.snapshot.copies.flatMap((copy) => {
-      if (copy.status !== "available") return [];
       const printing = printings.get(copy.printingId);
       const target = printing ? targets.get(printing.targetId) : undefined;
       if (!printing || !target) return [];
@@ -209,43 +210,41 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
     });
   }, [source.snapshot.copies, source.snapshot.copyEbayExposures, source.snapshot.printings, source.snapshot.targets]);
 
+  const selection = useMemo(() => reconcileCopySelection(
+    draft.copyIds,
+    allCopies.map((item) => ({
+      id: item.copy.id,
+      item,
+      reason: copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }),
+    })),
+    { min: draft.kind === "single" ? 1 : 2, max: 100 },
+  ), [allCopies, draft.copyIds, draft.kind]);
+  const availableCopies = useMemo(() => allCopies.filter((item) => (
+    copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }) === null
+  )), [allCopies]);
   const rarityOptions = useMemo(
     () => Array.from(new Set(availableCopies.map((item) => item.target.rarity).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
     [availableCopies],
   );
-
-  const selectedCopies = useMemo(
-    () => availableCopies.filter((item) => draft.copyIds.includes(item.copy.id)),
-    [availableCopies, draft.copyIds],
+  const conditionOptions = useMemo(
+    () => Array.from(new Set(availableCopies.map((item) => item.copy.condition))).sort((left, right) => left.localeCompare(right)),
+    [availableCopies],
   );
+
+  const selectedCopies = selection.selected;
   const copiesForTarget = (item: AvailableCopy) => source.snapshot.copies.filter((copy) => {
     const printing = source.snapshot.printings.find((candidate) => candidate.id === copy.printingId);
     return printing?.targetId === item.target.id;
   });
 
-  const filteredCopies = useMemo(() => {
-    const search = query.trim().toLowerCase();
-    return availableCopies.filter((item) => {
-      if (selectedOnly && !draft.copyIds.includes(item.copy.id)) return false;
-      if (rarity !== "all" && item.target.rarity !== rarity) return false;
-      const exposure = item.exposure
-        ? ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount)
-        : null;
-      if (!search) return true;
-      return [
-        item.target.name,
-        item.target.rarity,
-        item.target.edition,
-        item.printing.setName,
-        item.printing.setCode,
-        item.copy.condition,
-        exposure?.label ?? "exposure unavailable",
-      ].some((value) => value.toLowerCase().includes(search));
-    });
-  }, [availableCopies, draft.copyIds, query, rarity, selectedOnly]);
-
-  const pageCount = Math.max(1, Math.ceil(filteredCopies.length / salePageSize));
-  const visibleCopies = filteredCopies.slice((page - 1) * salePageSize, page * salePageSize);
+  const filteredCopies = useMemo(() => filterCopySelectionCandidates(availableCopies, {
+    condition, query, rarity, selectedIds: selection.selectedIds, selectedOnly,
+    searchTerms: (item) => item.exposure
+      ? [ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount).label, ebayExposureSummary(item.exposure)]
+      : ["exposure unavailable"],
+  }), [availableCopies, condition, query, rarity, selectedOnly, selection.selectedIds]);
+  const pagination = pageCopySelection(filteredCopies, page, salePageSize);
+  const { currentPage, items: visibleCopies, pageCount, resultEnd, resultStart } = pagination;
   const photoCopyIds = Array.from(new Set([...visibleCopies, ...selectedCopies].map((item) => item.copy.id))).join(",");
 
   const libraryImpacts = useMemo<LibraryImpact[]>(() => source.snapshot.targets.flatMap((target) => {
@@ -287,8 +286,9 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   }
 
   function selectionError() {
-    if (draft.kind === "single" && draft.copyIds.length !== 1) return "Choose exactly one physical copy for a Single card sale.";
-    if (draft.kind === "bulk" && draft.copyIds.length < 2) return "Choose at least two physical copies for a Bulk card sale.";
+    if (selection.issues.length) return selection.issues[0]!.message;
+    if (draft.kind === "single" && selection.selectedIds.length !== 1) return "Choose exactly one physical copy for a Single card sale.";
+    if (draft.kind === "bulk" && selection.selectedIds.length < 2) return "Choose at least two physical copies for a Bulk card sale.";
     return null;
   }
 
@@ -316,7 +316,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
       source: draft.source.trim(),
       netProceedsPence: poundsToPence(draft.proceeds),
       notes: draft.notes.trim(),
-      copyIds: draft.copyIds,
+      copyIds: selection.selectedIds,
     });
     setPending(false);
     if (!result.ok) {
@@ -336,6 +336,10 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   }
 
   function toggleCopy(copyId: string, checked: boolean) {
+    if (checked && draft.kind === "bulk" && selection.selectedIds.length >= 100) {
+      setError("A Bulk card sale can contain no more than 100 physical Copies.");
+      return;
+    }
     setError(null);
     setDraft((current) => ({
       ...current,
@@ -360,6 +364,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
 
   function clearInventoryFilters() {
     setQuery("");
+    setCondition("all");
     setRarity("all");
     setSelectedOnly(false);
     setPage(1);
@@ -368,10 +373,8 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   const saleLabel = draft.kind === "single" ? "Single card" : "Bulk cards";
   const saleRecordName = draft.recordName.trim() || generatedSaleRecordName(selectedCopies.map((item) => item.target.name));
   const requiredCopies = draft.kind === "single" ? 1 : 2;
-  const remainingCopies = Math.max(0, requiredCopies - draft.copyIds.length);
-  const selectionComplete = draft.kind !== null && remainingCopies === 0;
-  const resultStart = filteredCopies.length ? (page - 1) * salePageSize + 1 : 0;
-  const resultEnd = Math.min(page * salePageSize, filteredCopies.length);
+  const remainingCopies = Math.max(0, requiredCopies - selection.selectedIds.length);
+  const selectionComplete = draft.kind !== null && selection.valid;
 
   return (
     <DraftHydrationBoundary ready={lifecycle.hydrated}>
@@ -484,7 +487,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
                   {selectionComplete ? <CheckCircle2 className="size-4" /> : <Info className="size-4" />}
                   {selectionComplete ? "Ready to continue" : `${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} required`}
                 </span>
-                {draft.kind === "bulk" && draft.copyIds.length === 1 ? (
+                {draft.kind === "bulk" && selection.selectedIds.length === 1 ? (
                   <button
                     className="inline-flex min-h-11 items-center rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-zinc-500 hover:bg-zinc-100"
                     onClick={switchToSingleSale}
@@ -496,7 +499,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.3fr)_minmax(180px,0.35fr)_auto] lg:items-end">
               <label>
                 <span className="text-sm font-bold text-zinc-700">Search cards</span>
                 <div className="relative mt-1">
@@ -509,6 +512,13 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
                     value={query}
                   />
                 </div>
+              </label>
+              <label>
+                <span className="text-sm font-bold text-zinc-700">Condition</span>
+                <select className={fieldClass} onChange={(event) => { setCondition(event.target.value); setPage(1); }} value={condition}>
+                  <option value="all">All conditions</option>
+                  {conditionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
               </label>
               <label>
                 <span className="text-sm font-bold text-zinc-700">Rarity</span>
@@ -525,13 +535,13 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
 
             <div aria-atomic="true" aria-live="polite" className="mt-4 flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <strong>{draft.copyIds.length} {draft.copyIds.length === 1 ? "copy" : "copies"} selected</strong>
+                <strong>{selection.selectedIds.length} {selection.selectedIds.length === 1 ? "copy" : "copies"} selected</strong>
                 <span className="mt-0.5 block text-sm font-medium text-zinc-500">
                   {selectionComplete
                     ? "Selection complete"
                     : draft.kind === "single"
                       ? "Choose one copy to continue"
-                      : draft.copyIds.length === 1
+                      : selection.selectedIds.length === 1
                         ? "Bulk sales need two or more copies. Add another card or switch to Single sale."
                         : `Choose ${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} to continue`}
                 </span>
@@ -539,10 +549,25 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
               <span className="text-sm font-medium text-zinc-500">Showing {resultStart}–{resultEnd} of {filteredCopies.length}</span>
             </div>
 
+            {selection.issues.length ? (
+              <div aria-live="assertive" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+                <strong className="block">Selected Copies need attention</strong>
+                <ul className="mt-2 grid gap-2">
+                  {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? "selection"}:${index}`}>
+                    <span>{issue.message}</span>
+                    {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => {
+                      if (issue.code === "duplicate") setDraft((current) => ({ ...current, copyIds: removeDuplicateCopySelectionId(current.copyIds, issue.copyId!) }));
+                      else toggleCopy(issue.copyId!, false);
+                    }} type="button">{issue.code === "duplicate" ? "Remove duplicate" : "Remove"}</button> : null}
+                  </li>)}
+                </ul>
+              </div>
+            ) : null}
+
             {visibleCopies.length ? (
               <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
                 {visibleCopies.map((item, index) => {
-                  const selected = draft.copyIds.includes(item.copy.id);
+                  const selected = selection.selectedIds.includes(item.copy.id);
                   const exposurePresentation = item.exposure
                     ? ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount)
                     : null;
@@ -608,9 +633,9 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
 
             {filteredCopies.length > salePageSize ? (
               <nav aria-label="Card results pages" className="mt-4 flex items-center justify-between gap-3 border-t border-zinc-200 pt-4">
-                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /> Previous</button>
-                <span className="text-sm font-bold text-zinc-600">Page {page} of {pageCount}</span>
-                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={page === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button">Next <ChevronRight className="size-4" /></button>
+                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /> Previous</button>
+                <span className="text-sm font-bold text-zinc-600">Page {currentPage} of {pageCount}</span>
+                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button">Next <ChevronRight className="size-4" /></button>
               </nav>
             ) : null}
 

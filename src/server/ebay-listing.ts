@@ -24,10 +24,12 @@ import {
   readListingImageDraft,
   storeListingImageDraft,
   storeRemoteListingImageDraft,
+  transferListingImageDraft,
 } from "@/server/ebay-listing-images";
 import { parseApprovedRemoteImageUrl } from "@/server/remote-images";
 import { readCardInventoryImage } from "@/server/card-inventory-images";
 import { getEbaySellerAccessToken } from "@/server/ebay-seller";
+import { CopySelectionError, lockReconciledCopies } from "@/server/records/copy-selection";
 import {
   EbayListingReconciliationError,
   ebayListingStatusSummary,
@@ -494,6 +496,7 @@ export async function publishEbayListing(ownerId: string, details: EbayListingDe
 
 function assertLotCopyIds(copyIds: string[], imageDraftCopyId: string) {
   if (copyIds.length < 2) throw new EbayListingError("Choose at least two physical Copies for a card lot.");
+  if (copyIds.length > 100) throw new EbayListingError("Choose no more than 100 physical Copies for a card lot.");
   if (new Set(copyIds).size !== copyIds.length) throw new EbayListingError("Each physical Copy can appear only once in a card lot.");
   if (!copyIds.includes(imageDraftCopyId)) {
     throw new EbayListingError("The Copy holding this lot's image drafts must remain in the card lot.");
@@ -502,12 +505,11 @@ function assertLotCopyIds(copyIds: string[], imageDraftCopyId: string) {
 
 async function recheckLotMembers(ownerId: string, copyIds: string[]) {
   await db.transaction(async (tx) => {
-    const copies = await tx.select().from(cardCopies).where(and(
-      eq(cardCopies.ownerId, ownerId),
-      inArray(cardCopies.id, copyIds),
-    )).for("update");
-    if (copies.length !== copyIds.length || copies.some((copy) => copy.status !== "available")) {
-      throw new EbayListingError("One or more selected Copies is no longer available. Refresh the lot and review it again.");
+    try {
+      await lockReconciledCopies(tx, ownerId, copyIds, { min: 2, max: 100 });
+    } catch (error) {
+      if (error instanceof CopySelectionError) throw new EbayListingError(`${error.message} Refresh the lot and review it again.`);
+      throw error;
     }
     const related = await tx.select({ copyId: ebayListingMembers.copyId, fulfilmentPosition: ebayListingMembers.fulfilmentPosition, listing: ebayListings, memberId: ebayListingMembers.id })
       .from(ebayListingMembers)
@@ -558,8 +560,12 @@ export async function publishEbayLotListing(ownerId: string, details: EbayLotLis
   let publishedItemId: string | null = null;
   try {
     await db.transaction(async (tx) => {
-      const copies = await tx.select().from(cardCopies).where(and(eq(cardCopies.ownerId, ownerId), inArray(cardCopies.id, details.copyIds))).for("update");
-      if (copies.length !== details.copyIds.length || copies.some((copy) => copy.status !== "available")) throw new EbayListingError("A selected Copy changed while this lot was being published. The remote listing needs review.");
+      try {
+        await lockReconciledCopies(tx, ownerId, details.copyIds, { min: 2, max: 100 });
+      } catch (error) {
+        if (error instanceof CopySelectionError) throw new EbayListingError(`${error.message} The remote listing needs review.`);
+        throw error;
+      }
       const related = await tx.select({ copyId: ebayListingMembers.copyId, fulfilmentPosition: ebayListingMembers.fulfilmentPosition, listing: ebayListings, memberId: ebayListingMembers.id })
         .from(ebayListingMembers)
         .innerJoin(ebayListings, and(eq(ebayListingMembers.listingId, ebayListings.id), eq(ebayListingMembers.ownerId, ebayListings.ownerId)))
@@ -791,6 +797,16 @@ export async function getEbayListingImageDraft(ownerId: string, copyId: string, 
 export async function removeEbayListingImageDraft(ownerId: string, copyId: string, archiveKey: string) {
   await loadOwnedCopy(ownerId, copyId);
   await deleteListingImageDraft(ownerId, copyId, archiveKey);
+}
+
+export async function transferEbayListingImageDraft(
+  ownerId: string,
+  fromCopyId: string,
+  toCopyId: string,
+  archiveKey: string,
+) {
+  await loadOwnedCopy(ownerId, toCopyId);
+  return transferListingImageDraft({ fromCopyId, key: archiveKey, ownerId, toCopyId });
 }
 
 async function listingCopyMetadata(ownerId: string, copyId: string) {
