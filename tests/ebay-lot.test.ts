@@ -167,6 +167,12 @@ test("lot UI keeps focused actions in dialogs and automatically checks selected 
   assert.match(source, /sticky=\{false\}/);
   assert.match(source, /sourceInventoryKey/);
   assert.match(source, /Clear all/);
+  assert.match(source, /Select 2–100 physical Copies/);
+  assert.match(source, /Condition[\s\S]*All conditions/);
+  assert.match(source, /setCondition\("all"\)/);
+  assert.match(source, /fromCopyId: copyId[\s\S]*toCopyId: replacementCopyId/);
+  assert.match(source, /method: "PATCH"/);
+  assert.match(source, /Your staged lot photos are being kept safe/);
 });
 
 test("batch inventory-photo response includes every ordered photo for the picker", async () => {

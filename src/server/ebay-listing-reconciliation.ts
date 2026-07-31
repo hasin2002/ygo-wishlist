@@ -5,6 +5,7 @@ import {
   asc,
   eq,
   gte,
+  inArray,
   isNull,
   lte,
   or,
@@ -255,6 +256,7 @@ function paymentStateForRemoteTransaction(
 
 async function persistRemoteOrderLines({
   listingId,
+  members,
   ownerId,
   remote,
   timestamp,
@@ -263,6 +265,7 @@ async function persistRemoteOrderLines({
 }: {
   enabled: boolean;
   listingId: string;
+  members: Array<typeof ebayListingMembers.$inferSelect>;
   ownerId: string;
   remote: EbayRemoteListing;
   timestamp: Date;
@@ -270,14 +273,6 @@ async function persistRemoteOrderLines({
 }) {
   if (!enabled) return { failureReasons: [] as EbayCompositionReviewReason[] };
   const failureReasons = new Set<EbayCompositionReviewReason>();
-  const members = await tx
-      .select()
-      .from(ebayListingMembers)
-      .where(and(
-        eq(ebayListingMembers.ownerId, ownerId),
-        eq(ebayListingMembers.listingId, listingId),
-      ))
-      .orderBy(asc(ebayListingMembers.fulfilmentPosition));
 
   for (const transaction of remote.transactions) {
       if (!transaction.orderLineItemId && !transaction.transactionId) continue;
@@ -509,6 +504,18 @@ export async function reconcileEbayListing({
 
   const attemptedAt = new Date();
   const compositionSchemaReady = await hasEbayCompositionSchema();
+  const knownMembers = compositionSchemaReady
+    ? await db.select({
+        copyId: ebayListingMembers.copyId,
+      }).from(ebayListingMembers).where(and(
+        eq(ebayListingMembers.ownerId, ownerId),
+        eq(ebayListingMembers.listingId, listingId),
+      ))
+    : [];
+  const expectedCopyIds = Array.from(new Set([
+    knownListing.copyId,
+    ...knownMembers.map((member) => member.copyId),
+  ])).sort();
   let remote: EbayRemoteListing;
   try {
     remote = await getEbayRemoteListing(ownerId, knownListing.itemId);
@@ -533,6 +540,24 @@ export async function reconcileEbayListing({
   }
 
   return db.transaction(async (tx) => {
+    await tx.select({ id: cardCopies.id }).from(cardCopies).where(and(
+      eq(cardCopies.ownerId, ownerId),
+      inArray(cardCopies.id, expectedCopyIds),
+    )).orderBy(asc(cardCopies.id)).for("update");
+    const currentMembers = compositionSchemaReady
+      ? await tx.select().from(ebayListingMembers).where(and(
+          eq(ebayListingMembers.ownerId, ownerId),
+          eq(ebayListingMembers.listingId, listingId),
+        )).orderBy(
+          asc(ebayListingMembers.copyId),
+          asc(ebayListingMembers.id),
+        ).for("update")
+      : [];
+    if (currentMembers.some((member) => !expectedCopyIds.includes(member.copyId))) {
+      throw new EbayListingReconciliationError(
+        "This listing's physical Copy links changed during reconciliation. Refresh and try again.",
+      );
+    }
     const [currentRow] = await tx
       .select(legacySafeEbayListingSelection)
       .from(ebayListings)
@@ -549,6 +574,7 @@ export async function reconcileEbayListing({
     const normalized = await persistRemoteOrderLines({
       enabled: compositionSchemaReady,
       listingId: currentRow.id,
+      members: currentMembers,
       ownerId,
       remote,
       timestamp: attemptedAt,

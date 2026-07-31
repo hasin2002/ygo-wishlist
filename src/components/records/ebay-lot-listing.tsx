@@ -59,7 +59,7 @@ import {
   copyDisplayLabel,
   copyShortReference,
 } from "@/lib/records/copy-display";
-import { filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reconcileCopySelection } from "@/lib/records/copy-selection";
+import { copySelectionAvailabilityReason, filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reanchorCopySelectionPhotos, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import { trpc } from "@/trpc/client";
 import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
 import { taskReturnHref } from "@/lib/navigation-intent";
@@ -409,6 +409,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const setDraft = lifecycle.setData;
   const [step, setStep] = useState(1);
   const [query, setQuery] = useState("");
+  const [condition, setCondition] = useState("all");
   const [rarity, setRarity] = useState("all");
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [page, setPage] = useState(1);
@@ -436,6 +437,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const [preparingPhotos, setPreparingPhotos] = useState(false);
   const [removingPhotoId, setRemovingPhotoId] = useState<string | null>(null);
   const [reorderingPhotos, setReorderingPhotos] = useState(false);
+  const [movingPhotoAnchor, setMovingPhotoAnchor] = useState(false);
   const validate = trpc.ebay.validateLot.useMutation();
   const publish = trpc.ebay.publishLot.useMutation();
 
@@ -471,11 +473,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     candidates.map((item) => ({
       id: item.copy.id,
       item,
-      reason: item.copy.status !== "available"
-        ? `Copy #${copyShortReference(item.copy.id)} is ${item.copy.status === "sold" ? "already sold" : "not available"}. Remove or replace it.`
-        : item.exposure?.action.disposition === "blocked"
-          ? `Copy #${copyShortReference(item.copy.id)} is blocked: ${item.exposure.action.reason}`
-          : null,
+      reason: copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }),
     })),
     mixedLotCopyBounds,
   ), [candidates, draft.copyIds]);
@@ -527,11 +525,9 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const effectivePrice = draft.priceOrigin === "estimate"
     ? estimatedPriceText
     : draft.price;
-  const eligibleCandidates = candidates.filter(
-    ({ copy, exposure }) =>
-      copy.status === "available" &&
-      exposure?.action.disposition !== "blocked",
-  );
+  const eligibleCandidates = candidates.filter(({ copy, exposure }) => (
+    copySelectionAvailabilityReason({ copyId: copy.id, exposure, status: copy.status }) === null
+  ));
   const rarityOptions = Array.from(
     new Set(
       eligibleCandidates
@@ -539,8 +535,14 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
         .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
+  const conditionOptions = Array.from(
+    new Set(eligibleCandidates.map((item) => item.copy.condition)),
+  ).sort((left, right) => left.localeCompare(right));
   const filtered = filterCopySelectionCandidates(eligibleCandidates, {
-    query, rarity, selectedIds: selection.selectedIds, selectedOnly,
+    condition, query, rarity, selectedIds: selection.selectedIds, selectedOnly,
+    searchTerms: (item) => item.exposure
+      ? [ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount).label, ebayExposureSummary(item.exposure)]
+      : ["exposure unavailable"],
   });
   const { currentPage, items: visible, pageCount, resultEnd, resultStart } = pageCopySelection(filtered, page, pageSize);
   const visibleFees =
@@ -557,7 +559,8 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     savedPhotosLoading ||
     clearingSelection ||
     removingPhotoId !== null ||
-    reorderingPhotos;
+    reorderingPhotos ||
+    movingPhotoAnchor;
   const availablePhotoSlots = Math.max(0, 12 - draft.photos.length);
 
   function updateDraft(next: Partial<Draft>) {
@@ -573,29 +576,59 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     });
   }
 
-  function toggleCopy(copyId: string, checked: boolean) {
+  async function toggleCopy(copyId: string, checked: boolean) {
     if (checked && selection.selectedIds.length >= mixedLotCopyBounds.max) {
       setError("A mixed card lot can contain no more than 100 physical Copies. Remove or reorder selected Copies before adding another.");
       return;
     }
+    let photoAnchorCopyId = draft.photoAnchorCopyId;
+    let photos = draft.photos;
     if (
       !checked &&
       draft.photoAnchorCopyId === copyId &&
       draft.photos.length
     ) {
-      setError(
-        "Remove the lot photos before removing their anchor Copy from this manifest.",
-      );
-      return;
+      const replacementCopyId = selection.selectedIds.find((id) => id !== copyId);
+      if (!replacementCopyId) {
+        setError("Choose a replacement Copy before removing the photo anchor. Your staged lot photos are being kept safe.");
+        return;
+      }
+      setMovingPhotoAnchor(true);
+      try {
+        const response = await fetch("/api/ebay/image", {
+          body: JSON.stringify({
+            archiveKeys: draft.photos.map((photo) => photo.archiveKey),
+            fromCopyId: copyId,
+            toCopyId: replacementCopyId,
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "PATCH",
+        });
+        const result = await response.json() as {
+          message?: string;
+          photos?: Array<{ archiveKey: string; previousArchiveKey: string; previewUrl: string }>;
+        };
+        const movedPhotos = result.photos
+          ? reanchorCopySelectionPhotos(draft.photos, result.photos)
+          : null;
+        if (!response.ok || !movedPhotos) {
+          throw new Error(result.message || "Listing photos could not be moved safely.");
+        }
+        photos = movedPhotos;
+        photoAnchorCopyId = replacementCopyId;
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Listing photos could not be moved safely.");
+        return;
+      } finally {
+        setMovingPhotoAnchor(false);
+      }
     }
     updateDraft({
       copyIds: checked
         ? Array.from(new Set([...draft.copyIds, copyId]))
         : draft.copyIds.filter((id) => id !== copyId),
-      photoAnchorCopyId:
-        !checked && draft.photoAnchorCopyId === copyId
-          ? null
-          : draft.photoAnchorCopyId,
+      photoAnchorCopyId,
+      photos,
     });
     setError(null);
   }
@@ -1173,7 +1206,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
       {step === 1 ? (
         <StepPanel step={step}>
           <FormSection
-            description="Select every physical Copy the buyer will receive, then arrange the exact order used in the listing."
+            description="Select 2–100 physical Copies the buyer will receive, then arrange the exact order used in the listing."
             number={1}
             title="Choose Copies"
           >
@@ -1186,7 +1219,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   <div>
                     <strong>{selected.length} {selected.length === 1 ? "copy" : "copies"} selected</strong>
                     <span className="mt-0.5 block text-sm font-medium text-zinc-500">
-                      {selection.valid ? "Selection complete" : selection.issues.length ? "Remove or replace the unavailable selected Copy" : "Choose at least two copies to continue"}
+                      {selection.valid ? "Selection complete" : selection.issues.length ? "Remove or replace the unavailable selected Copy" : "Choose 2–100 Copies to continue"}
                     </span>
                   </div>
                   <span className={`inline-flex min-h-9 w-fit items-center gap-2 rounded-full px-3 text-sm font-bold ${selection.valid ? "bg-emerald-50 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
@@ -1199,15 +1232,18 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   <div aria-live="assertive" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
                     <strong className="block">Selected Copies need attention</strong>
                     <ul className="mt-2 grid gap-2">
-                      {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? index}`}>
+                      {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? "selection"}:${index}`}>
                         <span>{issue.message}</span>
-                        {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => toggleCopy(issue.copyId!, false)} type="button">Remove</button> : null}
+                        {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => {
+                          if (issue.code === "duplicate") updateDraft({ copyIds: removeDuplicateCopySelectionId(draft.copyIds, issue.copyId!) });
+                          else toggleCopy(issue.copyId!, false);
+                        }} type="button">{issue.code === "duplicate" ? "Remove duplicate" : "Remove"}</button> : null}
                       </li>)}
                     </ul>
                   </div>
                 ) : null}
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.3fr)_minmax(180px,0.35fr)_auto] lg:items-end">
                   <label>
                     <span className="text-sm font-bold text-zinc-700">Search cards</span>
                     <div className="relative mt-1">
@@ -1223,6 +1259,20 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                         value={query}
                       />
                     </div>
+                  </label>
+                  <label>
+                    <span className="text-sm font-bold text-zinc-700">Condition</span>
+                    <select
+                      className={fieldClass}
+                      onChange={(event) => {
+                        setCondition(event.target.value);
+                        setPage(1);
+                      }}
+                      value={condition}
+                    >
+                      <option value="all">All conditions</option>
+                      {conditionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
                   </label>
                   <label>
                     <span className="text-sm font-bold text-zinc-700">Rarity</span>
@@ -1338,6 +1388,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                       className="mt-2 min-h-11 rounded-md px-3 text-sm font-bold text-[#8a1f2d] hover:bg-rose-50"
                       onClick={() => {
                         setQuery("");
+                        setCondition("all");
                         setRarity("all");
                         setSelectedOnly(false);
                         setPage(1);

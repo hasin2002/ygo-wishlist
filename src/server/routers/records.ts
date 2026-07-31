@@ -43,6 +43,7 @@ import type {
 } from "@/lib/records/types";
 import {
   EbayListingReconciliationError,
+  ebayListingStatusSummary,
   reconcileEbayListing,
 } from "@/server/ebay-listing-reconciliation";
 import {
@@ -87,6 +88,65 @@ async function listingIdsForCopies(
   ));
   for (const listing of legacyRows) listingIds.add(listing.id);
   return [...listingIds];
+}
+
+/** Locks the exact listing relationships after Copy rows are locked. */
+async function lockListingsForCopies(
+  tx: Transaction,
+  ownerId: string,
+  copyIds: string[],
+  compositionSchemaReady: boolean,
+) {
+  const relations = new Map<string, {
+    copyId: string;
+    listing: typeof ebayListings.$inferSelect;
+  }>();
+  const memberRelations: Array<{ copyId: string; listingId: string }> = [];
+  if (compositionSchemaReady) {
+    const members = await tx.select({
+      copyId: ebayListingMembers.copyId,
+      listingId: ebayListingMembers.listingId,
+    }).from(ebayListingMembers).where(and(
+      eq(ebayListingMembers.ownerId, ownerId),
+      inArray(ebayListingMembers.copyId, copyIds),
+    )).orderBy(
+      asc(ebayListingMembers.copyId),
+      asc(ebayListingMembers.listingId),
+    ).for("update");
+    memberRelations.push(...members);
+  }
+  const memberListingIds = Array.from(
+    new Set(memberRelations.map((relation) => relation.listingId)),
+  );
+  const listings = await tx.select().from(ebayListings).where(and(
+    eq(ebayListings.ownerId, ownerId),
+    or(
+      inArray(ebayListings.copyId, copyIds),
+      memberListingIds.length
+        ? inArray(ebayListings.id, memberListingIds)
+        : undefined,
+    ),
+  )).orderBy(asc(ebayListings.id)).for("update");
+  const listingById = new Map(listings.map((listing) => [listing.id, listing]));
+  for (const relation of memberRelations) {
+    const listing = listingById.get(relation.listingId);
+    if (listing) {
+      relations.set(`${relation.copyId}:${listing.id}`, {
+        copyId: relation.copyId,
+        listing,
+      });
+    }
+  }
+  const selectedCopyIds = new Set(copyIds);
+  for (const listing of listings) {
+    if (selectedCopyIds.has(listing.copyId)) {
+      relations.set(`${listing.copyId}:${listing.id}`, {
+        copyId: listing.copyId,
+        listing,
+      });
+    }
+  }
+  return [...relations.values()];
 }
 
 const productEditionSchema = z.enum(["1st Edition", "Unlimited Edition", "Limited Edition"]);
@@ -870,30 +930,45 @@ export const recordsRouter = router({
     if (!await hasEbayCompositionSchema()) {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "eBay Copy links are not ready yet. Refresh and try again." });
     }
+    const [knownListing] = await db.select({
+      copyId: ebayListings.copyId,
+    }).from(ebayListings).where(and(
+      eq(ebayListings.id, input.listingId),
+      eq(ebayListings.ownerId, ctx.collectionOwnerId),
+    )).limit(1);
+    if (!knownListing) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "That eBay listing was not found." });
+    }
     const now = new Date();
     return db.transaction(async (tx) => {
+      const [copy] = await tx.select().from(cardCopies).where(and(
+        eq(cardCopies.id, knownListing.copyId),
+        eq(cardCopies.ownerId, ctx.collectionOwnerId),
+      )).orderBy(asc(cardCopies.id)).for("update").limit(1);
+      if (!copy) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The saved physical Copy no longer exists, so this link needs investigation." });
+      const members = await tx.select().from(ebayListingMembers).where(and(
+        eq(ebayListingMembers.ownerId, ctx.collectionOwnerId),
+        eq(ebayListingMembers.listingId, input.listingId),
+      )).orderBy(
+        asc(ebayListingMembers.copyId),
+        asc(ebayListingMembers.id),
+      ).for("update");
       const [listing] = await tx.select().from(ebayListings).where(and(
         eq(ebayListings.id, input.listingId),
         eq(ebayListings.ownerId, ctx.collectionOwnerId),
-      )).for("update").limit(1);
+      )).orderBy(asc(ebayListings.id)).for("update").limit(1);
       if (!listing) throw new TRPCError({ code: "NOT_FOUND", message: "That eBay listing was not found." });
+      if (listing.copyId !== copy.id) {
+        throw new TRPCError({ code: "CONFLICT", message: "This listing's saved physical Copy changed. Refresh and review it again." });
+      }
       if (
         listing.kind !== "individual"
       ) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This listing needs investigation and cannot be repaired automatically." });
       }
-      const members = await tx.select().from(ebayListingMembers).where(and(
-        eq(ebayListingMembers.ownerId, ctx.collectionOwnerId),
-        eq(ebayListingMembers.listingId, listing.id),
-      )).for("update");
       if (members.length > 0) {
         throw new TRPCError({ code: "CONFLICT", message: "This listing already has a physical Copy link. Refresh and review its latest status." });
       }
-      const [copy] = await tx.select().from(cardCopies).where(and(
-        eq(cardCopies.id, listing.copyId),
-        eq(cardCopies.ownerId, ctx.collectionOwnerId),
-      )).for("update").limit(1);
-      if (!copy) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "The saved physical Copy no longer exists, so this link needs investigation." });
       const memberId = `ebay-member-${randomUUID()}`;
       await tx.insert(ebayListingMembers).values({
         copyId: copy.id,
@@ -1352,22 +1427,17 @@ export const recordsRouter = router({
   createSale: authenticatedProcedure.input(saleSchema).mutation(async ({ ctx, input }) => {
     const ownerId = ctx.collectionOwnerId;
     const uniqueCopyIds = Array.from(new Set(input.copyIds));
+    if (uniqueCopyIds.length !== input.copyIds.length) {
+      conflict("Each physical Copy can appear only once. The Sale has not been saved.");
+    }
     const saleId = id("record");
     const now = new Date();
     const compositionSchemaReady = await hasEbayCompositionSchema();
     const listingIds = await listingIdsForCopies(ownerId, uniqueCopyIds);
-    const trackedListings = listingIds.length ? await db.select({
-      id: ebayListings.id,
-    }).from(ebayListings).where(and(
+    const trackedListings = listingIds.length ? (await db.select().from(ebayListings).where(and(
       eq(ebayListings.ownerId, ownerId),
       inArray(ebayListings.id, listingIds),
-      or(
-        eq(ebayListings.status, "active"),
-        eq(ebayListings.listingState, "unknown"),
-        eq(ebayListings.saleState, "pending"),
-        eq(ebayListings.saleState, "needs_review"),
-      ),
-    )) : [];
+    ))).filter((listing) => !ebayListingStatusSummary(listing).relistAllowed) : [];
     if (trackedListings.length) await requireEbayExternalCapability(ctx.session);
     for (const listing of trackedListings) {
       try {
@@ -1379,28 +1449,6 @@ export const recordsRouter = router({
         throw error;
       }
     }
-    const unresolvedListings = listingIds.length ? await db.select({
-      id: ebayListings.id,
-      copyId: ebayListings.copyId,
-      saleState: ebayListings.saleState,
-    }).from(ebayListings).where(and(
-      eq(ebayListings.ownerId, ownerId),
-      inArray(ebayListings.id, listingIds),
-      or(
-        eq(ebayListings.status, "active"),
-        eq(ebayListings.listingState, "unknown"),
-        eq(ebayListings.saleState, "pending"),
-        eq(ebayListings.saleState, "needs_review"),
-      ),
-    )) : [];
-    const unpaidOrUncertain = unresolvedListings.filter((listing) => listing.saleState !== "paid");
-    if (unpaidOrUncertain.length) {
-      conflict("One or more selected Copies still has a live, pending, or uncertain eBay listing. Resolve it before recording this Sale.");
-    }
-    if (unresolvedListings.length && normalize(input.source) !== "ebay") {
-      conflict("This Sale matches a paid eBay listing. Set the Sale source to eBay so the listing and Record can be linked.");
-    }
-
     await db.transaction(async (tx) => {
       let copies;
       try {
@@ -1408,6 +1456,27 @@ export const recordsRouter = router({
       } catch (error) {
         if (error instanceof CopySelectionError) conflict(`${error.message} The Sale has not been saved.`);
         throw error;
+      }
+      const lockedRelations = await lockListingsForCopies(
+        tx,
+        ownerId,
+        input.copyIds,
+        compositionSchemaReady,
+      );
+      const unresolvedListings = Array.from(new Map(
+        lockedRelations
+          .map((relation) => relation.listing)
+          .filter((listing) => !ebayListingStatusSummary(listing).relistAllowed)
+          .map((listing) => [listing.id, listing]),
+      ).values());
+      const unpaidOrUncertain = unresolvedListings.filter(
+        (listing) => listing.saleState !== "paid",
+      );
+      if (unpaidOrUncertain.length) {
+        conflict("One or more selected Copies still has a live, pending, or uncertain eBay listing. Resolve it before recording this Sale.");
+      }
+      if (unresolvedListings.length && normalize(input.source) !== "ebay") {
+        conflict("This Sale matches a paid eBay listing. Set the Sale source to eBay so the listing and Record can be linked.");
       }
       let normalizedPaidLineIds: string[] | null = null;
       if (unresolvedListings.length && compositionSchemaReady) {

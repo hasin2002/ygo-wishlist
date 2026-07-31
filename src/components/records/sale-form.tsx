@@ -45,7 +45,7 @@ import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
 import { taskReturnHref } from "@/lib/navigation-intent";
 import { hasFields, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
 import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
-import { filterCopySelectionCandidates, pageCopySelection, reconcileCopySelection } from "@/lib/records/copy-selection";
+import { copySelectionAvailabilityReason, filterCopySelectionCandidates, pageCopySelection, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import type {
   CardCopy,
   CardPrinting,
@@ -191,6 +191,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [query, setQuery] = useState("");
+  const [condition, setCondition] = useState("all");
   const [rarity, setRarity] = useState("all");
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [page, setPage] = useState(1);
@@ -214,19 +215,19 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
     allCopies.map((item) => ({
       id: item.copy.id,
       item,
-      reason: item.copy.status !== "available"
-        ? `Copy #${copyShortReference(item.copy.id)} is ${item.copy.status === "sold" ? "already sold" : "not available"}. Remove or replace it.`
-        : item.exposure?.action.disposition === "blocked"
-          ? `Copy #${copyShortReference(item.copy.id)} is blocked: ${item.exposure.action.reason}`
-          : null,
+      reason: copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }),
     })),
     { min: draft.kind === "single" ? 1 : 2, max: 100 },
   ), [allCopies, draft.copyIds, draft.kind]);
   const availableCopies = useMemo(() => allCopies.filter((item) => (
-    item.copy.status === "available" && item.exposure?.action.disposition !== "blocked"
+    copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }) === null
   )), [allCopies]);
   const rarityOptions = useMemo(
     () => Array.from(new Set(availableCopies.map((item) => item.target.rarity).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
+    [availableCopies],
+  );
+  const conditionOptions = useMemo(
+    () => Array.from(new Set(availableCopies.map((item) => item.copy.condition))).sort((left, right) => left.localeCompare(right)),
     [availableCopies],
   );
 
@@ -237,8 +238,11 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   });
 
   const filteredCopies = useMemo(() => filterCopySelectionCandidates(availableCopies, {
-    query, rarity, selectedIds: selection.selectedIds, selectedOnly,
-  }), [availableCopies, query, rarity, selectedOnly, selection.selectedIds]);
+    condition, query, rarity, selectedIds: selection.selectedIds, selectedOnly,
+    searchTerms: (item) => item.exposure
+      ? [ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount).label, ebayExposureSummary(item.exposure)]
+      : ["exposure unavailable"],
+  }), [availableCopies, condition, query, rarity, selectedOnly, selection.selectedIds]);
   const pagination = pageCopySelection(filteredCopies, page, salePageSize);
   const { currentPage, items: visibleCopies, pageCount, resultEnd, resultStart } = pagination;
   const photoCopyIds = Array.from(new Set([...visibleCopies, ...selectedCopies].map((item) => item.copy.id))).join(",");
@@ -360,6 +364,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
 
   function clearInventoryFilters() {
     setQuery("");
+    setCondition("all");
     setRarity("all");
     setSelectedOnly(false);
     setPage(1);
@@ -494,7 +499,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] lg:items-end">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.3fr)_minmax(180px,0.35fr)_auto] lg:items-end">
               <label>
                 <span className="text-sm font-bold text-zinc-700">Search cards</span>
                 <div className="relative mt-1">
@@ -507,6 +512,13 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
                     value={query}
                   />
                 </div>
+              </label>
+              <label>
+                <span className="text-sm font-bold text-zinc-700">Condition</span>
+                <select className={fieldClass} onChange={(event) => { setCondition(event.target.value); setPage(1); }} value={condition}>
+                  <option value="all">All conditions</option>
+                  {conditionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
               </label>
               <label>
                 <span className="text-sm font-bold text-zinc-700">Rarity</span>
@@ -541,9 +553,12 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
               <div aria-live="assertive" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
                 <strong className="block">Selected Copies need attention</strong>
                 <ul className="mt-2 grid gap-2">
-                  {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? index}`}>
+                  {selection.issues.map((issue, index) => <li className="flex flex-wrap items-center justify-between gap-2" key={`${issue.code}:${issue.copyId ?? "selection"}:${index}`}>
                     <span>{issue.message}</span>
-                    {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => toggleCopy(issue.copyId!, false)} type="button">Remove</button> : null}
+                    {issue.copyId ? <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 font-bold" onClick={() => {
+                      if (issue.code === "duplicate") setDraft((current) => ({ ...current, copyIds: removeDuplicateCopySelectionId(current.copyIds, issue.copyId!) }));
+                      else toggleCopy(issue.copyId!, false);
+                    }} type="button">{issue.code === "duplicate" ? "Remove duplicate" : "Remove"}</button> : null}
                   </li>)}
                 </ul>
               </div>

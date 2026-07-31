@@ -1,6 +1,6 @@
 import "server-only";
 
-import { inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { cardCopies } from "@/db/schema";
 
@@ -22,14 +22,15 @@ export async function lockReconciledCopies(
   if (copyIds.length > max) throw new CopySelectionError(`Choose no more than ${max} physical Copies.`);
   if (new Set(copyIds).size !== copyIds.length) throw new CopySelectionError("Each physical Copy can appear only once.");
 
+  const uniqueCopyIds = [...new Set(copyIds)].sort();
   const copies = await tx.select().from(cardCopies)
-    .where(inArray(cardCopies.id, copyIds))
+    .where(and(eq(cardCopies.ownerId, ownerId), inArray(cardCopies.id, uniqueCopyIds)))
+    .orderBy(asc(cardCopies.id))
     .for("update");
   const byId = new Map(copies.map((copy) => [copy.id, copy]));
   for (const copyId of copyIds) {
     const copy = byId.get(copyId);
-    if (!copy) throw new CopySelectionError(`Copy #${copyId.slice(-6)} was deleted or no longer exists.`);
-    if (copy.ownerId !== ownerId) throw new CopySelectionError(`Copy #${copyId.slice(-6)} does not belong to this collection.`);
+    if (!copy) throw new CopySelectionError("One or more selected Copies is missing or does not belong to this collection.");
     if (copy.status !== "available" || copy.soldRecordId !== null) {
       throw new CopySelectionError(`Copy #${copyId.slice(-6)} is no longer available${copy.status === "sold" ? " because it is already sold" : ""}. Refresh and replace it.`);
     }

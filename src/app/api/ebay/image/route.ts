@@ -12,6 +12,7 @@ import {
   EbayListingError,
   getEbayListingImageDraft,
   removeEbayListingImageDraft,
+  transferEbayListingImageDraft,
   uploadArchivedEbayImage,
 } from "@/server/ebay-listing";
 import { EbayAuthorizationError } from "@/server/ebay-seller";
@@ -164,5 +165,46 @@ export async function DELETE(request: Request) {
       ? error.message
       : "The archived listing image could not be removed.";
     return NextResponse.json({ message }, { status: 502 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  const session = await getSessionFromHeaders(request.headers);
+  const capability = await getEbayCapabilityForSession(session);
+  if (!capability.canManageListingPhotoDrafts) {
+    return NextResponse.json({ message: capability.mode === "preview"
+      ? "Listing photos cannot be moved in preview mode. Switch to live Records."
+      : session
+        ? "Administrator seller permission is required to move listing photos."
+        : "Sign in to move listing photos." }, { status: session ? 403 : 401 });
+  }
+  if (!session) return NextResponse.json({ message: "Sign in to move listing photos." }, { status: 401 });
+  let fromCopyId = "";
+  let toCopyId = "";
+  let archiveKeys: string[] = [];
+  try {
+    const body = await request.json() as { archiveKeys?: unknown; fromCopyId?: unknown; toCopyId?: unknown };
+    fromCopyId = typeof body.fromCopyId === "string" ? body.fromCopyId.trim() : "";
+    toCopyId = typeof body.toCopyId === "string" ? body.toCopyId.trim() : "";
+    archiveKeys = Array.isArray(body.archiveKeys) ? body.archiveKeys.filter((key): key is string => typeof key === "string" && Boolean(key.trim())) : [];
+  } catch {
+    return NextResponse.json({ message: "Choose the staged listing photos to move." }, { status: 400 });
+  }
+  if (!fromCopyId || !toCopyId || !archiveKeys.length || new Set(archiveKeys).size !== archiveKeys.length) {
+    return NextResponse.json({ message: "Choose the staged listing photos to move." }, { status: 400 });
+  }
+  try {
+    const photos = [];
+    for (const archiveKey of archiveKeys) {
+      const nextKey = await transferEbayListingImageDraft(session.user.id, fromCopyId, toCopyId, archiveKey);
+      photos.push({ archiveKey: nextKey, previousArchiveKey: archiveKey, previewUrl: previewUrl(toCopyId, nextKey) });
+    }
+    return NextResponse.json({ photos });
+  } catch (error) {
+    return NextResponse.json({
+      message: error instanceof EbayListingError
+        ? error.message
+        : "Listing photos could not be moved safely. Your original staged photos were kept.",
+    }, { status: error instanceof EbayListingError ? 400 : 502 });
   }
 }

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { eq } from "drizzle-orm";
+import { Client } from "pg";
 import { db } from "../src/db/index.ts";
 import {
   cardCopies,
@@ -13,6 +14,7 @@ import {
   cardPrintings,
   cardTargets,
   ebayConnections,
+  ebayListingMembers,
   ebayListings,
   recordEntries,
   recordLines,
@@ -61,6 +63,25 @@ const secondOwnerContext = {
 const secondOwnerRecords = recordsRouter.createCaller(secondOwnerContext);
 const library = libraryRouter.createCaller(context);
 const spend = spendRouter.createCaller(context);
+
+async function waitForBlockedCardCopyLock(client: Client) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await client.query<{ blocked: boolean }>(`
+      select exists (
+        select 1
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and usename = current_user
+          and wait_event_type = 'Lock'
+      ) as blocked
+    `);
+    if (result.rows[0]?.blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("The Sale did not reach its final Copy lock before the race-test deadline.");
+}
 
 const card = (quantity = 1) => ({
   id: `card-${quantity}`,
@@ -796,6 +817,132 @@ test("an ordinary unlisted manual Sale remains available to an authenticated own
     source: "Local buyer",
   });
   assert.ok(sale.id);
+});
+
+test("Sale final locking rejects duplicate, missing, foreign, sold, and oversized exact Copy selections without a partial Record", async () => {
+  const purchase = await records.createPurchase({
+    kind: "card",
+    recordName: "Selection lock coverage",
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "exact selection server guards",
+    totalPence: 200,
+    card: card(2),
+  });
+  const created = (await records.snapshot()).copies.filter((copy) => copy.acquiredRecordId === purchase.id);
+  assert.equal(created.length, 2);
+  const before = (await records.snapshot()).records.length;
+  const saleInput = {
+    date: "2026-07-30",
+    netProceedsPence: 100,
+    notes: "must roll back",
+    recordName: "Rejected exact selection",
+    source: "Local buyer",
+  };
+  await assert.rejects(records.createSale({ ...saleInput, copyIds: [created[0]!.id, created[0]!.id] }), /only once/i);
+  await assert.rejects(records.createSale({ ...saleInput, copyIds: ["missing-copy-id"] }), /missing or does not belong/i);
+  const foreignCopy = (await secondOwnerRecords.snapshot()).copies[0];
+  assert.ok(foreignCopy);
+  await assert.rejects(records.createSale({ ...saleInput, copyIds: [foreignCopy.id] }), /missing or does not belong/i);
+  const sold = await records.createSale({ ...saleInput, copyIds: [created[0]!.id], recordName: "Legitimate exact sale" });
+  assert.ok(sold.id);
+  await assert.rejects(records.createSale({ ...saleInput, copyIds: [created[0]!.id] }), /no longer available/i);
+  await assert.rejects(
+    records.createSale({ ...saleInput, copyIds: Array.from({ length: 101 }, () => created[1]!.id) }),
+    /at most 100|<=100 items/i,
+  );
+  const after = await records.snapshot();
+  assert.equal(after.records.length, before + 1);
+  assert.equal(after.copies.find((copy) => copy.id === created[1]!.id)?.status, "available");
+});
+
+test("a listing published after Sale preflight is caught by the same transaction without a partial Sale", async () => {
+  const purchase = await records.createPurchase({
+    kind: "card",
+    recordName: "Concurrent listing race source",
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "transaction race coverage",
+    totalPence: 100,
+    card: card(),
+  });
+  const copy = (await records.snapshot()).copies.find(
+    (candidate) => candidate.acquiredRecordId === purchase.id,
+  );
+  assert.ok(copy);
+  const before = (await records.snapshot()).records.length;
+  const concurrent = new Client({ connectionString: process.env.DATABASE_URL });
+  let transactionOpen = false;
+  try {
+    await concurrent.connect();
+    await concurrent.query("begin");
+    transactionOpen = true;
+    await concurrent.query(
+      "select id from card_copies where owner_id = $1 and id = $2 for update",
+      [ownerId, copy.id],
+    );
+
+    const saleOutcome = records.createSale({
+      copyIds: [copy.id],
+      date: "2026-07-30",
+      netProceedsPence: 100,
+      notes: "must lose to concurrent listing publication",
+      recordName: "Concurrent Sale must not persist",
+      source: "Local buyer",
+    }).then(
+      (value) => ({ error: null, value }),
+      (error: unknown) => ({ error, value: null }),
+    );
+    await waitForBlockedCardCopyLock(concurrent);
+    const now = new Date();
+    await concurrent.query(`
+      insert into ebay_listings (
+        id, owner_id, copy_id, kind, item_id, listing_url, title, status,
+        listing_state, sale_state, created_at, updated_at
+      ) values ($1, $2, $3, 'individual', $4, $5, $6, 'active', 'active', 'pending', $7, $7)
+    `, [
+      "selection-race-listing",
+      ownerId,
+      copy.id,
+      "selection-race-item",
+      "https://www.ebay.co.uk/itm/selection-race-item",
+      "Concurrent listing",
+      now,
+    ]);
+    await concurrent.query(`
+      insert into ebay_listing_members (
+        id, owner_id, listing_id, copy_id, fulfilment_position, created_at, updated_at
+      ) values ($1, $2, $3, $4, 0, $5, $5)
+    `, [
+      "selection-race-member",
+      ownerId,
+      "selection-race-listing",
+      copy.id,
+      now,
+    ]);
+    await concurrent.query("commit");
+    transactionOpen = false;
+
+    const outcome = await saleOutcome;
+    assert.equal(outcome.value, null);
+    assert.match(
+      outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+      /live, pending, or uncertain eBay listing/i,
+    );
+    const after = await records.snapshot();
+    assert.equal(after.records.length, before);
+    assert.equal(
+      after.copies.find((candidate) => candidate.id === copy.id)?.status,
+      "available",
+    );
+  } finally {
+    if (transactionOpen) await concurrent.query("rollback");
+    await concurrent.end();
+    await db.delete(ebayListingMembers).where(eq(ebayListingMembers.id, "selection-race-member"));
+    await db.delete(ebayListings).where(eq(ebayListings.id, "selection-race-listing"));
+  }
 });
 
 test("non-sellers and preview mode cannot repair eBay membership directly", async () => {

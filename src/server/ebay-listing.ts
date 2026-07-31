@@ -24,6 +24,7 @@ import {
   readListingImageDraft,
   storeListingImageDraft,
   storeRemoteListingImageDraft,
+  transferListingImageDraft,
 } from "@/server/ebay-listing-images";
 import { parseApprovedRemoteImageUrl } from "@/server/remote-images";
 import { readCardInventoryImage } from "@/server/card-inventory-images";
@@ -796,6 +797,16 @@ export async function getEbayListingImageDraft(ownerId: string, copyId: string, 
 export async function removeEbayListingImageDraft(ownerId: string, copyId: string, archiveKey: string) {
   await loadOwnedCopy(ownerId, copyId);
   await deleteListingImageDraft(ownerId, copyId, archiveKey);
+}
+
+export async function transferEbayListingImageDraft(
+  ownerId: string,
+  fromCopyId: string,
+  toCopyId: string,
+  archiveKey: string,
+) {
+  await loadOwnedCopy(ownerId, toCopyId);
+  return transferListingImageDraft({ fromCopyId, key: archiveKey, ownerId, toCopyId });
 }
 
 async function listingCopyMetadata(ownerId: string, copyId: string) {
