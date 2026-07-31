@@ -40,6 +40,21 @@ to its Record; each physical Copy retains its own allocated purchase cost. When
 some Copy costs are missing, summaries show a known subtotal rather than
 pretending the total is complete.
 
+### Collector glossary
+
+- **Library** — the catalogue of cards you own or want. It can show market
+  estimates, which are guide prices rather than real cashflow.
+- **Record** — a dated Purchase, Pack Opening, Sale, or imported acquisition
+  that preserves what happened.
+- **Copy** — one exact physical card. Its purchase cost is its allocated share
+  of the source Purchase, not the grouped total for sibling Copies.
+- **Purchase total / sale proceeds** — the real cashflow recorded for that
+  event. These are distinct from market estimates.
+- **Known subtotal** — the sum of only the Copies whose costs are known. The UI
+  also states how many Copy costs remain unknown.
+- **Void / restore effects** — voiding keeps the Record in History but removes
+  its inventory and cashflow effects; restoring reapplies those effects.
+
 The legacy `cards` table remains intact solely as migration input. The only
 temporary access is the authenticated, read-only `legacyCards` adapter that
 seeds the resettable Records preview while legacy rows remain. It has deprecation

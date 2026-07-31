@@ -155,6 +155,7 @@ test("Library cards stay dense and usable from phone through wide desktop", asyn
   await imageDialog.click({ position: { x: 2, y: 2 } });
   await expect(imageDialog).toBeHidden();
   await expect(imageButton).toBeFocused();
+  await page.mouse.move(0, 0);
   const phoneRows = await page.locator("[data-library-card]").evaluateAll((elements) => (
     elements.map((element) => Math.round(element.getBoundingClientRect().height))
   ));
@@ -171,11 +172,15 @@ test("Library cards stay dense and usable from phone through wide desktop", asyn
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.getByRole("button", { name: "Collapse navigation" }).click();
   await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
+  await page.mouse.move(1365, 899);
+  await page.waitForTimeout(200);
   await screenshotLibrary(page, testInfo, "library-density-laptop-1366");
   await expectGridColumns(page, 5);
   await expectCompleteDesktopRows(page, 5, 2);
 
   await page.setViewportSize({ width: 1728, height: 1000 });
+  await page.mouse.move(1727, 999);
+  await page.waitForTimeout(200);
   await screenshotLibrary(page, testInfo, "library-density-wide-1728");
   await expectGridColumns(page, 5);
   await expectCompleteDesktopRows(page, 5, 2);
@@ -219,6 +224,7 @@ test("global Add opens the dedicated Add to wishlist page form", async ({ page }
   const origin = "/?status=wishlist&page=2";
   const destination = `/wishlist/new?origin=${encodeURIComponent(origin)}`;
   await page.goto(origin);
+  await expect(page.locator("[data-library-card]")).toHaveCount(10);
 
   await page.getByRole("button", { name: "Add", exact: true }).click();
   const addWishlist = page.getByRole("menuitem", { name: /Add to wishlist/ });
@@ -315,7 +321,7 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await editDialog.getByRole("button", { name: "Remove from wishlist" }).click();
   const removalDialog = page.getByRole("alertdialog", { name: "Remove this Library card?" });
   await expect(removalDialog).toBeVisible();
-  await expect(removalDialog.getByText(/owned Copy and every Record stay unchanged/)).toBeVisible();
+  await expect(removalDialog.getByText(/owned Copy and every Record remain unchanged/)).toBeVisible();
   await expect(removalDialog.getByRole("button", { name: "Cancel" })).toBeFocused();
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(removalDialog).toBeHidden();
@@ -328,7 +334,7 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await expect(editDialog).toBeVisible();
   await expect(editDialog.getByRole("button", { name: "Remove from wishlist" })).toBeVisible();
   await editDialog.getByRole("button", { name: "Remove from wishlist" }).click();
-  await expect(removalDialog.getByText(/will no longer be wanted.*4 owned Copies.*every Record stay unchanged/)).toBeVisible();
+  await expect(removalDialog.getByText(/will no longer be wanted.*4 owned Copies.*every Record remain unchanged/)).toBeVisible();
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await editDialog.getByRole("button", { name: "Cancel" }).click();
 

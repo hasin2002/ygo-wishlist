@@ -72,7 +72,7 @@ type WheelSegment = {
 };
 function formatCurrency(value: number | null) {
   if (value === null) {
-    return "Market estimate unknown";
+    return "unknown";
   }
 
   return new Intl.NumberFormat("en-GB", {

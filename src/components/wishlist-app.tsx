@@ -757,7 +757,7 @@ function RemoveWishlistDialog({
           id="remove-wishlist-description"
         >
           {card.ownedQuantity > 0
-            ? `${card.name} will no longer be wanted. Its ${card.ownedQuantity} owned ${card.ownedQuantity === 1 ? "Copy" : "Copies"} and every Record stay unchanged.`
+            ? `${card.name} will no longer be wanted. Its ${card.ownedQuantity} owned ${card.ownedQuantity === 1 ? "Copy" : "Copies"} and every Record remain unchanged.`
             : `${card.name} and its saved catalogue details will be deleted. It has no physical Copy or Record history to delete.`}
         </p>
         <div className="mt-5 grid grid-cols-2 gap-2">
