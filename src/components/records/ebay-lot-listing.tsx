@@ -59,7 +59,7 @@ import {
   copyDisplayLabel,
   copyShortReference,
 } from "@/lib/records/copy-display";
-import { copySelectionAvailabilityReason, filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reanchorCopySelectionPhotos, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
+import { copySelectionAvailabilityReason, copySelectionValidationFingerprint, copySelectionValidationIsCurrent, filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reanchorCopySelectionPhotos, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import { trpc } from "@/trpc/client";
 import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
 import { taskReturnHref } from "@/lib/navigation-intent";
@@ -415,6 +415,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<EbayVerification | null>(null);
+  const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [arrangeAnnouncement, setArrangeAnnouncement] = useState("");
@@ -525,6 +526,18 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const effectivePrice = draft.priceOrigin === "estimate"
     ? estimatedPriceText
     : draft.price;
+  const currentValidationFingerprint = copySelectionValidationFingerprint(
+    selection,
+    input(),
+  );
+  const currentValidation = validatedFingerprint === currentValidationFingerprint
+    ? validation
+    : null;
+  const validationIsCurrent = Boolean(currentValidation?.readyToPublish) && copySelectionValidationIsCurrent({
+    currentFingerprint: currentValidationFingerprint,
+    selection,
+    validatedFingerprint,
+  });
   const eligibleCandidates = candidates.filter(({ copy, exposure }) => (
     copySelectionAvailabilityReason({ copyId: copy.id, exposure, status: copy.status }) === null
   ));
@@ -546,7 +559,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   });
   const { currentPage, items: visible, pageCount, resultEnd, resultStart } = pageCopySelection(filtered, page, pageSize);
   const visibleFees =
-    validation?.fees.filter(
+    currentValidation?.fees.filter(
       (fee) => Number.isFinite(fee.amount) && fee.amount !== 0,
     ) ?? [];
   const photoAnchor = draft.photoAnchorCopyId
@@ -1081,12 +1094,17 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     };
   }
 
+  const lateSelectionProblem = step > 1
+    ? selection.issues[0]?.message
+      ?? (!selection.valid ? "This lot no longer has 2–100 eligible physical Copies. Review the Copy selection." : null)
+    : null;
+
   function stepProblem() {
-    if (step === 1 && selection.issues.length) {
+    if (selection.issues.length) {
       return selection.issues[0]!.message;
     }
-    if (step === 1 && !selection.valid) {
-      return "Choose at least two eligible physical Copies.";
+    if (!selection.valid) {
+      return "Choose 2–100 eligible physical Copies.";
     }
     if (
       step === 2 &&
@@ -1115,9 +1133,13 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     if (step === 2) {
       try {
         const photos = await preparePhotosForEbay();
-        setValidation(await validate.mutateAsync(input(photos)));
+        const request = input(photos);
+        const fingerprint = copySelectionValidationFingerprint(selection, request);
+        setValidation(await validate.mutateAsync(request));
+        setValidatedFingerprint(fingerprint);
       } catch (reason) {
         setValidation(null);
+        setValidatedFingerprint(null);
         const message = reason instanceof Error
           ? reason.message
           : "eBay validation failed.";
@@ -1133,7 +1155,19 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   }
 
   async function confirm() {
-    if (!validation?.readyToPublish || publishActionRef.current) return;
+    const problem = stepProblem();
+    if (problem) {
+      setValidation(null);
+      setValidatedFingerprint(null);
+      setError(problem);
+      return;
+    }
+    if (!validationIsCurrent || publishActionRef.current) {
+      setValidation(null);
+      setValidatedFingerprint(null);
+      setError("This lot changed after eBay validation. Validate the current Copies and listing details again.");
+      return;
+    }
     publishActionRef.current = true;
     setPublishing(true);
     setError(null);
@@ -1193,6 +1227,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
           lifecycle.discard();
           setStep(1);
           setValidation(null);
+          setValidatedFingerprint(null);
         }}
         recoveryMessage={lifecycle.recoveryMessage}
         restored={lifecycle.restored}
@@ -1202,6 +1237,19 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
         labels={["Choose Copies", "Details & Photos", "Review"]}
         step={step}
       />
+
+      {lateSelectionProblem ? (
+        <div aria-live="assertive" className="flex flex-col gap-3 rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm font-medium text-rose-950 sm:flex-row sm:items-center sm:justify-between">
+          <span>{lateSelectionProblem} Your title, description, price, and staged photos are still saved.</span>
+          <button
+            className="min-h-11 shrink-0 rounded-md border border-rose-300 bg-white px-3 font-bold"
+            onClick={() => setStep(1)}
+            type="button"
+          >
+            Review Copy selection
+          </button>
+        </div>
+      ) : null}
 
       {step === 1 ? (
         <StepPanel step={step}>
@@ -2091,12 +2139,12 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   <div className="flex items-start gap-3">
                     <span
                       className={`grid size-10 shrink-0 place-items-center rounded-full ${
-                        validation?.readyToPublish
+                        currentValidation?.readyToPublish
                           ? "bg-emerald-50 text-emerald-700"
                           : "bg-rose-50 text-rose-700"
                       }`}
                     >
-                      {validation?.readyToPublish ? (
+                      {currentValidation?.readyToPublish ? (
                         <CheckCircle2
                           aria-hidden="true"
                           className="size-5"
@@ -2114,22 +2162,22 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                       </p>
                       <h3
                         className={`mt-1 font-black ${
-                          validation?.readyToPublish
+                          currentValidation?.readyToPublish
                             ? "text-emerald-800"
                             : "text-rose-800"
                         }`}
                         id="ebay-check-title"
                       >
-                        {validation?.readyToPublish
+                        {currentValidation?.readyToPublish
                           ? "Ready to publish"
                           : "Changes required"}
                       </h3>
                     </div>
                   </div>
 
-                  {validation?.errors.length ? (
+                  {currentValidation?.errors.length ? (
                     <ul className="mt-4 grid gap-2">
-                      {validation.errors.map((validationError, index) => (
+                      {currentValidation.errors.map((validationError, index) => (
                         <li
                           className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium leading-5 text-rose-950"
                           key={`${validationError.code}-${index}`}
@@ -2149,7 +2197,7 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                     </ul>
                   ) : (
                     <p className="mt-4 text-sm font-medium leading-5 text-zinc-600">
-                      {validation?.readyToPublish
+                      {currentValidation?.readyToPublish
                         ? "eBay accepted the listing details and returned no validation messages."
                         : "Go back, review the listing details, and validate again."}
                     </p>
@@ -2248,10 +2296,10 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
 
       {!publishedUrl ? (
         <WizardActions
-          confirmDisabled={!validation?.readyToPublish}
+          confirmDisabled={!validationIsCurrent}
           finalLabel="Publish quantity 1 lot"
           nextDisabled={
-            (step === 1 && !selection.valid) ||
+            !selection.valid ||
             (step === 2 && photoBusy)
           }
           onBack={() => {

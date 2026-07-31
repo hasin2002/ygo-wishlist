@@ -64,3 +64,17 @@ test("eBay reconciliation follows the same Copy, membership, listing lock order"
   assert.ok(memberLock < listingLock);
   assert.match(transaction, /orderBy\(asc\(cardCopies\.id\)\)\.for\("update"\)/);
 });
+
+test("mixed-lot Details and Review cannot reuse validation after reconciliation changes", async () => {
+  const source = await readFile(
+    new URL("../src/components/records/ebay-lot-listing.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /function stepProblem\(\) \{\s+if \(selection\.issues\.length\)/);
+  assert.match(source, /currentValidationFingerprint[\s\S]*validationIsCurrent/);
+  assert.match(source, /if \(!validationIsCurrent \|\| publishActionRef\.current\)/);
+  assert.match(source, /confirmDisabled=\{!validationIsCurrent\}/);
+  assert.match(source, /nextDisabled=\{\s+!selection\.valid/);
+  assert.match(source, /Your title, description, price, and staged photos are still saved/);
+  assert.match(source, /Review Copy selection/);
+});

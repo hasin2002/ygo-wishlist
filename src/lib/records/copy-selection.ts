@@ -96,6 +96,36 @@ export function reanchorCopySelectionPhotos<
   });
 }
 
+/** Binds a server validation response to the exact reconciled request it checked. */
+export function copySelectionValidationFingerprint(
+  selection: Pick<
+    ReconciledCopySelection<unknown>,
+    "issues" | "requestedIds" | "selectedIds"
+  >,
+  request: unknown,
+) {
+  return JSON.stringify({
+    issues: selection.issues.map(({ code, copyId, message }) => ({
+      code,
+      copyId: copyId ?? null,
+      message,
+    })),
+    requestedIds: selection.requestedIds,
+    request,
+    selectedIds: selection.selectedIds,
+  });
+}
+
+export function copySelectionValidationIsCurrent(input: {
+  currentFingerprint: string;
+  selection: Pick<ReconciledCopySelection<unknown>, "issues" | "valid">;
+  validatedFingerprint: string | null;
+}) {
+  return input.selection.valid
+    && input.selection.issues.length === 0
+    && input.validatedFingerprint === input.currentFingerprint;
+}
+
 export const mixedLotCopyBounds: CopySelectionBounds = { min: 2, max: 100 };
 
 export function reconcileCopySelection<T>(

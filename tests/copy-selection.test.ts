@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   copySelectionAvailabilityReason,
+  copySelectionValidationFingerprint,
+  copySelectionValidationIsCurrent,
   filterCopySelectionCandidates,
   mixedLotCopyBounds,
   pageCopySelection,
@@ -168,4 +170,55 @@ test("photo-anchor recovery changes staged keys without corrupting exact invento
     previousArchiveKey: "old-a",
     previewUrl: "/new-a",
   }]), null);
+});
+
+test("a Copy becoming stale after validation cannot authorize a reduced manifest", () => {
+  const a = candidate("copy-a");
+  const b = candidate("copy-b");
+  const draft = {
+    description: "Keep this description",
+    photos: [{ archiveKey: "photo-a" }],
+    price: "12.00",
+    title: "Keep this title",
+  };
+  const ready = reconcileCopySelection(
+    ["copy-a", "copy-b"],
+    [
+      { id: "copy-a", item: a },
+      { id: "copy-b", item: b },
+    ],
+    mixedLotCopyBounds,
+  );
+  const validatedFingerprint = copySelectionValidationFingerprint(ready, {
+    ...draft,
+    copyIds: ready.selectedIds,
+  });
+  assert.equal(copySelectionValidationIsCurrent({
+    currentFingerprint: validatedFingerprint,
+    selection: ready,
+    validatedFingerprint,
+  }), true);
+
+  const stale = reconcileCopySelection(
+    ["copy-a", "copy-b"],
+    [{ id: "copy-a", item: a }],
+    mixedLotCopyBounds,
+  );
+  const reducedFingerprint = copySelectionValidationFingerprint(stale, {
+    ...draft,
+    copyIds: stale.selectedIds,
+  });
+  assert.deepEqual(stale.selectedIds, ["copy-a"]);
+  assert.equal(stale.issues[0]?.copyId, "copy-b");
+  assert.equal(copySelectionValidationIsCurrent({
+    currentFingerprint: reducedFingerprint,
+    selection: stale,
+    validatedFingerprint,
+  }), false);
+  assert.deepEqual(draft, {
+    description: "Keep this description",
+    photos: [{ archiveKey: "photo-a" }],
+    price: "12.00",
+    title: "Keep this title",
+  });
 });

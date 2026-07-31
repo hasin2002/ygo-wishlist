@@ -32,6 +32,10 @@ import {
 import { ebayRouter } from "../src/server/routers/ebay.ts";
 import { libraryRouter } from "../src/server/routers/library.ts";
 import { recordsRouter } from "../src/server/routers/records.ts";
+import {
+  CopySelectionError,
+  lockReconciledCopies,
+} from "../src/server/records/copy-selection.ts";
 import { spendRouter } from "../src/server/routers/spend.ts";
 
 const ownerId = "records-transaction-test-owner";
@@ -942,6 +946,75 @@ test("a listing published after Sale preflight is caught by the same transaction
     await concurrent.end();
     await db.delete(ebayListingMembers).where(eq(ebayListingMembers.id, "selection-race-member"));
     await db.delete(ebayListings).where(eq(ebayListings.id, "selection-race-listing"));
+  }
+});
+
+test("the mixed-lot final lock rejects a concurrent Copy state change without persisting membership", async () => {
+  const purchase = await records.createPurchase({
+    kind: "card",
+    recordName: "Concurrent mixed-lot lock source",
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "listing final-lock race coverage",
+    totalPence: 200,
+    card: card(2),
+  });
+  const copies = (await records.snapshot()).copies.filter(
+    (candidate) => candidate.acquiredRecordId === purchase.id,
+  );
+  assert.equal(copies.length, 2);
+  const orderedIds = copies.map((copy) => copy.id).sort();
+  const concurrent = new Client({ connectionString: process.env.DATABASE_URL });
+  let transactionOpen = false;
+  try {
+    await concurrent.connect();
+    await concurrent.query("begin");
+    transactionOpen = true;
+    await concurrent.query(
+      "select id from card_copies where owner_id = $1 and id = $2 for update",
+      [ownerId, orderedIds[0]],
+    );
+
+    const listingLockOutcome = db.transaction(async (tx) => {
+      try {
+        return {
+          copies: await lockReconciledCopies(
+            tx,
+            ownerId,
+            orderedIds,
+            { min: 2, max: 100 },
+          ),
+          error: null,
+        };
+      } catch (error) {
+        return { copies: null, error };
+      }
+    });
+    await waitForBlockedCardCopyLock(concurrent);
+    await concurrent.query(
+      "update card_copies set status = 'void', updated_at = $1 where owner_id = $2 and id = $3",
+      [new Date(), ownerId, orderedIds[0]],
+    );
+    await concurrent.query("commit");
+    transactionOpen = false;
+
+    const outcome = await listingLockOutcome;
+    assert.equal(outcome.copies, null);
+    assert.ok(outcome.error instanceof CopySelectionError);
+    assert.match(outcome.error.message, /no longer available/i);
+    const memberships = await db.select().from(ebayListingMembers).where(
+      eq(ebayListingMembers.copyId, orderedIds[0]),
+    );
+    assert.equal(memberships.length, 0);
+    const after = await records.snapshot();
+    assert.equal(
+      after.copies.find((candidate) => candidate.id === orderedIds[1])?.status,
+      "available",
+    );
+  } finally {
+    if (transactionOpen) await concurrent.query("rollback");
+    await concurrent.end();
   }
 });
 
