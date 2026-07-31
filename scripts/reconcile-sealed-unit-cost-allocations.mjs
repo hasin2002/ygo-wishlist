@@ -55,7 +55,7 @@ try {
           );
         }
         await pool.query(
-          "update record_lines set allocation_pence = $1, updated_at = now() where id = $2 and record_id = $3 and owner_id = $4 and kind = 'sealed'",
+          "update record_lines set allocation_pence = $1, updated_at = now() where id = $2 and record_id = $3 and owner_id = $4 and kind = 'sealed' and allocation_pence is distinct from $1",
           [known ? total : null, sourceLineId, item.recordId, item.ownerId],
         );
         applied += 1;

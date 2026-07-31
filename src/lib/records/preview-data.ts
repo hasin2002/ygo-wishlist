@@ -1194,7 +1194,6 @@ export function updateRecordDetails(snapshot: RecordsSnapshot, recordId: string,
         .sort((left, right) => left.id.localeCompare(right.id));
       const hasOverrides = units.some((unit) => unit.allocationMode === "override");
       const currentTotal = units.reduce((sum, unit) => sum + (unit.allocationPence ?? 0), 0);
-      const currentKnown = units.every((unit) => unit.allocationPence !== null && unit.allocationPence !== undefined);
       if (hasOverrides && !update.sealedAllocationOverrideConfirmed && (
         record.amountKnown === false || currentTotal !== record.amountPence
       )) {

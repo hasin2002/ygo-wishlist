@@ -351,8 +351,11 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
       if (draft.useSealedOverrides) {
         const allocations = draft.sealedUnitAllocations.map(parsePoundsToPence);
         if (!amountKnown) return "Unknown costs cannot have per-unit allocations.";
-        if (allocations.length !== draft.sealed.quantity || allocations.some((value) => value === null)) return "Enter a valid amount for every sealed unit.";
-        if (allocations.reduce((sum, value) => sum + (value ?? 0), 0) !== totalPence) return "Individual sealed-unit costs must add up exactly to the purchase total.";
+        if (
+          allocations.length !== draft.sealed.quantity
+          || !allocations.every((value): value is number => value !== null)
+        ) return "Enter a valid amount for every sealed unit.";
+        if (allocations.reduce((sum, value) => sum + value, 0) !== totalPence) return "Individual sealed-unit costs must add up exactly to the purchase total.";
         if (!draft.sealedAllocationsReviewed) return "Review and confirm the unequal sealed-unit costs before continuing.";
       }
     }
