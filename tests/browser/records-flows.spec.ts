@@ -76,15 +76,15 @@ test("Inventory keeps a selected Copy cost separate from its three-card total", 
   await page.getByText("Card details", { exact: true }).click();
   await expect(page.getByText("3-card total", { exact: true })).toBeVisible();
   await expect(cardDetails).toContainText(/3-card total[\s\S]*Paid £75\.00/);
-  const acquisition = page.getByText("This Copy’s purchase cost:").locator("..");
-  await expect(acquisition).toHaveText(/This Copy’s purchase cost: £25\.00/);
+  const acquisition = page.getByText("This Copy’s cost:").locator("..");
+  await expect(acquisition).toHaveText(/This Copy’s cost: £25\.00/);
 
   const picker = page.getByRole("combobox", { name: "Physical Copy" });
   await picker.click();
   await page.getByRole("option", { name: /Copy 2 of 3/ }).click();
 
   await expect(page).toHaveURL(/copy=copy-preview-dark-2/);
-  await expect(acquisition).toHaveText(/This Copy’s purchase cost: £25\.00/);
+  await expect(acquisition).toHaveText(/This Copy’s cost: £25\.00/);
   await expect(cardDetails).toContainText(/3-card total[\s\S]*Paid £75\.00/);
 });
 
@@ -94,8 +94,8 @@ test("Inventory identifies an unknown selected Copy without hiding the partial a
   const cardDetails = page.locator("details");
   await page.getByText("Card details", { exact: true }).click();
   await expect(cardDetails).toContainText(/3-card total[\s\S]*Known subtotal £50\.00 · 1 cost unknown/);
-  await expect(page.getByText("This Copy’s purchase cost:").locator("..")).toHaveText(
-    /This Copy’s purchase cost: unknown/,
+  await expect(page.getByText("This Copy’s cost:").locator("..")).toHaveText(
+    /This Copy’s cost: unknown/,
   );
   await expect(page.getByRole("combobox", { name: "Physical Copy" })).toHaveValue(/Copy 3 of 3/);
 });

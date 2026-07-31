@@ -321,7 +321,7 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await editDialog.getByRole("button", { name: "Remove from wishlist" }).click();
   const removalDialog = page.getByRole("alertdialog", { name: "Remove this Library card?" });
   await expect(removalDialog).toBeVisible();
-  await expect(removalDialog.getByText(/owned Copy and every Record remain unchanged/)).toBeVisible();
+  await expect(removalDialog.getByText(/owned Copy and every Record remains unchanged/)).toBeVisible();
   await expect(removalDialog.getByRole("button", { name: "Cancel" })).toBeFocused();
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(removalDialog).toBeHidden();
@@ -334,7 +334,7 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await expect(editDialog).toBeVisible();
   await expect(editDialog.getByRole("button", { name: "Remove from wishlist" })).toBeVisible();
   await editDialog.getByRole("button", { name: "Remove from wishlist" }).click();
-  await expect(removalDialog.getByText(/will no longer be wanted.*4 owned Copies.*every Record remain unchanged/)).toBeVisible();
+  await expect(removalDialog.getByText(/will no longer be wanted.*4 owned Copies.*every Record remains unchanged/)).toBeVisible();
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await editDialog.getByRole("button", { name: "Cancel" }).click();
 

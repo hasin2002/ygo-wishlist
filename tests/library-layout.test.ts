@@ -149,7 +149,7 @@ test("wishlist removal preserves owned Copies and only deletes a pure target", (
   assert.match(libraryRouterSource, /Owned Copies and their Record history were kept/);
   assert.match(source, /form\.desiredQuantity > 0[\s\S]*?Remove from wishlist/);
   assert.match(source, /will no longer be wanted/);
-  assert.match(source, /owned[\s\S]*?Copies[\s\S]*?every Record remain unchanged/);
+  assert.match(source, /owned[\s\S]*?Copies[\s\S]*?every Record remains unchanged/);
   assert.match(source, /saved catalogue details will be deleted/);
   assert.doesNotMatch(source, /will be deleted because there are no owned physical Copies to keep/);
   assert.match(source, /function RemoveWishlistDialog[\s\S]*?return createPortal\(/);

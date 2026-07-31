@@ -118,7 +118,8 @@ test("value presentation keeps physical Copy costs separate from grouped card to
   const libraryApp = sourceFile("src/components/wishlist-app.tsx");
   const wheelApp = sourceFile("src/components/wheel-app.tsx");
 
-  assert.match(recordsApp, /This Copy’s purchase cost:/);
+  assert.match(recordsApp, /This Copy’s cost:/);
+  assert.match(recordsApp, /allocated share from its source Record/);
   assert.match(recordsApp, /ownedCardTotalLabel\(libraryStatus\.ownedQuantity\)/);
   assert.match(recordsApp, /libraryStatus\.ownedQuantity \? <div><dt[\s\S]*?No owned Copies/);
   assert.doesNotMatch(recordsApp, /Purchase value/);

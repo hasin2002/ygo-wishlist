@@ -46,8 +46,8 @@ pretending the total is complete.
   estimates, which are guide prices rather than real cashflow.
 - **Record** — a dated Purchase, Pack Opening, Sale, or imported acquisition
   that preserves what happened.
-- **Copy** — one exact physical card. Its purchase cost is its allocated share
-  of the source Purchase, not the grouped total for sibling Copies.
+- **Copy** — one exact physical card. Its cost is its allocated share from the
+  source Record, not the grouped total for sibling Copies.
 - **Purchase total / sale proceeds** — the real cashflow recorded for that
   event. These are distinct from market estimates.
 - **Known subtotal** — the sum of only the Copies whose costs are known. The UI
