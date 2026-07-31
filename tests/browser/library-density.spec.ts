@@ -235,6 +235,61 @@ test("global Add opens the dedicated Add to wishlist page form", async ({ page }
   await expect(page).toHaveURL(new URL(origin, page.url()).toString());
 });
 
+test("Global Add and the rarity guide provide complete keyboard lifecycles", async ({ page }) => {
+  await mockLibrary(page, true);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto("/");
+  await expect(page.locator("[data-library-card]")).toHaveCount(10);
+
+  const add = page.getByRole("button", { name: "Add", exact: true });
+  await add.focus();
+  await page.keyboard.press("ArrowDown");
+  const menu = page.getByRole("menu", { name: "Add an activity" });
+  const firstItem = page.getByRole("menuitem", { name: /Add to wishlist/ });
+  await expect(menu).toBeVisible();
+  await expect(firstItem).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(page.getByRole("menuitem", { name: /Mixed card lot/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(add).toBeFocused();
+
+  const guideTrigger = page.getByRole("button", { name: "View rarity abbreviation guide" });
+  await guideTrigger.click();
+  const guide = page.getByRole("dialog", { name: "Rarity guide" });
+  const closeGuide = page.getByRole("button", { name: "Close rarity guide" });
+  await expect(guide).toBeVisible();
+  await expect(closeGuide).toBeFocused();
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  await page.keyboard.press("Escape");
+  await expect(guide).toBeHidden();
+  await expect(guideTrigger).toBeFocused();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+});
+
+test("mobile navigation behaves as a viewport modal and preserves keyboard return", async ({ page }) => {
+  await mockLibrary(page, true);
+  await page.setViewportSize({ width: 375, height: 844 });
+  await page.goto("/");
+
+  const trigger = page.getByRole("button", { name: "Open navigation" });
+  await trigger.click();
+  const navigation = page.getByRole("dialog", { name: "Primary navigation" });
+  await expect(navigation).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
+  await expect(navigation.getByRole("button", { name: "Close navigation" })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(navigation).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+
+  const skip = page.getByRole("link", { name: "Skip to main content" });
+  await skip.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#main-content")).toBeFocused();
+});
+
 test("Add and edit forms remove redundant panels and explain wishlist removal", async ({ page }, testInfo) => {
   await mockLibrary(page, true);
   await page.setViewportSize({ width: 1280, height: 900 });

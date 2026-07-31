@@ -21,17 +21,20 @@ import { usePathname } from "next/navigation";
 import {
   createContext,
   useContext,
+  useCallback,
   useId,
   useState,
   type CSSProperties,
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { useInitialAuth } from "@/app/providers";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { authClient, useSession } from "@/lib/auth-client";
 import { useClientReady } from "@/lib/use-client-ready";
 import { clearPersistedQueryCache, trpc } from "@/trpc/client";
+import { useViewportOverlay } from "@/components/use-viewport-overlay";
 
 const navItems = [
   { href: "/", icon: ListChecks, label: "Library" },
@@ -221,7 +224,7 @@ function SpendSummaryState({
   if (pending) {
     return (
       <div
-        className={`flex min-h-10 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-500 shadow-sm ${expanded ? "w-full" : "size-12 justify-center px-0"}`}
+        className={`flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-500 shadow-sm ${expanded ? "w-full" : "size-12 justify-center px-0"}`}
         role="status"
       >
         <Wallet aria-hidden="true" className="size-4 shrink-0" />
@@ -232,7 +235,8 @@ function SpendSummaryState({
   return (
     <button
       aria-label={expanded ? undefined : "Spend summary unavailable. Retry"}
-      className={`flex min-h-10 items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm transition hover:border-amber-500 ${expanded ? "w-full" : "size-12 justify-center px-0"}`}
+      className={`flex min-h-11 items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm transition hover:border-amber-500 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 ${expanded ? "w-full" : "size-12 justify-center px-0"}`}
+      disabled={pending}
       onClick={() => void onRetry()}
       type="button"
     >
@@ -284,6 +288,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const spendSummaryPending =
     !clientReady ||
     (currentMonth.isPending && !currentMonth.data);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
+  const mobileNavRef = useViewportOverlay<HTMLElement>({
+    isOpen: mobileMenuOpen,
+    onClose: closeMobileMenu,
+  });
 
   async function signOut() {
     await authClient.signOut();
@@ -294,7 +303,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   function selectNavigation(href: string, event: MouseEvent<HTMLAnchorElement>) {
     if (!isPlainNavigation(event)) return;
     setOptimisticPathname(href);
-    setMobileMenuOpen(false);
+    closeMobileMenu();
   }
 
   const shellStyle = {
@@ -308,6 +317,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       toggleMobileMenu: () => setMobileMenuOpen((open) => !open),
     }}>
       <div style={shellStyle}>
+        <a className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[80] focus:rounded-md focus:bg-white focus:px-4 focus:py-3 focus:font-bold focus:text-zinc-950 focus:shadow-lg" href="#main-content" onClick={() => document.getElementById("main-content")?.focus()}>Skip to main content</a>
         {navigationVisible ? (
           <>
             <aside className={`fixed bottom-4 left-4 top-4 z-40 hidden flex-col rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-lg transition-[width] duration-200 lg:flex ${desktopMenuOpen ? "w-64" : "w-[72px]"}`}>
@@ -330,17 +340,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ThemeToggle expanded={desktopMenuOpen} />
                 {isAuthenticated ? <button className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-zinc-950 hover:text-zinc-950 ${desktopMenuOpen ? "w-full px-3" : "size-12 justify-center"}`} onClick={() => void signOut()} title="Sign out" type="button"><LogOut className="size-4 shrink-0" />{desktopMenuOpen ? <span>Sign out</span> : <span className="sr-only">Sign out</span>}</button> : sessionPending ? null : <Link aria-label="Owner sign in" className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-zinc-300 bg-white text-sm font-bold text-zinc-700 shadow-sm transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] ${desktopMenuOpen ? "w-full px-3" : "size-12 justify-center"}`} href="/login" title="Owner sign in"><LogIn className="size-4 shrink-0" />{desktopMenuOpen ? <span>Owner sign in</span> : <span className="sr-only">Owner sign in</span>}</Link>}
                 {showSpendSummary ? currentMonth.isError || !currentMonth.data
-                  ? <SpendSummaryState expanded={desktopMenuOpen} onRetry={() => currentMonth.refetch()} pending={spendSummaryPending} />
+                  ? <SpendSummaryState expanded={desktopMenuOpen} onRetry={() => currentMonth.refetch()} pending={spendSummaryPending || currentMonth.isFetching} />
                   : desktopMenuOpen
                     ? <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} />
                     : <Link aria-label={`${monthlyUnknownCount ? `Known costs only; ${monthlyUnknownCount} unknown. ` : ""}Spend for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`} className="mt-3 inline-flex size-12 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 shadow-sm transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]" href="/records" onClick={(event) => selectNavigation("/records", event)} prefetch title={`${monthlyUnknownCount ? `Known costs only; ${monthlyUnknownCount} unknown. ` : ""}Actual cost for ${monthlyLabel}: ${formatCurrency(monthlyTotal)}`}><Wallet className="size-4" /></Link>
                   : null}
               </div>
             </aside>
-            {mobileMenuOpen ? <div className="fixed inset-x-4 top-4 z-50 rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-xl lg:hidden" id={mobileNavId}><div className="flex items-center justify-between gap-3"><span className="font-black text-zinc-950">Yu-Gi-Oh! Collection hub</span><button aria-label="Close navigation" className="inline-flex size-10 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600" onClick={() => setMobileMenuOpen(false)} type="button"><X className="size-4" /></button></div><nav aria-label="Primary" className="mt-3 grid gap-1">{visibleNavItems.map((item) => { const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`)); const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href); return <div key={item.href}><PrimaryNavLink active={active} item={item} mobile onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" ? <RecordsSubNavigation mobile onSelect={selectNavigation} pathname={activePathname} /> : null}</div>; })}</nav><div className="mt-3 border-t border-zinc-200 pt-3">{showSpendSummary ? currentMonth.isError || !currentMonth.data ? <SpendSummaryState expanded onRetry={() => currentMonth.refetch()} pending={spendSummaryPending} /> : <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} /> : null}<div className={isAuthenticated ? "mt-2" : ""}><ThemeToggle mobile /></div>{isAuthenticated ? <button className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={() => void signOut()} type="button"><LogOut className="size-4" />Sign out</button> : sessionPending ? null : <Link className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" href="/login"><LogIn className="size-4" />Owner sign in</Link>}</div></div> : null}
+            {mobileMenuOpen && typeof document !== "undefined" ? createPortal(<div className="fixed inset-0 z-50 bg-zinc-950/35 p-4 backdrop-blur-sm lg:hidden" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMobileMenu(); }}><section aria-label="Primary navigation" aria-modal="true" className="mx-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-y-auto rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-xl" id={mobileNavId} ref={mobileNavRef} role="dialog" tabIndex={-1}><div className="flex items-center justify-between gap-3"><span className="font-black text-zinc-950">Yu-Gi-Oh! Collection hub</span><button aria-label="Close navigation" className="inline-flex size-11 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={closeMobileMenu} type="button"><X className="size-4" /></button></div><nav aria-label="Primary" className="mt-3 grid gap-1">{visibleNavItems.map((item) => { const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`)); const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href); return <div key={item.href}><PrimaryNavLink active={active} item={item} mobile onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" ? <RecordsSubNavigation mobile onSelect={selectNavigation} pathname={activePathname} /> : null}</div>; })}</nav><div className="mt-3 border-t border-zinc-200 pt-3">{showSpendSummary ? currentMonth.isError || !currentMonth.data ? <SpendSummaryState expanded onRetry={() => currentMonth.refetch()} pending={spendSummaryPending || currentMonth.isFetching} /> : <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} /> : null}<div className={isAuthenticated ? "mt-2" : ""}><ThemeToggle mobile /></div>{isAuthenticated ? <button className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={() => void signOut()} type="button"><LogOut className="size-4" />Sign out</button> : sessionPending ? null : <Link className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" href="/login"><LogIn className="size-4" />Owner sign in</Link>}</div></section></div>, document.body) : null}
           </>
         ) : null}
-        {children}
+        <div id="main-content" tabIndex={-1}>{children}</div>
       </div>
     </AppShellContext.Provider>
   );

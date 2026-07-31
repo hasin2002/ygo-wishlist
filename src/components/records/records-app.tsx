@@ -15,7 +15,6 @@ import {
   CircleDollarSign,
   Clock3,
   History,
-  Info,
   PackageCheck,
   PackageOpen,
   Pencil,
@@ -48,6 +47,8 @@ import { EbayListingAction } from "@/components/records/ebay-listing-action";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
 import { parsePoundsToPence } from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
+import { UnavailableAction } from "@/components/unavailable-action";
+import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import { parseSaleReviewIntent } from "@/lib/navigation-intent";
@@ -538,14 +539,15 @@ function RecordEditorDialog({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [activePanel, setActivePanel] = useState<"details" | "items">(initialPanel);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    initialFocusRef: closeButtonRef,
+    isOpen: true,
+    onClose,
+  });
   const editsCashflow = record.type === "purchase" || record.type === "sale" || record.type === "imported-acquisition";
   const editsListing = record.type === "purchase" || record.type === "imported-acquisition";
   const canMarkCostUnknown = !costOnly && (record.type === "purchase" || record.type === "imported-acquisition");
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const dialogDescription = reviewSale
-    ? "Review this sale record and its exact physical Copies. You can correct its details or items before continuing."
-    : null;
   const sealedUnitsForRecord = source.snapshot.sealedUnits.filter((unit) => unit.acquiredRecordId === record.id);
   const hasSealedAllocationOverrides = sealedUnitsForRecord.some((unit) => unit.allocationMode === "override");
   const hasOpenedSealedUnit = sealedUnitsForRecord.some((unit) => unit.openedRecordId);
@@ -553,69 +555,11 @@ function RecordEditorDialog({
   const changingSealedCost = hasSealedAllocationOverrides && (
     !amountKnown || parsedChangedAmount !== record.amountPence
   );
-
-  useEffect(() => {
-    if (reviewSale) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose, reviewSale]);
-
-  useEffect(() => {
-    if (!reviewSale) return;
-
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousDocumentOverflow = document.documentElement.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
-
-    function focusableElements() {
-      return Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      ) ?? []).filter((element) => !element.hasAttribute("hidden"));
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-
-      const focusable = focusableElements();
-      if (!focusable.length) {
-        event.preventDefault();
-        dialogRef.current?.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousBodyOverflow;
-      document.documentElement.style.overflow = previousDocumentOverflow;
-      window.requestAnimationFrame(() => {
-        if (previouslyFocused?.isConnected) previouslyFocused.focus();
-      });
-    };
-  }, [onClose, reviewSale]);
-
+  const dialogDescription = reviewSale
+    ? "Review this sale record and its exact physical Copies. You can correct its details or items before continuing."
+    : costOnly
+      ? "Add the acquisition cost to resolve this attention item."
+      : "Edit this Record and its items without leaving the current view.";
   async function save() {
     const parsedAmount = editsCashflow && amountKnown ? parsePoundsToPence(amount) : 0;
     if (editsCashflow && amountKnown && parsedAmount === null) {
@@ -656,19 +600,21 @@ function RecordEditorDialog({
     onClose();
   }
 
-  const dialog = (
-    <div aria-describedby={reviewSale ? "record-editor-description" : undefined} aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" onClick={(event) => { if (reviewSale && event.target === event.currentTarget) onClose(); }} ref={dialogRef} role="dialog" tabIndex={reviewSale ? -1 : undefined}>
-      <div className={`w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl ${reviewSale ? "max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-3rem)]" : "max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)]"}`}>
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="record-editor-description" aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div>{reviewSale ? <><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Review sale</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">Review sale</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="record-editor-description">{dialogDescription}</p></> : <><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{costOnly ? "Add acquisition cost" : "Edit record"}</h2></>}</div>
-          <button aria-label={reviewSale ? "Close Review sale" : backLabel || "Close record editor"} autoFocus={!reviewSale} className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} ref={closeButtonRef} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{reviewSale ? "Review sale" : costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{reviewSale ? "Review sale" : costOnly ? "Add acquisition cost" : "Edit record"}</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="record-editor-description">{dialogDescription}</p></div>
+          <button aria-label={reviewSale ? "Close Review sale" : backLabel || "Close record editor"} className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} ref={closeButtonRef} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
         </div>
         {!costOnly ? <div className="border-b border-zinc-300 bg-white px-4 sm:px-6"><div className="grid grid-cols-2 rounded-t-lg border-x border-t border-zinc-300 bg-zinc-100 p-1"><button aria-pressed={activePanel === "details"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "details" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("details")} type="button">Record details</button><button aria-pressed={activePanel === "items"} className={`min-h-11 rounded-md px-3 text-sm font-bold transition ${activePanel === "items" ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600 hover:text-zinc-950"}`} onClick={() => setActivePanel("items")} type="button">Items ({record.lines.filter((line) => line.kind !== "bulk").reduce((sum, line) => sum + line.quantity, 0)})</button></div></div> : null}
         {activePanel === "details" ? <div className="grid gap-5 p-4 sm:p-6">
           <div><h3 className="font-bold">{costOnly ? record.title : "Record details"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">{reviewSale ? dialogDescription : costOnly ? "Enter the full amount paid. Saving removes this item from Needs attention and includes it in your totals." : `Edit the shared information that identifies this ${recordTypeLabels[record.type].toLowerCase()}.`}</p></div>
           {error ? <div className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold text-rose-900" role="alert">{error}</div> : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            {costOnly ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input autoFocus className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></div></label> : <>
+            {costOnly ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">All-in amount paid <span className="text-rose-700">*</span></span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-lg font-bold text-zinc-500">£</span><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" inputMode="decimal" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></div></label> : <>
             <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">Record name <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label>
             <label><span className="text-sm font-bold text-zinc-700">Date <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setDate(event.target.value)} type="date" value={date} /></label>
             <label><span className="text-sm font-bold text-zinc-700">{record.type === "sale" ? "Buyer or marketplace" : "Seller or source"} <span className="text-rose-700">*</span></span><input className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => setRecordSource(event.target.value)} value={recordSource} /></label>
@@ -686,10 +632,9 @@ function RecordEditorDialog({
           <div className="flex flex-col-reverse gap-2 sm:flex-row"><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950" disabled={saving} onClick={onClose} type="button">{activePanel === "details" ? "Cancel" : "Close"}</button>{activePanel === "details" ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={save} type="button">{saving ? "Saving…" : costOnly ? "Save acquisition cost" : "Save details"}</button> : null}</div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
-
-  return reviewSale && typeof document !== "undefined" ? createPortal(dialog, document.body) : dialog;
 }
 
 type OverviewPeriod = "all" | "month" | "30-days" | "year" | "custom";
@@ -737,17 +682,15 @@ function CardAttentionDialog({
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const showTcgplayerUrl = !tcgplayerUrl;
   const showName = !target?.name;
   const showRarity = !target?.rarity;
   const showEdition = item.field === "edition";
   const showSetName = !printingSetName;
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   async function fetchDetails() {
     setFetching(true);
@@ -779,12 +722,14 @@ function CardAttentionDialog({
     onClose();
   }
 
-  return (
-    <div aria-labelledby="card-attention-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
-      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="card-attention-description" aria-labelledby="card-attention-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve attention</span><h2 className="mt-1 text-xl font-black" id="card-attention-title">Confirm card details</h2><p className="mt-1 text-sm font-medium text-zinc-500">Save the missing metadata once, and this item will leave the attention list.</p></div>
-          <button aria-label="Close card resolution" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve attention</span><h2 className="mt-1 text-xl font-black" id="card-attention-title">Confirm card details</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="card-attention-description">Save the missing metadata once, and this item will leave the attention list.</p></div>
+          <button aria-label="Close card resolution" className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
         </header>
         <div className="grid gap-4 p-4 sm:p-6">
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">Why this needs attention</strong><p className="mt-1">{item.detail}</p></div>
@@ -799,7 +744,8 @@ function CardAttentionDialog({
         </div>
         <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving || fetching} onClick={() => void save()} type="button">{saving ? "Saving…" : "Save resolved details"}</button></footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -816,18 +762,16 @@ function EbayCopyLinkAttentionDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const copy = item.copyId ? source.snapshot.copies.find((value) => value.id === item.copyId) : null;
   const target = item.targetId ? source.snapshot.targets.find((value) => value.id === item.targetId) : null;
   const printing = copy ? source.snapshot.printings.find((value) => value.id === copy.printingId) : null;
   const inventoryHref = copy && target
     ? inventoryCardDetailHref(target.id, defaultInventoryListState, copy.id)
     : null;
-
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
 
   async function confirm() {
     if (!item.listingId) return;
@@ -840,12 +784,14 @@ function EbayCopyLinkAttentionDialog({
     onClose();
   }
 
-  return (
-    <div aria-labelledby="ebay-copy-link-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" role="dialog">
-      <div className="w-full max-w-lg rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="ebay-copy-link-description" aria-labelledby="ebay-copy-link-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
         <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
-          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve eBay link</span><h2 className="mt-1 text-xl font-black" id="ebay-copy-link-title">Confirm physical Copy</h2><p className="mt-1 text-sm font-medium text-zinc-500">This confirms the Copy already saved on the historical listing. It does not record a Sale.</p></div>
-          <button aria-label="Close eBay Copy link resolution" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
+          <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Resolve eBay link</span><h2 className="mt-1 text-xl font-black" id="ebay-copy-link-title">Confirm physical Copy</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="ebay-copy-link-description">This confirms the Copy already saved on the historical listing. It does not record a Sale.</p></div>
+          <button aria-label="Close eBay Copy link resolution" className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} type="button"><X className="size-5" /></button>
         </header>
         <div className="grid gap-4 p-4 sm:p-6">
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium leading-5 text-amber-950"><strong className="font-bold">{item.label}</strong><p className="mt-1">{item.detail}</p></div>
@@ -867,7 +813,8 @@ function EbayCopyLinkAttentionDialog({
         </div>
         <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={() => void confirm()} type="button">{saving ? "Confirming…" : "Confirm Copy link"}</button></footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1489,13 +1436,7 @@ function InventoryCardDetailContent({
                       {selectedExposure ? <EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} exposure={selectedExposure} printing={selectedDetail.printing} target={target} /> : null}
                       {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? selectedCopyRemoval.available ? (
                         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 sm:w-auto" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
-                      ) : (
-                        <div className="group relative min-w-0 w-full sm:w-auto">
-                          <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-zinc-100 px-3 pr-10 text-sm font-bold text-zinc-500 disabled:cursor-not-allowed sm:w-auto" disabled type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
-                          <button aria-describedby={`remove-copy-reason-${selectedDetail.copy.id}`} aria-label="Why Remove Copy is unavailable" className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-700 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" type="button"><Info aria-hidden="true" className="size-3.5" /></button>
-                          <span className="pointer-events-none absolute right-0 top-full z-20 mt-2 w-72 rounded-md border border-zinc-300 bg-zinc-950 px-3 py-2 text-xs font-semibold leading-5 text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100" id={`remove-copy-reason-${selectedDetail.copy.id}`} role="tooltip">{selectedCopyRemoval.reason}</span>
-                        </div>
-                      ) : null}
+                      ) : <UnavailableAction icon={Trash2} label="Remove Copy" reason={selectedCopyRemoval.reason ?? "This Copy cannot be removed."} /> : null}
                     </div>
                   </header>
 
@@ -1563,6 +1504,10 @@ function InventoryFilterModal({
   onUpdate: (update: Partial<InventoryListState>) => void;
   rarityOptions: string[];
 }) {
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    isOpen: true,
+    onClose,
+  });
   const [raritySearch, setRaritySearch] = useState("");
   const visibleRarities = useMemo(() => {
     const search = raritySearch.trim().toLocaleLowerCase("en-GB");
@@ -1579,16 +1524,18 @@ function InventoryFilterModal({
     });
   }
 
-  return (
-    <div aria-labelledby="inventory-filter-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6" role="dialog">
-      <section className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-xl">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="inventory-filter-description" aria-labelledby="inventory-filter-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-center bg-black/30 px-4 py-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} role="dialog">
+      <section className="flex max-h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-xl" ref={dialogRef} tabIndex={-1}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 p-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#8a1f2d]">Filters</p>
             <h2 className="mt-1 text-xl font-bold" id="inventory-filter-title">Refine inventory</h2>
-            <p className="mt-1 text-sm font-medium text-zinc-500">{activeFilterCount ? `${activeFilterCount} active` : "No filters active"} <span className="text-zinc-400">· narrow down your collection</span></p>
+            <p className="mt-1 text-sm font-medium text-zinc-500" id="inventory-filter-description">{activeFilterCount ? `${activeFilterCount} active` : "No filters active"} <span className="text-zinc-400">· narrow down your collection</span></p>
           </div>
-          <button aria-label="Close filters" className="grid size-9 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={onClose} type="button"><X className="size-4" /></button>
+          <button aria-label="Close filters" className="grid size-11 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={onClose} type="button"><X className="size-4" /></button>
         </div>
 
         <div className="grid gap-4 overflow-auto p-4">
@@ -1626,9 +1573,10 @@ function InventoryFilterModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-white p-4"><button className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:opacity-40" disabled={!activeFilterCount} onClick={onClear} type="button">Clear filters</button><button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800" onClick={onClose} type="button">Done</button></div>
+        <div className="flex justify-end gap-2 border-t border-zinc-200 bg-white p-4"><button className="min-h-11 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40" disabled={!activeFilterCount} onClick={onClear} type="button">Clear filters</button><button className="min-h-11 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800" onClick={onClose} type="button">Done</button></div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
