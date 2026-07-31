@@ -4,9 +4,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AnimatedCardWall } from "@/components/animated-card-wall";
 import { LoginForm } from "@/components/login-form";
+import { safeNavigationHref } from "@/lib/navigation-intent";
 import { getCurrentSession } from "@/server/session";
-
-const privatePaths = new Set(["/assign-chase", "/spend", "/wheel", "/wishlist/new"]);
 
 export const metadata: Metadata = {
   title: "Sign in | Yu-Gi-Oh! Wishlist",
@@ -19,7 +18,7 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string }>;
 }) {
   const [session, params] = await Promise.all([getCurrentSession(), searchParams]);
-  const nextPath = privatePaths.has(params.next ?? "") ? params.next! : "/";
+  const nextPath = safeNavigationHref(params.next, "/");
 
   if (session) {
     redirect(nextPath);

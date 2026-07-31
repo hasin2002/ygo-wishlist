@@ -10,6 +10,7 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import { DataLoadError } from "@/components/data-load-error";
@@ -17,6 +18,7 @@ import { PreviewNotice } from "@/components/records/entry-form-ui";
 import { OpeningForm, PurchaseForm } from "@/components/records/purchase-opening-forms";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { SaleForm } from "@/components/records/sale-form";
+import { taskReturnHref } from "@/lib/navigation-intent";
 
 export type EntryFlow = "purchase" | "pack-opening" | "sale";
 
@@ -73,6 +75,8 @@ function SavedState({
 
 export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
   const source = useRecordsDataSource();
+  const searchParams = useSearchParams();
+  const returnHref = taskReturnHref(searchParams.get("origin"));
   const [savedRecord, setSavedRecord] = useState<{ id: string; warning?: string } | null>(null);
   const content = flowContent[flow];
   const form = source.status === "loading" ? (
@@ -92,7 +96,7 @@ export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
         <AppHeader title={content.title} />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <Link className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950" href="/records"><ArrowLeft className="size-4" /> Back to Records</Link>
+          <Link className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950" href={returnHref} replace><ArrowLeft className="size-4" /> Back to Records</Link>
           <p className="text-xs font-semibold text-zinc-500">Unfinished work is kept in this browser tab.</p>
         </div>
         <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#8a1f2d]">{content.icon}</span><p className="max-w-2xl pt-1 text-sm font-medium leading-6 text-zinc-600">{content.description}</p></div>

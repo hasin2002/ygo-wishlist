@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
@@ -60,6 +61,7 @@ import {
 } from "@/lib/records/copy-display";
 import { trpc } from "@/trpc/client";
 import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
+import { taskReturnHref } from "@/lib/navigation-intent";
 
 type Photo = {
   archiveKey: string;
@@ -392,7 +394,7 @@ function SoldListingResearch({ groups }: { groups: SoldListingResearchGroup[] })
   );
 }
 
-function EbayLotForm() {
+function EbayLotForm({ returnHref }: { returnHref: string }) {
   const collectionChanged = useCollectionChange();
   const source = useRecordsDataSource();
   const lifecycle = useFormDraftLifecycle({
@@ -2225,7 +2227,8 @@ function EbayLotForm() {
       ) : (
         <Link
           className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 hover:border-zinc-950 sm:w-fit"
-          href="/records/listings"
+          href={returnHref}
+          replace
         >
           Back to Listings
         </Link>
@@ -2245,6 +2248,8 @@ function EbayLotForm() {
 
 export function EbayLotListing() {
   const source = useRecordsDataSource();
+  const searchParams = useSearchParams();
+  const returnHref = taskReturnHref(searchParams.get("origin"), "/records/listings");
   const { data: session } = useSession();
   const ebayStatus = trpc.ebay.status.useQuery(undefined, {
     enabled: source.mode === "live" && Boolean(session),
@@ -2256,7 +2261,8 @@ export function EbayLotListing() {
       <nav aria-label="Mixed lot breadcrumb" className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <Link
           className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950"
-          href="/records/listings"
+          href={returnHref}
+          replace
         >
           <ArrowLeft className="size-4" />
           Back to Listings
@@ -2278,7 +2284,7 @@ export function EbayLotListing() {
       {source.mode !== "live" ? <section className="rounded-xl border border-zinc-300 bg-white p-6 text-center"><h2 className="text-xl font-black">Mixed lots are unavailable in preview mode</h2><p className="mt-2 text-sm font-medium text-zinc-600">Switch to live Records to prepare an eBay listing.</p></section>
         : ebayStatus.isError ? <section className="rounded-xl border border-rose-300 bg-rose-50 p-6 text-center text-rose-950" role="alert"><h2 className="text-xl font-black">eBay readiness could not be checked</h2><p className="mt-2 text-sm font-medium">The mixed-lot editor is paused until the permission check succeeds.</p><button className="mt-4 min-h-11 rounded-md border border-rose-400 bg-white px-4 text-sm font-bold" onClick={() => void ebayStatus.refetch()} type="button">Retry eBay check</button></section>
         : !capability?.ebay.allowed ? <section className="rounded-xl border border-amber-300 bg-amber-50 p-6 text-center text-amber-950" role="status"><h2 className="text-xl font-black">{ebayStatus.isPending ? "Checking eBay readiness" : "Mixed lot unavailable"}</h2><p className="mt-2 text-sm font-medium">{ebayStatus.isPending ? "Checking whether this account can create an eBay listing…" : capability ? `${capability.ebay.message} ${capability.ebay.remedy}` : "Sign in with seller permission to create an eBay listing."}</p>{capability && ["not_connected", "reconnect_required", "missing_scopes"].includes(capability.ebay.code) ? <Link className="mt-4 inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white" href="/ebay">Open eBay settings</Link> : null}</section>
-          : <EbayLotForm />}
+          : <EbayLotForm returnHref={returnHref} />}
     </div>
   );
 }

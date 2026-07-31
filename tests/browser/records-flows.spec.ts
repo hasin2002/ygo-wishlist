@@ -196,13 +196,49 @@ test("Sale flow selects one exact physical Copy and reaches a reviewable confirm
   await expect(page.getByRole("heading", { name: "sale saved" })).toBeVisible();
 });
 
-test("protected Records routes retain their return destination for sign-in", async ({ browser }) => {
+test("protected Records routes retain their exact return destination through an expired session cookie", async ({ browser }) => {
   const context = await browser.newContext({ extraHTTPHeaders: { "x-records-test-live": "1" } });
+  await context.addCookies([{
+    name: "better-auth.session_token",
+    url: "http://127.0.0.1:3105",
+    value: "expired-session-shaped-cookie",
+  }]);
   const page = await context.newPage();
-  await page.goto("/records/inventory");
-  await expect(page).toHaveURL(/\/login\?next=\/records/);
+  const destination = "/records/inventory/cards/target-preview-dark?kind=cards&rarity=Ultra+Rare&page=3&copy=copy-preview-dark-2";
+  await page.goto(destination);
+  await expect(page).toHaveURL(`http://127.0.0.1:3105/login?next=${encodeURIComponent(destination)}`);
   await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
   await context.close();
+});
+
+test("a direct Review Sale opens a viewport dialog with an accessible focus boundary", async ({ page }) => {
+  await page.goto("/records/history?record=record-preview-sale");
+
+  const dialog = page.getByRole("dialog", { name: "Review sale" });
+  const close = dialog.getByRole("button", { name: "Close Review sale" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(dialog).toHaveAttribute("aria-describedby", "record-editor-description");
+  await expect(dialog.locator("#record-editor-description")).toHaveText(
+    /Review this sale record and its exact physical Copies/i,
+  );
+  expect(await dialog.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+});
+
+test("a missing direct Review Sale stays owner-safe and explains the fallback", async ({ page }) => {
+  await page.goto("/records/history?record=missing-preview-sale");
+
+  await expect(page.getByRole("status")).toHaveText(
+    "That Sale is no longer available in this collection.",
+  );
+  await expect(page.getByRole("dialog", { name: "Review sale" })).toHaveCount(0);
 });
 
 test("Feature Ideas is absent from navigation and resolves to Not Found", async ({ page }) => {
