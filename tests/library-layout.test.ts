@@ -117,7 +117,8 @@ test("Library icon controls share the same accessible target size", () => {
 
 test("Add to wishlist is a global Add destination backed by a page form", () => {
   assert.match(appHeaderSource, /href: "\/wishlist\/new"[\s\S]*?label: "Add to wishlist"/);
-  assert.match(addWishlistPageSource, /redirect\("\/login\?next=\/wishlist\/new"\)/);
+  assert.match(addWishlistPageSource, /import \{ protectedLoginHref \} from "@\/server\/protected-login"/);
+  assert.match(addWishlistPageSource, /redirect\(await protectedLoginHref\("\/wishlist\/new"\)\)/);
   assert.match(addWishlistPageSource, /<AddWishlistApp \/>/);
   assert.match(source, /export function AddWishlistApp\(\)/);
   assert.match(source, /<AppHeader title="Add to wishlist" \/>/);

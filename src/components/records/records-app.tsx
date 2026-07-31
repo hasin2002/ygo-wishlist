@@ -1011,8 +1011,9 @@ function HistoryView() {
 
   useEffect(() => {
     if (!requestedReviewValue || handledReviewId.current === requestedReviewValue) return;
-    handledReviewId.current = requestedReviewValue;
     const timeoutId = window.setTimeout(() => {
+      if (handledReviewId.current === requestedReviewValue) return;
+      handledReviewId.current = requestedReviewValue;
       if (!requestedReviewId) {
         setMessage("That Sale is no longer available in this collection.");
         return;

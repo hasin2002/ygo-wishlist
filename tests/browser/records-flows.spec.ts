@@ -219,7 +219,9 @@ test("a direct Review Sale opens a viewport dialog with an accessible focus boun
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute("aria-modal", "true");
   await expect(dialog).toHaveAttribute("aria-describedby", "record-editor-description");
-  await expect(dialog.getByText(/Review this sale record and its exact physical Copies/i)).toBeVisible();
+  await expect(dialog.locator("#record-editor-description")).toHaveText(
+    /Review this sale record and its exact physical Copies/i,
+  );
   expect(await dialog.evaluate((element) => element.parentElement === document.body)).toBe(true);
   await expect(close).toBeFocused();
 
@@ -228,6 +230,15 @@ test("a direct Review Sale opens a viewport dialog with an accessible focus boun
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
+});
+
+test("a missing direct Review Sale stays owner-safe and explains the fallback", async ({ page }) => {
+  await page.goto("/records/history?record=missing-preview-sale");
+
+  await expect(page.getByRole("status")).toHaveText(
+    "That Sale is no longer available in this collection.",
+  );
+  await expect(page.getByRole("dialog", { name: "Review sale" })).toHaveCount(0);
 });
 
 test("Feature Ideas is absent from navigation and resolves to Not Found", async ({ page }) => {
