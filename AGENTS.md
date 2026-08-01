@@ -1,7 +1,7 @@
 <!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Next.js version awareness
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+When changing Next.js APIs, routing, configuration, or conventions, read the relevant guide in `node_modules/next/dist/docs/` first and heed deprecation notices. Do not read Next.js documentation for unrelated work.
 <!-- END:nextjs-agent-rules -->
 
 # Records UI and Copy Semantics
@@ -16,28 +16,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Render viewport-level dialogs through a React portal to `document.body`. Do not mount them beneath an ancestor using `transform`, `filter`, `perspective`, or a retained transform animation: those properties can capture `position: fixed` descendants and break viewport positioning or z-index.
 - A Records dialog must cover the complete viewport, use a bounded and internally scrollable panel, work with keyboard focus, close with Escape and a backdrop click where appropriate, restore focus to its trigger, and lock background scrolling.
 
-# Multi-Agent Collaboration
+# Execution Model and Task Boundaries
 
-- Use sub-agents proactively for independent, bounded work that can run in parallel, especially repository reconnaissance, test investigation, and focused implementation slices. This preserves the primary agent's context for integration and decisions.
-- Choose the model and reasoning effort appropriate to the task. Default to `gpt-5.6-terra` with high reasoning effort; use a stronger model only when the task's complexity or risk justifies it.
-- Give every sub-agent a concrete deliverable, relevant constraints, and clear file or ownership boundaries. Do not delegate broad, overlapping implementation work into the same checkout.
-- Check in on sub-agents at meaningful milestones. Review their findings or changes, redirect them when the scope drifts, and integrate only work that is relevant to the user's request.
-- Keep the primary agent accountable for final decisions, validation, user communication, and safe Git operations. Do not use sub-agents merely to offload coordination or to make irreversible decisions without review.
+- Work on one GitHub issue or coherent implementation task at a time. Do not dispatch or implement multiple issues in parallel.
+- Keep the main task accountable for scoping, planning, final decisions, integration, validation judgment, user communication, and Git operations.
+- Handle genuinely small, isolated changes directly. For substantial implementation after scope and acceptance criteria are fixed, the main task may delegate one bounded implementation assignment to one sub-agent.
+- Do not start a second implementation sub-agent, automatically refill work, or begin another issue in the same task. Model and reasoning selection for delegated GitHub work belongs in the dispatch skill.
+- Recommend a fresh Codex task after an issue reaches review, PR, merge, or completion, or when the next request changes scope. Briefly explain that a fresh task avoids carrying stale context and unnecessary usage.
+- Before recommending a fresh task, provide a compact handoff with the issue, branch or worktree, completed work, remaining work, important decisions, and checks already run. Do not interrupt active edits or validation merely to change tasks.
 
-# Concurrent Chat and Git Workspace Safety
+# Git Workspace Ownership
 
-- Assume other chats or agents may be working on this repository at the same time.
-- Before changing files, run `pwd`, `git status --short --branch`, and `git worktree list` to identify the current folder, branch, and active worktrees.
-- Every implementation task must use a focused `agent/<short-task-name>` branch. Never implement directly on `main`.
-- For a single active task in a clean checkout that is clearly associated with the current chat, create or switch to the task branch in that checkout. This is the default workflow.
-- Create a separate Git worktree only when concurrent tasks need different branches checked out at the same time, the current checkout is dirty or belongs to another active task, or the user explicitly requests a worktree.
-- A branch name such as `agent/search-filters` is not a worktree. A worktree is an additional checkout folder and should not be created without one of the reasons above.
-- Before switching branches in an existing checkout, confirm it is clean and is not being used by another active chat or task. If ownership is unclear, stop and ask the user.
-- Before creating a worktree, inspect `git worktree list` and confirm that the intended branch and folder are not already in use.
-- When a worktree is necessary, create it as a sibling folder when practical, for example: `git worktree add ../ygo-wishlist-search-filters -b agent/search-filters main`.
-- After creating a task worktree, perform all edits, tests, commits, and development-server work for that task from that worktree only.
-- Never edit files in, repurpose, switch branches in, or remove a worktree that belongs to another active task.
-- If the current checkout is dirty, on an unexpected branch, or cannot be clearly associated with this chat's task, preserve the existing work and ask the user which checkout or worktree to use.
+- Before editing, inspect `pwd`, `git status --short --branch`, and `git worktree list`.
+- One implementation task owns one focused `agent/<short-task-name>` branch or worktree. Never implement directly on `main`.
+- Use the current clean checkout by default. Create a worktree only when another active task requires a different branch, the current checkout is dirty or already owned, or the user explicitly requests one.
+- Never edit, switch, repurpose, or remove another task's worktree. If checkout ownership is unclear, stop and ask before changing files.
 
 # Git Workflow Rules
 
@@ -50,46 +43,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 # Significant Change Planning Workflow
 
 - Treat work as significant when it affects multiple features or layers, changes architecture or data models, introduces migrations or new dependencies, touches authentication/authorization, integrates external services, or otherwise has meaningful regression or deployment risk.
-- If an initial user message appears to request or explore a significant change, do not begin implementation immediately. Explain briefly why planning would reduce risk and offer to work through a plan first.
-- Do not force the planning workflow onto small, isolated, low-risk fixes.
-- During planning, inspect the relevant code and project documentation, clarify important unknowns, identify risks, and divide the work into reviewable outcomes.
-- Before creating anything in GitHub, present the proposed plan to the user and wait for explicit approval to create the issue.
-- Once approved, create a GitHub issue that acts as the source of truth and includes:
-  - the problem and desired outcome
-  - scope and explicit non-goals
-  - the proposed implementation approach
-  - acceptance criteria and pass conditions
-  - automated tests to add or run
-  - manual test steps the user can follow
-  - risks, dependencies, migration concerns, and rollback notes where relevant
-- Do not begin implementation merely because the issue exists. Wait until the user approves the issue and asks for implementation.
-- Implement the approved issue in a dedicated task branch. Use the current clean checkout by default; create a separate worktree only when required by the concurrent-work rules above. Reference the issue in the branch work and later pull request.
-- A new implementation chat or agent may perform the work, but the task branch provides the baseline isolation. Use a worktree as additional isolation only when multiple branches must remain checked out concurrently.
-- When implementation is ready, explain what changed, what checks passed, and exactly what the user should manually test.
-- Open a pull request only after the user approves the implemented behaviour. A draft pull request may be opened earlier only when the user explicitly requests it, for example to run PR-only CI checks.
-- Creating or approving a pull request does not authorize merging it. Merge only after separate explicit user approval.
+- Use `$plan-significant-change` for the detailed planning workflow before implementation. Do not force it onto small, isolated, low-risk fixes.
+- Create a GitHub issue only when the user requests one or when approved multi-session work needs a durable source of truth.
+- Implementation requires approval of the agreed scope. Database changes, production actions, deployment, and merging into `main` remain separately explicit.
 
-# GitHub Authentication Diagnostics
+# GitHub Access
 
-- Do not conclude that GitHub credentials are expired or invalid from a single failed authentication check in a restricted or sandboxed environment.
-- A restricted environment may be unable to access the operating-system keyring or GitHub network endpoints even when the user's credentials are valid.
-- If `gh auth status -h github.com` fails under restrictions, retry it with normal host keyring and network access when permission is available before asking the user to re-authenticate.
-- Distinguish GitHub CLI/API authentication from Git transport authentication. Check the relevant path with safe commands such as `gh auth status -h github.com`, `gh api user`, or `git ls-remote origin HEAD`.
-- When available, the connected GitHub app may be used as an independent authentication check or as an alternative for supported GitHub operations.
-- Never display, log, or request the user's raw authentication token. Do not run commands that print token values merely to diagnose access.
-- Ask the user to run `gh auth login` only after authentication still fails with normal keyring and network access, or when the required permission cannot be requested safely.
-- When reporting an authentication problem, state which check failed and whether it ran in a restricted environment so the user is not given a misleading diagnosis.
-
-# Approval Communication
-
-- When asking for approval, explain the changes in plain English.
-- Assume the user is semi-technical and may be out of practice.
-- Clearly state:
-  - what changed
-  - why it changed
-  - what the user should check
-  - what approval would allow next
-- Avoid unnecessary jargon. If technical terms are needed, briefly explain them.
+- Prefer the connected GitHub app for issue and pull-request operations when available.
+- If a GitHub CLI or Git authentication check fails in a restricted environment, retry it once with normal keychain and network access before diagnosing an authentication problem.
+- Never expose tokens or request re-authentication unless the normal-access check also fails.
 
 # Existing Change Safety
 
@@ -99,24 +61,22 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # Verification
 
-- After code changes, run `npm run lint` when practical.
-- For larger UI, routing, data, or deployment-related changes, also run `npm run build`.
+- Run the smallest relevant checks once after implementation. Prefer focused tests for the changed behaviour and run `npm run lint` for code changes when practical.
+- Run `npm run build` when the change affects routing, build configuration, schema or generated boundaries, deployment behaviour, or broad integration, or when the user requests it. Do not run a production build for every routine UI change.
+- Use browser or manual QA only for the changed user flow and concrete regression risks.
 - Report any checks that were skipped or failed.
 
 # Dev Server Cleanup
 
 - If you start a dev server for testing or any other reason, stop it completely when you are done using it.
 - Before finishing, make sure any server process you started has been killed and is no longer running.
-- Turbopack cannot use a `node_modules` symlink that points outside the project filesystem root. In a worktree, use locally installed dependencies or start Next with `npm run dev -- --webpack`; do not assume a sibling checkout's `node_modules` symlink will work.
-- New worktrees do not automatically include ignored `.env*` files. Before starting the app in a task worktree, confirm that its required local environment configuration is present. If it is missing, copy the existing `.env*` files from a trusted worktree for this same repository without opening, printing, inspecting, or altering their contents. Do not stage, commit, or otherwise expose those files. If no trusted source is available, ask the user before starting the app.
-- Better Auth supports the approved localhost, ngrok, and deployed hosts defined in `src/lib/auth-hosts.ts`. Use the hostname relevant to the flow being verified; `http://localhost:3000` is valid for local checks and does not require a tunnel.
-- Run `ngrok http 3000` only when a test needs the public-tunnel flow. Before testing authentication through the tunnel, verify that it serves `https://armless-backslid-surrogate.ngrok-free.dev`, which must remain in the approved host allowlist.
-- When an authentication, cookie, redirect, or callback change could behave differently by hostname, test each affected approved host rather than assuming localhost and ngrok share a session. Do not modify `.env*` files unless the user explicitly asks.
-- Stop the ngrok tunnel as well as the development server when testing is complete. Do not expose a local server through a tunnel longer than needed.
+- Follow `README.md` for local environment, worktree dependency, authentication-host, ngrok, eBay, and deployment guidance. Do not duplicate or improvise environment instructions in task prompts.
+- Stop any tunnel you started when testing ends. Do not expose a local server longer than needed.
 
 # Database, Environment, and Deployment Safety
 
-- Do not run database migrations, `npm run db:push`, deployment commands, or production-affecting commands without explicit approval.
+- `npm run db:push` is pre-authorized only for local testing when the active database target is confirmed to be the local development database. Confirm the environment without printing or exposing the connection string; if the target is ambiguous, stop and ask.
+- This local-development permission does not authorize staging or production database changes, other migration commands, deployment commands, or production-affecting actions.
 - Do not modify `.env*` files or expose secrets unless directly instructed.
 - Keep changes scoped to the requested task.
 
