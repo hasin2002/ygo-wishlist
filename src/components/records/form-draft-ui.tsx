@@ -1,9 +1,59 @@
 "use client";
 
 import { RotateCcw, X } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { FormDraftIntent } from "@/lib/records/form-draft-lifecycle";
+
+export type DraftConflictCardSummary = {
+  additionalCopies?: number;
+  condition: string;
+  identifier: string;
+  imageUrl: string | null;
+  name: string;
+  rarity: string;
+};
+
+function DraftConflictWorkSummary({
+  fallback,
+  item,
+  label,
+}: {
+  fallback: string;
+  item?: DraftConflictCardSummary;
+  label: string;
+}) {
+  return (
+    <article className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+      <div className="relative aspect-[59/86] w-14 overflow-hidden rounded-md border border-zinc-200 bg-white">
+        {item?.imageUrl ? (
+          <Image
+            alt={`${item.name} card`}
+            className="object-contain p-1"
+            fill
+            sizes="56px"
+            src={item.imageUrl}
+            unoptimized
+          />
+        ) : (
+          <span aria-hidden="true" className="grid h-full place-items-center text-[10px] font-black text-zinc-400">CARD</span>
+        )}
+      </div>
+      <div className="min-w-0 self-center">
+        <p className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-500">{label}</p>
+        <p className="mt-0.5 line-clamp-2 text-sm font-black leading-5 text-zinc-950">{item?.name ?? fallback}</p>
+        {item ? (
+          <>
+            <p className="mt-1 text-xs font-semibold text-zinc-600">{item.rarity} · {item.condition}</p>
+            <p className="mt-1 truncate text-xs font-bold text-zinc-800" title={item.identifier}>{item.identifier}</p>
+            {item.additionalCopies ? <p className="mt-1 text-xs font-semibold text-zinc-500">+{item.additionalCopies} more {item.additionalCopies === 1 ? "Copy" : "Copies"} in this draft</p> : null}
+          </>
+        ) : null}
+      </div>
+    </article>
+  );
+}
 
 export function FormDraftStatus({
   dirty,
@@ -35,16 +85,20 @@ export function FormDraftStatus({
 
 export function DraftConflictDialog({
   incoming,
+  incomingItem,
   onCancel,
   onResume,
   onStartNew,
   previous,
+  previousItem,
 }: {
   incoming: FormDraftIntent;
+  incomingItem?: DraftConflictCardSummary;
   onCancel: () => void;
   onResume: () => void;
   onStartNew: () => void;
   previous: FormDraftIntent;
+  previousItem?: DraftConflictCardSummary;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const resumeRef = useRef<HTMLButtonElement>(null);
@@ -124,13 +178,23 @@ export function DraftConflictDialog({
         </header>
         <div className="min-h-0 overflow-y-auto p-4" id={descriptionId}>
           <p className="text-sm font-medium leading-6 text-zinc-700">
-            This tab has a draft for {intentLabel(previous)}, but you deliberately opened {intentLabel(incoming)}. Nothing will be replaced until you choose.
+            Choose which work to continue. Nothing will be replaced until you choose.
           </p>
+          {incomingItem || previousItem ? (
+            <div className="mt-3 grid gap-2">
+              <DraftConflictWorkSummary fallback={intentLabel(previous)} item={previousItem} label="Saved draft" />
+              <DraftConflictWorkSummary fallback={intentLabel(incoming)} item={incomingItem} label="Opened now" />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm font-medium leading-6 text-zinc-700">
+              This tab has a draft for {intentLabel(previous)}, but you deliberately opened {intentLabel(incoming)}.
+            </p>
+          )}
         </div>
         <footer className="grid gap-2 border-t border-zinc-200 p-4 sm:grid-cols-3">
+          <button className="min-h-11 rounded-md border border-zinc-300 px-3 font-bold" onClick={onCancel} type="button">Cancel</button>
           <button className="min-h-11 rounded-md border border-zinc-300 px-3 font-bold" onClick={onResume} ref={resumeRef} type="button">Resume previous draft</button>
           <button className="min-h-11 rounded-md bg-[#8a1f2d] px-3 font-bold text-white" onClick={onStartNew} type="button">Start new with this item</button>
-          <button className="min-h-11 rounded-md border border-zinc-300 px-3 font-bold" onClick={onCancel} type="button">Cancel</button>
         </footer>
       </section>
     </div>,

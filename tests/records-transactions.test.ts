@@ -16,6 +16,8 @@ import {
   ebayConnections,
   ebayListingMembers,
   ebayListings,
+  ebayOrderLineAllocations,
+  ebayOrderLines,
   recordEntries,
   recordLines,
   sealedUnits,
@@ -100,6 +102,81 @@ const card = (quantity = 1) => ({
   setName: "Legend of Blue Eyes White Dragon",
   tcgplayerUrl: "https://www.tcgplayer.com/product/12345/dark-magician",
 });
+
+async function seedPaidIndividualReview(
+  suffix: string,
+  caller = records,
+  seedOwnerId = ownerId,
+) {
+  const purchase = await caller.createPurchase({
+    kind: "card",
+    recordName: `Paid review source ${suffix}`,
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "paid Sale review transaction coverage",
+    totalPence: 100,
+    card: card(),
+  });
+  const [copy] = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, purchase.id));
+  assert.ok(copy);
+  const now = new Date();
+  const listingId = `paid-review-listing-${suffix}`;
+  const memberId = `paid-review-member-${suffix}`;
+  const orderLineId = `paid-review-order-line-${suffix}`;
+  await db.insert(ebayListings).values({
+    copyId: copy.id,
+    createdAt: now,
+    id: listingId,
+    itemId: `paid-review-item-${suffix}`,
+    kind: "individual",
+    listingEndedAt: now,
+    listingState: "ended",
+    listingUrl: `https://www.ebay.co.uk/itm/paid-review-item-${suffix}`,
+    ownerId: seedOwnerId,
+    paidAt: now,
+    quantitySold: 1,
+    saleState: "paid",
+    status: "ended",
+    title: `Paid review listing ${suffix}`,
+    updatedAt: now,
+  });
+  await db.insert(ebayListingMembers).values({
+    copyId: copy.id,
+    createdAt: now,
+    fulfilmentPosition: 0,
+    id: memberId,
+    listingId,
+    ownerId: seedOwnerId,
+    updatedAt: now,
+  });
+  await db.insert(ebayOrderLines).values({
+    createdAt: now,
+    id: orderLineId,
+    listingId,
+    orderId: `paid-review-order-${suffix}`,
+    orderLineItemId: `paid-review-line-item-${suffix}`,
+    ownerId: seedOwnerId,
+    paidAt: now,
+    paymentState: "paid",
+    quantityPurchased: 1,
+    transactionId: `paid-review-transaction-${suffix}`,
+    updatedAt: now,
+  });
+  await db.insert(ebayOrderLineAllocations).values({
+    allocatedAt: now,
+    copyId: copy.id,
+    createdAt: now,
+    fulfilmentPosition: 0,
+    id: `paid-review-allocation-${suffix}`,
+    listingId,
+    listingMemberId: memberId,
+    orderLineId,
+    ownerId: seedOwnerId,
+    updatedAt: now,
+  });
+  return { copy, listingId, memberId, orderLineId };
+}
 
 async function seedOwner() {
   const now = new Date();
@@ -614,6 +691,185 @@ test("sale changes only the selected exact Copy and does not partially write whe
   const afterFailure = await records.snapshot();
   assert.equal(afterFailure.records.length, recordsBeforeFailure);
   assert.equal(afterFailure.copies.find((copy) => copy.id === sourceCopies[1]!.id)?.status, "available");
+});
+
+test("paid eBay Sale review accepts an ended paid lifecycle with legacy active status and links only its exact Copy", async () => {
+  const seeded = await seedPaidIndividualReview("valid");
+  await db.update(ebayListings).set({ status: "active" }).where(eq(ebayListings.id, seeded.listingId));
+  const inspection = await records.inspectPaidEbaySaleReview({
+    copyId: seeded.copy.id,
+    listingId: seeded.listingId,
+  });
+  assert.equal(inspection.ok, true);
+  if (inspection.ok) {
+    assert.equal(inspection.copyId, seeded.copy.id);
+    assert.equal(inspection.listingId, seeded.listingId);
+    assert.equal(inspection.orderLineId, seeded.orderLineId);
+    assert.deepEqual(inspection.copy, {
+      condition: "Near Mint",
+      id: seeded.copy.id,
+      location: null,
+      stickerNumber: null,
+    });
+    assert.deepEqual(inspection.card, {
+      imageUrl: null,
+      name: "Dark Magician",
+      rarity: "Ultra Rare",
+      setCode: "LOB-005",
+      setName: "Legend of Blue Eyes White Dragon",
+    });
+    assert.equal(inspection.recordName, "Sold Dark Magician");
+    assert.equal(inspection.remote.itemId, "paid-review-item-valid");
+    assert.equal(inspection.remote.orderLineItemId, "paid-review-line-item-valid");
+  }
+
+  const result = await records.createSale({
+    copyIds: [seeded.copy.id],
+    date: "2026-07-30",
+    netProceedsPence: 625,
+    notes: "explicitly reviewed paid eBay sale",
+    paidEbayReview: {
+      copyId: seeded.copy.id,
+      listingId: seeded.listingId,
+    },
+    recordName: "Reviewed eBay Sale",
+    source: "eBay",
+  });
+  const [copy] = await db.select().from(cardCopies).where(eq(cardCopies.id, seeded.copy.id));
+  const [listing] = await db.select().from(ebayListings).where(eq(ebayListings.id, seeded.listingId));
+  const [orderLine] = await db.select().from(ebayOrderLines).where(eq(ebayOrderLines.id, seeded.orderLineId));
+  assert.equal(copy?.status, "sold");
+  assert.equal(copy?.soldRecordId, result.id);
+  assert.equal(listing?.saleRecordId, result.id);
+  assert.equal(listing?.saleState, "paid");
+  assert.equal(listing?.status, "ended");
+  assert.equal(orderLine?.saleRecordId, result.id);
+
+  const alreadyLinked = await records.inspectPaidEbaySaleReview({
+    copyId: seeded.copy.id,
+    listingId: seeded.listingId,
+  });
+  assert.equal(alreadyLinked.ok, false);
+  if (!alreadyLinked.ok) {
+    assert.equal(alreadyLinked.code, "already_recorded");
+    assert.match(alreadyLinked.message, /already has a Sale record/i);
+  }
+});
+
+test("paid eBay Sale review rejects stale, wrong-owner, wrong-listing, wrong-source, and extra-Copy intents atomically", async () => {
+  const stale = await seedPaidIndividualReview("legacy-stale");
+  await db.update(ebayListings).set({ quantitySold: null }).where(eq(ebayListings.id, stale.listingId));
+  const staleInspection = await records.inspectPaidEbaySaleReview({
+    copyId: stale.copy.id,
+    listingId: stale.listingId,
+  });
+  assert.equal(staleInspection.ok, false);
+  if (!staleInspection.ok) {
+    assert.equal(staleInspection.code, "unsupported_listing");
+    assert.match(staleInspection.message, /one-card individual/i);
+  }
+
+  const foreign = await seedPaidIndividualReview(
+    "foreign-owner",
+    secondOwnerRecords,
+    secondOwnerId,
+  );
+  const foreignInspection = await records.inspectPaidEbaySaleReview({
+    copyId: foreign.copy.id,
+    listingId: foreign.listingId,
+  });
+  assert.equal(foreignInspection.ok, false);
+  if (!foreignInspection.ok) {
+    assert.equal(foreignInspection.code, "copy_not_found");
+    assert.match(foreignInspection.message, /missing or belongs to another collection/i);
+  }
+
+  const wrongListing = await records.inspectPaidEbaySaleReview({
+    copyId: stale.copy.id,
+    listingId: "missing-paid-review-listing",
+  });
+  assert.equal(wrongListing.ok, false);
+  if (!wrongListing.ok) {
+    assert.equal(wrongListing.code, "listing_not_found");
+    assert.match(wrongListing.message, /could not be found in this collection/i);
+  }
+
+  const wrongSource = await seedPaidIndividualReview("wrong-source");
+  const extra = await records.createPurchase({
+    kind: "card",
+    recordName: "Paid review extra Copy",
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "",
+    totalPence: 100,
+    card: card(),
+  });
+  const [extraCopy] = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, extra.id));
+  assert.ok(extraCopy);
+  const recordsBefore = (await records.snapshot()).records.length;
+  const baseInput = {
+    date: "2026-07-30",
+    netProceedsPence: 500,
+    notes: "must remain atomic",
+    paidEbayReview: {
+      copyId: wrongSource.copy.id,
+      listingId: wrongSource.listingId,
+    },
+    recordName: "Rejected paid eBay Sale",
+  };
+  await assert.rejects(
+    records.createSale({
+      ...baseInput,
+      copyIds: [wrongSource.copy.id],
+      source: "Local buyer",
+    }),
+    /must keep eBay as its source/i,
+  );
+  await assert.rejects(
+    records.createSale({
+      ...baseInput,
+      copyIds: [wrongSource.copy.id, extraCopy.id],
+      source: "eBay",
+    }),
+    /only its exact physical Copy/i,
+  );
+  await assert.rejects(
+    records.createSale({
+      ...baseInput,
+      copyIds: [extraCopy.id],
+      source: "eBay",
+    }),
+    /only its exact physical Copy/i,
+  );
+  await assert.rejects(
+    records.createSale({
+      ...baseInput,
+      copyIds: [stale.copy.id],
+      paidEbayReview: {
+        copyId: stale.copy.id,
+        listingId: stale.listingId,
+      },
+      source: "eBay",
+    }),
+    /one-card individual/i,
+  );
+
+  const after = await records.snapshot();
+  assert.equal(after.records.length, recordsBefore);
+  assert.equal(after.copies.find((copy) => copy.id === wrongSource.copy.id)?.status, "available");
+  assert.equal(after.copies.find((copy) => copy.id === stale.copy.id)?.status, "available");
+  assert.equal(after.copies.find((copy) => copy.id === extraCopy.id)?.status, "available");
+  const [wrongSourceListing] = await db.select().from(ebayListings).where(eq(ebayListings.id, wrongSource.listingId));
+  const [wrongSourceLine] = await db.select().from(ebayOrderLines).where(eq(ebayOrderLines.id, wrongSource.orderLineId));
+  assert.equal(wrongSourceListing?.saleRecordId, null);
+  assert.equal(wrongSourceLine?.saleRecordId, null);
+  for (const listingId of [wrongSource.listingId, stale.listingId]) {
+    await db.delete(ebayOrderLineAllocations).where(eq(ebayOrderLineAllocations.listingId, listingId));
+    await db.delete(ebayOrderLines).where(eq(ebayOrderLines.listingId, listingId));
+    await db.delete(ebayListingMembers).where(eq(ebayListingMembers.listingId, listingId));
+    await db.delete(ebayListings).where(eq(ebayListings.id, listingId));
+  }
 });
 
 test("unknown acquisition cost remains distinct from an intentional £0 gift", async () => {

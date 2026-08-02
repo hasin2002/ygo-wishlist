@@ -13,10 +13,17 @@ export type SaleReviewIntent = Readonly<{
   recordId: string;
 }>;
 
+export type PaidEbaySaleReviewIntent = Readonly<{
+  copyId: string;
+  listingId: string;
+}>;
+
 const fallbackHref = "/records";
 const maximumHrefLength = 2_048;
+const maximumIntentIdLength = 160;
 const disallowedCharacter = /[\\\u0000-\u001f\u007f]/;
 const encodedPathSeparator = /%(?:2f|5c)/i;
+export const paidEbaySaleReviewIntentName = "paid-ebay-sale";
 
 /**
  * Proxy overwrites this request-only header for every protected navigation.
@@ -117,6 +124,53 @@ export function parseSaleReviewIntent(value: unknown): SaleReviewIntent | null {
 export function reviewSaleHref(value: unknown) {
   const intent = parseSaleReviewIntent(value);
   return intent ? `/records/history?record=${encodeURIComponent(intent.recordId)}` : "/records/history";
+}
+
+function parseBoundedIntentId(value: unknown) {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maximumIntentIdLength
+    && !disallowedCharacter.test(value)
+    ? value
+    : null;
+}
+
+export function parsePaidEbaySaleReviewIntent(
+  value: Pick<URLSearchParams, "getAll"> | null | undefined,
+): PaidEbaySaleReviewIntent | null {
+  if (!value) return null;
+  const names = value.getAll("intent");
+  const copyIds = value.getAll("copyId");
+  const listingIds = value.getAll("listingId");
+  if (
+    names.length !== 1
+    || names[0] !== paidEbaySaleReviewIntentName
+    || copyIds.length !== 1
+    || listingIds.length !== 1
+  ) return null;
+  const copyId = parseBoundedIntentId(copyIds[0]);
+  const listingId = parseBoundedIntentId(listingIds[0]);
+  return copyId && listingId ? { copyId, listingId } : null;
+}
+
+export function paidEbaySaleReviewHref(
+  intent: PaidEbaySaleReviewIntent,
+  origin?: string | NavigationIntent | null,
+) {
+  const parsed = parsePaidEbaySaleReviewIntent(new URLSearchParams({
+    intent: paidEbaySaleReviewIntentName,
+    copyId: intent.copyId,
+    listingId: intent.listingId,
+  }));
+  if (!parsed) return `/records/new/sale?intent=${paidEbaySaleReviewIntentName}`;
+  const params = new URLSearchParams({
+    intent: paidEbaySaleReviewIntentName,
+    listingId: parsed.listingId,
+    copyId: parsed.copyId,
+  });
+  const originIntent = typeof origin === "string" ? parseNavigationIntent(origin) : origin;
+  if (originIntent) params.set("origin", serializeNavigationIntent(originIntent));
+  return `/records/new/sale?${params.toString()}`;
 }
 
 export function currentNavigationHref(pathname: string | null, searchParams: Pick<URLSearchParams, "toString"> | null) {

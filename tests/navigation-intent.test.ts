@@ -4,7 +4,9 @@ import {
   addTaskHref,
   currentNavigationHref,
   loginHref,
+  paidEbaySaleReviewHref,
   parseNavigationIntent,
+  parsePaidEbaySaleReviewIntent,
   parseSaleReviewIntent,
   protectedLoginHref,
   reviewSaleHref,
@@ -80,4 +82,37 @@ test("Review Sale uses only a bounded, non-control record ID", () => {
   assert.equal(parseSaleReviewIntent(""), null);
   assert.equal(parseSaleReviewIntent("sale\u0000id"), null);
   assert.equal(reviewSaleHref(""), "/records/history");
+});
+
+test("paid eBay Sale review carries one bounded exact Listing and Copy", () => {
+  const href = paidEbaySaleReviewHref(
+    { copyId: "copy-123", listingId: "listing-456" },
+    "/records/listings/listing-456?lifecycle=paid&page=2",
+  );
+  const url = new URL(href, "https://collection-hub.invalid");
+  assert.equal(url.pathname, "/records/new/sale");
+  assert.deepEqual(parsePaidEbaySaleReviewIntent(url.searchParams), {
+    copyId: "copy-123",
+    listingId: "listing-456",
+  });
+  assert.equal(
+    url.searchParams.get("origin"),
+    "/records/listings/listing-456?lifecycle=paid&page=2",
+  );
+
+  for (const query of [
+    "",
+    "intent=paid-ebay-sale&copyId=copy-1",
+    "intent=paid-ebay-sale&listingId=listing-1",
+    "intent=other&copyId=copy-1&listingId=listing-1",
+    "intent=paid-ebay-sale&copyId=copy-1&copyId=copy-2&listingId=listing-1",
+    `intent=paid-ebay-sale&copyId=${"c".repeat(161)}&listingId=listing-1`,
+    "intent=paid-ebay-sale&copyId=copy%00one&listingId=listing-1",
+  ]) {
+    assert.equal(parsePaidEbaySaleReviewIntent(new URLSearchParams(query)), null, query);
+  }
+  assert.equal(
+    paidEbaySaleReviewHref({ copyId: "", listingId: "listing-1" }),
+    "/records/new/sale?intent=paid-ebay-sale",
+  );
 });

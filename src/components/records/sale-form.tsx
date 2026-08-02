@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DestructiveToast,
   fieldClass,
@@ -32,6 +32,7 @@ import {
   DraftConflictDialog,
   DraftHydrationBoundary,
   FormDraftStatus,
+  type DraftConflictCardSummary,
 } from "@/components/records/form-draft-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import {
@@ -42,9 +43,14 @@ import {
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { generatedSaleRecordName } from "@/lib/records/record-name";
 import { useFormDraftLifecycle } from "@/lib/records/use-form-draft-lifecycle";
-import { taskReturnHref } from "@/lib/navigation-intent";
+import {
+  paidEbaySaleReviewIntentName,
+  parsePaidEbaySaleReviewIntent,
+  taskReturnHref,
+  type PaidEbaySaleReviewIntent,
+} from "@/lib/navigation-intent";
 import { hasFields, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
-import { copyDisplayLabel, copyShortReference } from "@/lib/records/copy-display";
+import { copyDisplayLabel, copyPhysicalIdentifier, copyShortReference } from "@/lib/records/copy-display";
 import { copySelectionAvailabilityReason, filterCopySelectionCandidates, pageCopySelection, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import type {
   CardCopy,
@@ -52,6 +58,7 @@ import type {
   CopyEbayExposureState,
   WishlistTarget,
 } from "@/lib/records/types";
+import { trpc } from "@/trpc/client";
 
 const salePageSize = 20;
 
@@ -86,6 +93,22 @@ type LibraryImpact = {
   before: number;
   target: WishlistTarget;
 };
+
+function draftConflictCardSummary(
+  item: AvailableCopy,
+  photo: CopyPhotoSummary | undefined,
+  additionalCopies = 0,
+): DraftConflictCardSummary {
+  return {
+    additionalCopies,
+    condition: item.copy.condition,
+    identifier: copyPhysicalIdentifier(item.copy),
+    imageUrl: photo?.primary?.previewUrl
+      || (item.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(item.imageUrl)}` : null),
+    name: item.target.name,
+    rarity: item.target.rarity || "Unknown rarity",
+  };
+}
 
 function newSaleDraft(copyId?: string | null): SaleDraft {
   return {
@@ -168,16 +191,95 @@ function LibraryImpactNotice({ impacts }: { impacts: LibraryImpact[] }) {
 
 export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: string) => void }) {
   const source = useRecordsDataSource();
+  const searchParams = useSearchParams();
+  const paidReviewRequested = searchParams.getAll("intent").includes(paidEbaySaleReviewIntentName);
+  const paidReviewIntent = useMemo(
+    () => parsePaidEbaySaleReviewIntent(searchParams),
+    [searchParams],
+  );
+  const inspection = trpc.records.inspectPaidEbaySaleReview.useQuery(
+    paidReviewIntent ?? { copyId: "_invalid", listingId: "_invalid" },
+    {
+      enabled: source.mode === "live" && paidReviewRequested && paidReviewIntent !== null,
+      staleTime: 0,
+    },
+  );
+
+  if (
+    source.mode === "live"
+    && paidReviewRequested
+    && paidReviewIntent
+    && inspection.isPending
+  ) {
+    return (
+      <div aria-live="polite" className="rounded-lg border border-zinc-200 bg-white p-4 text-sm font-medium text-zinc-600">
+        Checking the exact paid eBay Copy…
+      </div>
+    );
+  }
+
+  const recoveryMessage = !paidReviewRequested
+    ? null
+    : !paidReviewIntent
+      ? "This paid Sale review link is incomplete. Return to the eBay listing and choose Review Sale record again."
+      : source.mode !== "live"
+        ? "Paid eBay Sale review is available in live Records. No physical Copy has been selected in preview."
+        : inspection.isError
+          ? "The paid eBay Sale review could not be checked. Return to Listings, refresh the paid listing, and try again."
+          : inspection.data && !inspection.data.ok
+            ? inspection.data.message
+            : null;
+  const paidReviewReady = Boolean(
+    paidReviewIntent
+    && source.mode === "live"
+    && inspection.data?.ok,
+  );
+
+  return (
+    <SaleFormWorkflow
+      onSaved={onSaved}
+      paidReviewIntent={paidReviewRequested ? paidReviewIntent : null}
+      paidReviewRequested={paidReviewRequested}
+      paidReviewReady={paidReviewReady}
+      recoveryMessage={recoveryMessage}
+    />
+  );
+}
+
+function SaleFormWorkflow({
+  onSaved,
+  paidReviewIntent,
+  paidReviewRequested,
+  paidReviewReady,
+  recoveryMessage,
+}: {
+  onSaved: (recordId: string, warning?: string) => void;
+  paidReviewIntent: PaidEbaySaleReviewIntent | null;
+  paidReviewRequested: boolean;
+  paidReviewReady: boolean;
+  recoveryMessage: string | null;
+}) {
+  const source = useRecordsDataSource();
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnHref = taskReturnHref(searchParams.get("origin"));
-  const requestedCopyId = searchParams.get("copyId");
+  const requestedCopyId = paidReviewRequested
+    ? paidReviewReady && paidReviewIntent ? paidReviewIntent.copyId : null
+    : searchParams.get("copyId");
   const initialDraft = useMemo(() => newSaleDraft(requestedCopyId), [requestedCopyId]);
   const launchIntent = useMemo(() => ({
-    kind: requestedCopyId ? "copy" as const : "none" as const,
-    id: requestedCopyId,
-    label: requestedCopyId ? `physical Copy #${copyShortReference(requestedCopyId)}` : undefined,
-  }), [requestedCopyId]);
+    kind: paidReviewRequested || requestedCopyId ? "copy" as const : "none" as const,
+    id: paidReviewRequested
+      ? paidReviewIntent
+        ? `${paidEbaySaleReviewIntentName}:${paidReviewIntent.listingId}:${paidReviewIntent.copyId}`
+        : `${paidEbaySaleReviewIntentName}:invalid`
+      : requestedCopyId,
+    label: paidReviewRequested
+      ? paidReviewIntent
+        ? `paid eBay listing for physical Copy #${copyShortReference(paidReviewIntent.copyId)}`
+        : "incomplete paid eBay Sale review"
+      : requestedCopyId ? `physical Copy #${copyShortReference(requestedCopyId)}` : undefined,
+  }), [paidReviewIntent, paidReviewRequested, requestedCopyId]);
   const lifecycle = useFormDraftLifecycle({
     workflow: "sale",
     ownerScope: source.draftOwnerScope,
@@ -190,6 +292,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [paidReviewActive, setPaidReviewActive] = useState(paidReviewReady);
   const [query, setQuery] = useState("");
   const [condition, setCondition] = useState("all");
   const [rarity, setRarity] = useState("all");
@@ -210,18 +313,27 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
     });
   }, [source.snapshot.copies, source.snapshot.copyEbayExposures, source.snapshot.printings, source.snapshot.targets]);
 
+  const selectionReason = useCallback((item: AvailableCopy) => (
+    paidReviewActive && paidReviewIntent?.copyId === item.copy.id
+      ? null
+      : copySelectionAvailabilityReason({
+          copyId: item.copy.id,
+          exposure: item.exposure,
+          status: item.copy.status,
+        })
+  ), [paidReviewActive, paidReviewIntent]);
   const selection = useMemo(() => reconcileCopySelection(
     draft.copyIds,
     allCopies.map((item) => ({
       id: item.copy.id,
       item,
-      reason: copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }),
+      reason: selectionReason(item),
     })),
     { min: draft.kind === "single" ? 1 : 2, max: 100 },
-  ), [allCopies, draft.copyIds, draft.kind]);
+  ), [allCopies, draft.copyIds, draft.kind, selectionReason]);
   const availableCopies = useMemo(() => allCopies.filter((item) => (
-    copySelectionAvailabilityReason({ copyId: item.copy.id, exposure: item.exposure, status: item.copy.status }) === null
-  )), [allCopies]);
+    selectionReason(item) === null
+  )), [allCopies, selectionReason]);
   const rarityOptions = useMemo(
     () => Array.from(new Set(availableCopies.map((item) => item.target.rarity).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
     [availableCopies],
@@ -245,7 +357,13 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   }), [availableCopies, condition, query, rarity, selectedOnly, selection.selectedIds]);
   const pagination = pageCopySelection(filteredCopies, page, salePageSize);
   const { currentPage, items: visibleCopies, pageCount, resultEnd, resultStart } = pagination;
-  const photoCopyIds = Array.from(new Set([...visibleCopies, ...selectedCopies].map((item) => item.copy.id))).join(",");
+  const conflictCopyIds = lifecycle.conflict?.data.copyIds ?? [];
+  const photoCopyIds = Array.from(new Set([
+    ...visibleCopies.map((item) => item.copy.id),
+    ...selectedCopies.map((item) => item.copy.id),
+    ...conflictCopyIds,
+    ...(requestedCopyId ? [requestedCopyId] : []),
+  ])).join(",");
 
   const libraryImpacts = useMemo<LibraryImpact[]>(() => source.snapshot.targets.flatMap((target) => {
     const printingIds = source.snapshot.printings
@@ -280,7 +398,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
 
   function detailsError() {
     if (!draft.date) return "Add the sale date.";
-    if (!draft.source.trim()) return "Add the marketplace or buyer.";
+    if (!(paidReviewActive ? "eBay" : draft.source).trim()) return "Add the marketplace or buyer.";
     if (!draft.proceeds.trim()) return "Enter the net amount you kept.";
     return null;
   }
@@ -313,10 +431,13 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
     const result = await source.createSale({
       recordName: draft.recordName.trim(),
       date: draft.date,
-      source: draft.source.trim(),
+      source: paidReviewActive ? "eBay" : draft.source.trim(),
       netProceedsPence: poundsToPence(draft.proceeds),
       notes: draft.notes.trim(),
       copyIds: selection.selectedIds,
+      ...(paidReviewActive && paidReviewIntent
+        ? { paidEbayReview: paidReviewIntent }
+        : {}),
     });
     setPending(false);
     if (!result.ok) {
@@ -328,6 +449,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   }
 
   function chooseType(kind: SaleKind) {
+    if (paidReviewActive && kind !== "single") return;
     setDraft((current) => ({
       ...current,
       kind,
@@ -336,6 +458,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   }
 
   function toggleCopy(copyId: string, checked: boolean) {
+    if (paidReviewActive) return;
     if (checked && draft.kind === "bulk" && selection.selectedIds.length >= 100) {
       setError("A Bulk card sale can contain no more than 100 physical Copies.");
       return;
@@ -371,16 +494,37 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
   }
 
   const saleLabel = draft.kind === "single" ? "Single card" : "Bulk cards";
+  const saleSource = paidReviewActive ? "eBay" : draft.source;
   const saleRecordName = draft.recordName.trim() || generatedSaleRecordName(selectedCopies.map((item) => item.target.name));
   const requiredCopies = draft.kind === "single" ? 1 : 2;
   const remainingCopies = Math.max(0, requiredCopies - selection.selectedIds.length);
   const selectionComplete = draft.kind !== null && selection.valid;
+  const previousConflictCopy = allCopies.find((item) => item.copy.id === conflictCopyIds[0]);
+  const incomingConflictCopy = allCopies.find((item) => item.copy.id === requestedCopyId);
+  const previousConflictItem = previousConflictCopy
+    ? draftConflictCardSummary(
+        previousConflictCopy,
+        photoSummaries[previousConflictCopy.copy.id],
+        Math.max(0, conflictCopyIds.length - 1),
+      )
+    : undefined;
+  const incomingConflictItem = incomingConflictCopy
+    ? draftConflictCardSummary(incomingConflictCopy, photoSummaries[incomingConflictCopy.copy.id])
+    : undefined;
 
   return (
     <DraftHydrationBoundary ready={lifecycle.hydrated}>
     <form autoComplete="off" className="grid gap-4" onSubmit={(event) => event.preventDefault()}>
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
-      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} onCancel={() => router.replace(returnHref)} onResume={lifecycle.resumePrevious} onStartNew={lifecycle.startNew} previous={lifecycle.conflict.intent} /> : null}
+      {lifecycle.conflict ? <DraftConflictDialog incoming={launchIntent} incomingItem={incomingConflictItem} onCancel={() => router.replace(returnHref)} onResume={() => {
+        setPaidReviewActive(false);
+        lifecycle.resumePrevious();
+      }} onStartNew={() => {
+        setPaidReviewActive(paidReviewReady);
+        lifecycle.startNew();
+      }} previous={lifecycle.conflict.intent} previousItem={previousConflictItem} /> : null}
+      {recoveryMessage ? <aside className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold leading-6 text-amber-950" role="status">{recoveryMessage}</aside> : null}
+      {paidReviewActive ? <aside className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-semibold leading-6 text-emerald-950">The exact paid eBay Copy is selected. Enter the Sale details, review them, and explicitly save the Record.</aside> : null}
       <FormDraftStatus dirty={lifecycle.dirty} onDiscard={() => {
         if (!window.confirm("Discard this Sale draft and start again?")) return;
         lifecycle.discard();
@@ -407,6 +551,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
                     aria-pressed={selected}
                     className={`group flex min-h-32 cursor-pointer items-start gap-4 rounded-lg border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-[#8a1f2d] focus:ring-offset-2 ${selected ? "border-[#8a1f2d] bg-rose-50 ring-1 ring-[#8a1f2d]" : "border-zinc-300 bg-white hover:border-zinc-500 hover:bg-zinc-50"}`}
                     key={option.kind}
+                    disabled={paidReviewActive && option.kind !== "single"}
                     onClick={() => chooseType(option.kind)}
                     type="button"
                   >
@@ -444,7 +589,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
               </label>
               <label>
                 <span className="text-sm font-bold text-zinc-700">Marketplace or buyer <span className="text-rose-700">*</span></span>
-                <input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, source: event.target.value }))} required value={draft.source} />
+                <input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, source: event.target.value }))} readOnly={paidReviewActive} required value={saleSource} />
               </label>
               <label className="sm:col-span-2">
                 <span className="text-sm font-bold text-zinc-700">Net proceeds <span className="text-rose-700">*</span></span>
@@ -595,6 +740,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
                           aria-label={`Select ${copyExposureSelectorLabel(copyLabel, item.exposure)}. eBay status ${exposurePresentation?.label ?? "Unavailable"}.`}
                           checked={selected}
                           className="sr-only"
+                          disabled={paidReviewActive}
                           name={draft.kind === "single" ? "sale-copy" : undefined}
                           onChange={(event) => toggleCopy(item.copy.id, event.target.checked)}
                           type={draft.kind === "single" ? "radio" : "checkbox"}
@@ -657,7 +803,7 @@ export function SaleForm({ onSaved }: { onSaved: (recordId: string, warning?: st
                 <div>
                   <span className="text-xs font-bold uppercase text-zinc-500">Record name</span>
                   <p className="mt-1 font-black">{saleRecordName}</p>
-                  <p className="mt-1 text-sm font-medium text-zinc-500">{saleLabel} · £{penceToPounds(poundsToPence(draft.proceeds))} · {draft.source} · {draft.date}</p>
+                  <p className="mt-1 text-sm font-medium text-zinc-500">{saleLabel} · £{penceToPounds(poundsToPence(draft.proceeds))} · {saleSource} · {draft.date}</p>
                 </div>
                 <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button>
               </div>

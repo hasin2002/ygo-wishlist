@@ -10,6 +10,9 @@ const unavailableActionSource = readFileSync(new URL("../src/components/unavaila
 const cardImagesSource = readFileSync(new URL("../src/components/records/card-inventory-images.tsx", import.meta.url), "utf8");
 const photoManagerSource = readFileSync(new URL("../src/components/records/card-photo-manager.tsx", import.meta.url), "utf8");
 const listingStatusSource = readFileSync(new URL("../src/components/records/ebay-listing-status.tsx", import.meta.url), "utf8");
+const listingsWorkspaceSource = readFileSync(new URL("../src/components/records/ebay-listings-workspace.tsx", import.meta.url), "utf8");
+const draftConflictSource = readFileSync(new URL("../src/components/records/form-draft-ui.tsx", import.meta.url), "utf8");
+const paidSaleDialogSource = readFileSync(new URL("../src/components/records/paid-ebay-sale-review-dialog.tsx", import.meta.url), "utf8");
 
 test("Sale Copy selectors expose physical and eBay status in visible and accessible text", () => {
   assert.match(saleFormSource, /Physical · \{item\.exposure \? physicalCopyStateLabel/);
@@ -76,6 +79,44 @@ test("preview Copy photos explain the limitation and retain phone-camera capture
 test("the preview shows where a live Copy's Sell on eBay action will appear", () => {
   assert.match(listingActionSource, /if \(!enabled\)/);
   assert.match(listingActionSource, /Sell on eBay/);
+});
+
+test("paid unlinked eBay actions open the compact exact-Copy Sale review", () => {
+  assert.match(listingActionSource, /setPaidReview\(\{ copyId: context\.copy\.id, listingId: listing\.id \}\)/);
+  assert.match(listingActionSource, /listing\.saleState === "paid" && !listing\.saleRecordId/);
+  assert.match(listingActionSource, /<PaidEbaySaleReviewDialog intent=\{paidReview\}/);
+  assert.match(listingsWorkspaceSource, /canReviewPaidSale[\s\S]*listing\.kind === "individual"/);
+  assert.match(listingsWorkspaceSource, /setPaidReview\(\{ copyId: member\.copyId, listingId: listing\.id \}\)/);
+  assert.match(listingsWorkspaceSource, />Review Sale record<\/button>/);
+  assert.match(paidSaleDialogSource, /createPortal\(/);
+  assert.match(paidSaleDialogSource, /aria-modal="true"/);
+  assert.match(paidSaleDialogSource, /Record name/);
+  assert.match(paidSaleDialogSource, /Net proceeds \(£\)/);
+  assert.match(paidSaleDialogSource, /copyIds: \[intent\.copyId\]/);
+  assert.match(paidSaleDialogSource, /paidEbayReview: intent/);
+  assert.match(paidSaleDialogSource, /source: "eBay"/);
+  assert.match(paidSaleDialogSource, /aria-expanded=\{detailsOpen\}/);
+  assert.match(paidSaleDialogSource, /notes \? "Edit notes" : "Add notes"/);
+  assert.doesNotMatch(paidSaleDialogSource, /type="date"/);
+  assert.match(paidSaleDialogSource, /Notes <span[^>]*>\(optional\)<\/span>/);
+  assert.match(paidSaleDialogSource, /date,/);
+  assert.match(paidSaleDialogSource, /notes,/);
+});
+
+test("the compact paid Sale dialog rejects stale cached inspection shapes before rendering card details", () => {
+  assert.match(paidSaleDialogSource, /responseVersion: 2/);
+  assert.match(paidSaleDialogSource, /function hasCompactInspectionDetails/);
+  assert.match(paidSaleDialogSource, /const inspected = hasCompactInspectionDetails\(inspection\.data\)/);
+  assert.match(paidSaleDialogSource, /invalidSuccessResponse/);
+});
+
+test("Sale draft conflicts compare compact physical card summaries and keep the requested action order", () => {
+  assert.match(saleFormSource, /incomingItem=\{incomingConflictItem\}/);
+  assert.match(saleFormSource, /previousItem=\{previousConflictItem\}/);
+  assert.match(draftConflictSource, /item\.rarity\} · \{item\.condition/);
+  assert.match(draftConflictSource, /title=\{item\.identifier\}/);
+  assert.ok(draftConflictSource.indexOf(">Cancel</") < draftConflictSource.indexOf(">Resume previous draft</"));
+  assert.ok(draftConflictSource.indexOf(">Resume previous draft</") < draftConflictSource.indexOf(">Start new with this item</"));
 });
 
 test("the listing workspace keeps navigation above the header and photo actions above the upload area", () => {

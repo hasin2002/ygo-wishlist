@@ -21,6 +21,28 @@ test("Sale locks owner-scoped Copies before authoritative eBay membership/exposu
   assert.match(sale, /live, pending, or uncertain eBay listing/);
 });
 
+test("paid Sale review keeps deterministic Copy, membership, Listing, and order-data locks", async () => {
+  const source = await readFile(
+    new URL("../src/server/records/paid-ebay-sale-review.ts", import.meta.url),
+    "utf8",
+  );
+  const copyLock = source.indexOf("from(cardCopies)");
+  const memberLock = source.indexOf("from(ebayListingMembers)");
+  const listingLock = source.indexOf("from(ebayListings)");
+  const orderLineLock = source.indexOf("from(ebayOrderLines)");
+  const allocationLock = source.indexOf("from(ebayOrderLineAllocations)");
+  assert.ok(copyLock >= 0);
+  assert.ok(copyLock < memberLock);
+  assert.ok(memberLock < listingLock);
+  assert.ok(listingLock < orderLineLock);
+  assert.ok(orderLineLock < allocationLock);
+  assert.match(source, /eq\(cardCopies\.ownerId, ownerId\)/);
+  assert.match(source, /eq\(ebayListingMembers\.ownerId, ownerId\)/);
+  assert.match(source, /eq\(ebayListings\.ownerId, ownerId\)/);
+  assert.match(source, /eq\(ebayOrderLines\.ownerId, ownerId\)/);
+  assert.match(source, /eq\(ebayOrderLineAllocations\.ownerId, ownerId\)/);
+});
+
 test("both selector forms expose the same condition and eBay-status filtering contract", async () => {
   const [sale, lot] = await Promise.all([
     readFile(new URL("../src/components/records/sale-form.tsx", import.meta.url), "utf8"),

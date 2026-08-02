@@ -52,6 +52,10 @@ import {
   isMissingEbayCompositionSchema,
 } from "@/server/ebay-listing-composition";
 import { listEbayListingsWorkspace } from "@/server/records/ebay-listings-workspace";
+import {
+  inspectPaidEbaySaleReviewIntent,
+  lockPaidEbaySaleReviewIntent,
+} from "@/server/records/paid-ebay-sale-review";
 import { requireEbayExternalCapability } from "@/server/ebay-capabilities";
 import { CopySelectionError, lockReconciledCopies } from "@/server/records/copy-selection";
 import {
@@ -231,6 +235,10 @@ const saleSchema = z.object({
   netProceedsPence: z.number().int().nonnegative(),
   notes: z.string().trim().max(4_000),
   copyIds: z.array(z.string().min(1)).min(1).max(100),
+  paidEbayReview: z.object({
+    copyId: z.string().min(1).max(160),
+    listingId: z.string().min(1).max(160),
+  }).optional(),
 });
 const recordMutationIdentitySchema = z.object({
   recordId: z.string().min(1),
@@ -925,6 +933,21 @@ export const recordsRouter = router({
   listEbayListings: adminProcedure.input(ebayListingsWorkspaceSchema).query(({ ctx, input }) =>
     listEbayListingsWorkspace(ctx.collectionOwnerId, input)),
 
+  inspectPaidEbaySaleReview: authenticatedProcedure.input(z.object({
+    copyId: z.string().min(1).max(160),
+    listingId: z.string().min(1).max(160),
+    responseVersion: z.literal(2).optional(),
+  })).query(async ({ ctx, input }) => {
+    if (!await hasEbayCompositionSchema()) {
+      return {
+        ok: false as const,
+        code: "composition_unavailable" as const,
+        message: "Paid eBay Sale review is not ready yet. Refresh after the approved Records migration has completed.",
+      };
+    }
+    return inspectPaidEbaySaleReviewIntent(ctx.collectionOwnerId, input);
+  }),
+
   resolveEbayCopyLinkAttention: authenticatedProcedure.input(resolveEbayCopyLinkAttentionSchema).mutation(async ({ ctx, input }) => {
     await requireEbayExternalCapability(ctx.session);
     if (!await hasEbayCompositionSchema()) {
@@ -1433,11 +1456,17 @@ export const recordsRouter = router({
     const saleId = id("record");
     const now = new Date();
     const compositionSchemaReady = await hasEbayCompositionSchema();
+    if (input.paidEbayReview && !compositionSchemaReady) {
+      conflict("Paid eBay Sale review is not ready yet. Refresh after the approved Records migration has completed. The Sale has not been saved.");
+    }
     const listingIds = await listingIdsForCopies(ownerId, uniqueCopyIds);
     const trackedListings = listingIds.length ? (await db.select().from(ebayListings).where(and(
       eq(ebayListings.ownerId, ownerId),
       inArray(ebayListings.id, listingIds),
-    ))).filter((listing) => !ebayListingStatusSummary(listing).relistAllowed) : [];
+    ))).filter((listing) => (
+      !ebayListingStatusSummary(listing).relistAllowed
+      && listing.id !== input.paidEbayReview?.listingId
+    )) : [];
     if (trackedListings.length) await requireEbayExternalCapability(ctx.session);
     for (const listing of trackedListings) {
       try {
@@ -1456,6 +1485,30 @@ export const recordsRouter = router({
       } catch (error) {
         if (error instanceof CopySelectionError) conflict(`${error.message} The Sale has not been saved.`);
         throw error;
+      }
+      let paidReviewLink: {
+        copyId: string;
+        listingId: string;
+        orderLineId: string;
+      } | null = null;
+      if (input.paidEbayReview) {
+        if (
+          uniqueCopyIds.length !== 1
+          || uniqueCopyIds[0] !== input.paidEbayReview.copyId
+        ) {
+          conflict("This paid eBay Sale review must contain only its exact physical Copy. The Sale has not been saved.");
+        }
+        if (normalize(input.source) !== "ebay") {
+          conflict("This paid eBay Sale review must keep eBay as its source. The Sale has not been saved.");
+        }
+        const inspected = await lockPaidEbaySaleReviewIntent(
+          tx,
+          ownerId,
+          input.paidEbayReview,
+          copies[0],
+        );
+        if (!inspected.ok) conflict(`${inspected.message} The Sale has not been saved.`);
+        paidReviewLink = inspected;
       }
       const lockedRelations = await lockListingsForCopies(
         tx,
@@ -1589,18 +1642,16 @@ export const recordsRouter = router({
         })));
         position += 1;
       }
-      if (unresolvedListings.length) {
-        const exactListingIds = normalizedPaidLineIds
-          ? Array.from(new Set(
-            (await tx.select({ id: ebayOrderLines.id, listingId: ebayOrderLines.listingId })
-              .from(ebayOrderLines)
-              .where(and(
-                eq(ebayOrderLines.ownerId, ownerId),
-                inArray(ebayOrderLines.id, normalizedPaidLineIds),
-              ))).map((line) => line.listingId),
-          ))
-          : unresolvedListings.map((listing) => listing.id);
-        await tx.update(ebayListings).set({
+      if (unresolvedListings.length || paidReviewLink) {
+        const paidLineIds = Array.from(new Set([
+          ...(normalizedPaidLineIds ?? []),
+          ...(paidReviewLink ? [paidReviewLink.orderLineId] : []),
+        ]));
+        const exactListingIds = Array.from(new Set([
+          ...unresolvedListings.map((listing) => listing.id),
+          ...(paidReviewLink ? [paidReviewLink.listingId] : []),
+        ]));
+        const linkedListings = await tx.update(ebayListings).set({
           saleRecordId: saleId,
           status: "ended",
           updatedAt: now,
@@ -1608,15 +1659,23 @@ export const recordsRouter = router({
           eq(ebayListings.ownerId, ownerId),
           inArray(ebayListings.id, exactListingIds),
           eq(ebayListings.saleState, "paid"),
-        ));
-        if (normalizedPaidLineIds) {
-          await tx.update(ebayOrderLines).set({
+          isNull(ebayListings.saleRecordId),
+        )).returning({ id: ebayListings.id });
+        if (linkedListings.length !== exactListingIds.length) {
+          conflict("A paid eBay listing changed while the Sale was being saved. Refresh Listings and try again.");
+        }
+        if (paidLineIds.length) {
+          const linkedOrderLines = await tx.update(ebayOrderLines).set({
             saleRecordId: saleId,
             updatedAt: now,
           }).where(and(
             eq(ebayOrderLines.ownerId, ownerId),
-            inArray(ebayOrderLines.id, normalizedPaidLineIds),
-          ));
+            inArray(ebayOrderLines.id, paidLineIds),
+            isNull(ebayOrderLines.saleRecordId),
+          )).returning({ id: ebayOrderLines.id });
+          if (linkedOrderLines.length !== paidLineIds.length) {
+            conflict("The paid eBay order changed while the Sale was being saved. Refresh Listings and try again.");
+          }
         }
       }
     });
