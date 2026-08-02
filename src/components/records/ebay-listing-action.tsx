@@ -5,12 +5,17 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   ImagePlus,
   PencilLine,
   RotateCcw,
+  Search,
   Send,
   ShieldCheck,
   WalletCards,
@@ -45,11 +50,28 @@ import {
   type CopyEbayExposureState,
   type WishlistTarget,
 } from "@/lib/records/types";
-import { copyShortReference } from "@/lib/records/copy-display";
+import { copyShortReference, orderCopies } from "@/lib/records/copy-display";
+import {
+  copySelectionAvailabilityReason,
+  reconcileCopySelection,
+} from "@/lib/records/copy-selection";
+import {
+  buildHomogeneousQuantityDescription,
+  buildHomogeneousQuantityTitle,
+  homogeneousQuantityIncompatibilities,
+  moveHomogeneousQuantityMember,
+  planHomogeneousQuantitySavedPhotos,
+} from "@/lib/records/ebay-quantity-listing";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { DraftConflictDialog } from "@/components/records/form-draft-ui";
 import { PaidEbaySaleReviewDialog } from "@/components/records/paid-ebay-sale-review-dialog";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
+import {
+  FormSection,
+  StepPanel,
+  WizardActions,
+  WizardProgress,
+} from "@/components/records/entry-form-ui";
 import { ebayOffersDialogEventName } from "@/components/records/ebay-copy-exposure";
 import {
   EbayListingStatusPanel,
@@ -61,12 +83,19 @@ import {
   useCollectionChange,
 } from "@/lib/use-collection-change";
 
-type ListingPhoto = { archiveKey: string; ebayUrl: string; previewUrl: string };
-type InventoryPhoto = { key: string; previewUrl: string };
+type ListingPhoto = {
+  archiveKey: string;
+  ebayUrl: string | null;
+  previewUrl: string;
+  sourceInventoryCopyId?: string;
+  sourceInventoryKey?: string;
+};
+type InventoryPhoto = { key: string; position: number; previewUrl: string };
 type ConditionId = "400010" | "400015" | "400016" | "400017";
 type ListingForm = {
   categoryId: typeof ebayCardCategory.id;
   cardConditionDescriptorValueId: ConditionId;
+  copyIds: string[];
   description: string;
   dispatchTimeMax: string;
   images: ListingPhoto[];
@@ -123,45 +152,21 @@ function conditionId(value: string): ConditionId {
   return cardConditionOptions.find((option) => option.value === value)?.ebayDescriptorValueId ?? "400010";
 }
 
-function editionAbbreviation(value: string) {
-  if (/^1st edition$/i.test(value)) return "1st Ed";
-  if (/^unlimited edition$/i.test(value)) return "Unlimited";
-  if (/^limited edition$/i.test(value)) return "Limited";
-  return value;
-}
-
-function conditionAbbreviation(value: string) {
-  return ({
-    "Near Mint": "NM",
-    "Lightly Played": "LP",
-    "Moderately Played": "MP",
-    "Heavily Played": "HP",
-  } as Record<string, string>)[value] ?? value;
-}
-
-function defaultTitle(target: WishlistTarget, printing: CardPrinting, copy: CardCopy) {
-  const prefix = "Yu Gi Oh";
-  const suffix = [
-    target.rarity,
-    printing.setCode || printing.setName,
-    editionAbbreviation(target.edition),
-    conditionAbbreviation(copy.condition),
-  ].filter(Boolean).join(" ");
-  const name = target.name.slice(0, Math.max(1, 80 - prefix.length - suffix.length - 2)).trim();
-  return `${prefix} ${name} ${suffix}`.slice(0, 80);
-}
-
-function defaultDescription(target: WishlistTarget, printing: CardPrinting, copy: CardCopy) {
-  return [
-    `Yu-Gi-Oh! ${target.name}`,
-    `Set: ${printing.setName || "Not specified"}${printing.setCode ? ` (${printing.setCode})` : ""}`,
-    `Rarity: ${target.rarity}`,
-    `Edition: ${target.edition}`,
-    `Condition: ${copy.condition}`,
-    "Please review all photos carefully before buying.",
-    "You are buying the card described in the title and shown in the images.",
-    "Please feel free to contact me with any questions or to request additional images.",
-  ].join("\n");
+function listingCopyTextInput(
+  target: WishlistTarget,
+  printing: CardPrinting,
+  copy: CardCopy,
+  quantity: number,
+) {
+  return {
+    condition: copy.condition,
+    edition: target.edition,
+    name: target.name,
+    quantity,
+    rarity: target.rarity,
+    setCode: printing.setCode,
+    setName: printing.setName,
+  };
 }
 
 function featureFromEdition(edition: string) {
@@ -175,7 +180,8 @@ function initialForm(target: WishlistTarget, printing: CardPrinting, copy: CardC
   return {
     categoryId,
     cardConditionDescriptorValueId: conditionId(copy.condition),
-    description: defaultDescription(target, printing, copy),
+    copyIds: [copy.id],
+    description: buildHomogeneousQuantityDescription(listingCopyTextInput(target, printing, copy, 1)),
     dispatchTimeMax: "3",
     images: [],
     itemSpecifics: {
@@ -193,25 +199,27 @@ function initialForm(target: WishlistTarget, printing: CardPrinting, copy: CardC
     price: "",
     shippingCost: pounds(defaultDeliveryService.suggestedCostPence),
     shippingService: defaultDeliveryService.code,
-    title: defaultTitle(target, printing, copy),
+    title: buildHomogeneousQuantityTitle(listingCopyTextInput(target, printing, copy, 1)),
   };
 }
 
 function isListingPhoto(value: unknown): value is ListingPhoto {
   return isRecord(value)
     && isString(value.archiveKey)
-    && isString(value.ebayUrl)
+    && (value.ebayUrl === null || isString(value.ebayUrl))
     && isString(value.previewUrl);
 }
 
 function isListingForm(value: unknown): value is ListingForm {
   if (!isRecord(value) || !hasFields(value, [
-    "categoryId", "cardConditionDescriptorValueId", "description", "dispatchTimeMax", "images", "itemSpecifics",
+    "categoryId", "cardConditionDescriptorValueId", "copyIds", "description", "dispatchTimeMax", "images", "itemSpecifics",
     "language", "location", "postalCode", "price", "shippingCost", "shippingService", "title",
   ])) return false;
   const specifics = value.itemSpecifics;
   return value.categoryId === categoryId
     && isOneOf(value.cardConditionDescriptorValueId, ["400010", "400015", "400016", "400017"] as const)
+    && Array.isArray(value.copyIds)
+    && value.copyIds.every(isString)
     && isString(value.description)
     && isString(value.dispatchTimeMax)
     && Array.isArray(value.images)
@@ -252,7 +260,7 @@ function listingInput(copy: CardCopy, form: ListingForm) {
     cardConditionDescriptorValueId: form.cardConditionDescriptorValueId,
     description: form.description.trim(),
     dispatchTimeMax: Number(form.dispatchTimeMax),
-    images: form.images.map(({ archiveKey, ebayUrl }) => ({ archiveKey, ebayUrl })),
+    images: form.images.map(({ archiveKey, ebayUrl }) => ({ archiveKey, ebayUrl: ebayUrl! })),
     itemSpecifics: Object.fromEntries(
       Object.entries(form.itemSpecifics).map(([key, value]) => [key, value.trim()]),
     ) as unknown as EbayListingItemSpecifics,
@@ -263,6 +271,14 @@ function listingInput(copy: CardCopy, form: ListingForm) {
     shippingCostPence: pence(form.shippingCost)!,
     shippingService: form.shippingService,
     title: form.title.trim(),
+  };
+}
+
+function quantityListingInput(copy: CardCopy, form: ListingForm) {
+  return {
+    ...listingInput(copy, form),
+    copyIds: form.copyIds,
+    imageDraftCopyId: copy.id,
   };
 }
 
@@ -552,9 +568,16 @@ function EbayListingWorkspace({
   const [validation, setValidation] = useState<EbayVerification | null>(null);
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [arrangeAnnouncement, setArrangeAnnouncement] = useState("");
+  const [step, setStep] = useState(1);
+  const [copyQuery, setCopyQuery] = useState("");
+  const [copyView, setCopyView] = useState<"compatible" | "issues">("compatible");
+  const [copyPage, setCopyPage] = useState(1);
+  const [fulfilmentOpen, setFulfilmentOpen] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
-  const importedRef = useRef(false);
+  const importedSelectionsRef = useRef(new Set<string>());
   const priceEditedRef = useRef(false);
   const pricingRefreshStartedRef = useRef(false);
   const publishActionRef = useRef(false);
@@ -562,6 +585,24 @@ function EbayListingWorkspace({
     target.estimatedPricePence ?? target.marketPricePence,
   );
   const catalogueImage = target.imageUrl ?? printing.imageUrl;
+  const copyNumberLabels = useMemo(() => {
+    const targetIdByPrintingId = new Map(source.snapshot.printings.map((item) => [item.id, item.targetId]));
+    const copiesByTargetId = new Map<string, CardCopy[]>();
+    for (const item of source.snapshot.copies) {
+      const targetId = targetIdByPrintingId.get(item.printingId);
+      if (!targetId) continue;
+      const groupedCopies = copiesByTargetId.get(targetId) ?? [];
+      groupedCopies.push(item);
+      copiesByTargetId.set(targetId, groupedCopies);
+    }
+    const labels = new Map<string, string>();
+    for (const groupedCopies of copiesByTargetId.values()) {
+      const orderedCopies = orderCopies(groupedCopies);
+      orderedCopies.forEach((item, index) => labels.set(item.id, `Copy ${index + 1} of ${orderedCopies.length}`));
+    }
+    return labels;
+  }, [source.snapshot.copies, source.snapshot.printings]);
+  const copyNumberLabel = (copyId: string) => copyNumberLabels.get(copyId) ?? "Copy";
   const soldUrl = useMemo(
     () => ebaySoldListingsUrl({
       edition: target.edition,
@@ -582,7 +623,63 @@ function EbayListingWorkspace({
     },
   });
   const validate = trpc.ebay.validate.useMutation();
+  const validateQuantity = trpc.ebay.validateQuantity.useMutation();
   const publish = trpc.ebay.publish.useMutation();
+  const publishQuantity = trpc.ebay.publishQuantity.useMutation();
+  const candidates = useMemo(() => {
+    const printingById = new Map(source.snapshot.printings.map((item) => [item.id, item]));
+    const targetById = new Map(source.snapshot.targets.map((item) => [item.id, item]));
+    const exposureByCopyId = new Map(source.snapshot.copyEbayExposures.map((item) => [item.copyId, item]));
+    const requested = new Set(form.copyIds);
+    return source.snapshot.copies.flatMap((candidateCopy) => {
+      const candidatePrinting = printingById.get(candidateCopy.printingId);
+      const candidateTarget = candidatePrinting ? targetById.get(candidatePrinting.targetId) : null;
+      if (!candidatePrinting || !candidateTarget) return [];
+      if (candidateTarget.name !== target.name && !requested.has(candidateCopy.id)) return [];
+      const exposure = exposureByCopyId.get(candidateCopy.id);
+      const item = { copy: candidateCopy, exposure, printing: candidatePrinting, target: candidateTarget };
+      const reasons = [
+        candidateCopy.id === copy.id
+          ? null
+          : copySelectionAvailabilityReason({ copyId: candidateCopy.id, exposure, status: candidateCopy.status }),
+        ...homogeneousQuantityIncompatibilities(
+          { copy, printing, target },
+          item,
+        ).map((issue) => issue.message),
+      ].filter((reason): reason is string => Boolean(reason));
+      return [{ ...item, reason: reasons.join(" ") || null }];
+    });
+  }, [copy, form.copyIds, printing, source.snapshot, target]);
+  const selection = useMemo(() => reconcileCopySelection(
+    form.copyIds,
+    candidates.map((candidate) => ({ id: candidate.copy.id, item: candidate, reason: candidate.reason })),
+    { min: 1, max: 100 },
+  ), [candidates, form.copyIds]);
+  const selected = selection.selected;
+  const isQuantity = selection.selectedIds.length > 1;
+  const selectedKey = selection.selectedIds.join(",");
+  const compatibleCandidates = candidates.filter((candidate) => !candidate.reason);
+  const issueCandidates = candidates.filter((candidate) => candidate.reason);
+  const bulkCompatibleCandidates = compatibleCandidates.slice(0, 100);
+  const normalizedCopyQuery = copyQuery.trim().toLowerCase();
+  const filteredCandidates = (copyView === "compatible" ? compatibleCandidates : issueCandidates).filter((candidate) => !normalizedCopyQuery || [
+    copyNumberLabels.get(candidate.copy.id),
+    candidate.copy.id,
+    candidate.copy.condition,
+    candidate.printing.setCode,
+    candidate.printing.setName,
+    candidate.target.edition,
+    candidate.reason ?? "compatible available",
+  ].join(" ").toLowerCase().includes(normalizedCopyQuery));
+  const copyPageSize = 2;
+  const copyPageCount = Math.max(1, Math.ceil(filteredCandidates.length / copyPageSize));
+  const currentCopyPage = Math.min(copyPage, copyPageCount);
+  const copyResultStart = filteredCandidates.length ? (currentCopyPage - 1) * copyPageSize + 1 : 0;
+  const copyResultEnd = Math.min(currentCopyPage * copyPageSize, filteredCandidates.length);
+  const visibleCandidates = filteredCandidates.slice(
+    (currentCopyPage - 1) * copyPageSize,
+    currentCopyPage * copyPageSize,
+  );
   const visibleFees = validation?.fees.filter((fee) => Number.isFinite(fee.amount) && fee.amount !== 0) ?? [];
 
   useEffect(() => {
@@ -597,36 +694,59 @@ function EbayListingWorkspace({
   }, [draftReady, refreshPricing, target.id]);
 
   useEffect(() => {
-    if (!draftReady || !imageArchiveConfigured || importedRef.current || form.images.length) return;
-    importedRef.current = true;
+    if (!draftReady || !imageArchiveConfigured || !selectedKey || importedSelectionsRef.current.has(selectedKey)) return;
+    importedSelectionsRef.current.add(selectedKey);
     let cancelled = false;
     async function importSavedPhotos() {
       setImporting(true);
       try {
-        const response = await fetch(`/api/inventory/card-images?copyId=${encodeURIComponent(copy.id)}`);
-        const payload = await response.json() as { images?: InventoryPhoto[]; message?: string };
+        const response = await fetch(`/api/inventory/card-images?copyIds=${encodeURIComponent(selectedKey)}`);
+        const payload = await response.json() as { imagesByCopy?: Record<string, InventoryPhoto[]>; message?: string };
         if (!response.ok) throw new Error(payload.message || "Saved card photos could not be loaded.");
+        const planned = planHomogeneousQuantitySavedPhotos({
+          copyIds: selection.selectedIds,
+          existingPhotos: form.images,
+          imagesByCopy: payload.imagesByCopy ?? {},
+        });
         const imported: ListingPhoto[] = [];
-        for (const image of (payload.images ?? []).slice(0, 12)) {
+        const failures: string[] = [];
+        for (const image of planned) {
           if (cancelled) return;
-          const body = new FormData();
-          body.append("copyId", copy.id);
-          body.append("inventoryKey", image.key);
-          const result = await fetch("/api/ebay/image", { body, method: "POST" });
-          const value = await result.json() as Partial<ListingPhoto> & { message?: string };
-          if (!result.ok || !value.archiveKey || !value.ebayUrl || !value.previewUrl) throw new Error(value.message || "A saved card photo could not be imported.");
-          imported.push(value as ListingPhoto);
+          try {
+            const body = new FormData();
+            body.append("copyId", copy.id);
+            body.append("inventoryCopyId", image.copyId);
+            body.append("inventoryKey", image.key);
+            body.append("stageOnly", "true");
+            const result = await fetch("/api/ebay/image", { body, method: "POST" });
+            const value = await result.json() as Partial<ListingPhoto> & { message?: string };
+            if (!result.ok || !value.archiveKey || !value.previewUrl) throw new Error(value.message || "A saved card photo could not be prepared.");
+            imported.push({
+              archiveKey: value.archiveKey,
+              ebayUrl: null,
+              previewUrl: value.previewUrl,
+              sourceInventoryCopyId: image.copyId,
+              sourceInventoryKey: image.key,
+            });
+          } catch (error) {
+            failures.push(error instanceof Error ? error.message : "A saved card photo could not be prepared.");
+          }
         }
-        if (!cancelled && imported.length) setForm((current) => ({ ...current, images: imported }));
+        if (!cancelled && imported.length) {
+          setForm((current) => ({ ...current, images: [...current.images, ...imported].slice(0, 12) }));
+        }
+        if (!cancelled && failures.length) {
+          setPhotoMessage(`${imported.length ? `${imported.length} saved ${imported.length === 1 ? "photo was" : "photos were"} prepared. ` : ""}${failures.length} could not be prepared. ${failures[0]}`);
+        }
       } catch (error) {
-        if (!cancelled) setPhotoMessage(error instanceof Error ? error.message : "Saved card photos could not be loaded.");
+        if (!cancelled) setPhotoMessage(error instanceof Error ? error.message : "Saved card photos could not be prepared.");
       } finally {
         if (!cancelled) setImporting(false);
       }
     }
     void importSavedPhotos();
     return () => { cancelled = true; };
-  }, [copy.id, draftReady, form.images.length, imageArchiveConfigured, setForm]);
+  }, [copy.id, draftReady, form.images, imageArchiveConfigured, selectedKey, selection.selectedIds, setForm]);
 
   function clearFieldError(key: FieldKey) {
     setErrors((current) => {
@@ -642,6 +762,7 @@ function EbayListingWorkspace({
     if (key === "price") priceEditedRef.current = true;
     setForm((current) => ({ ...current, [key]: value }));
     if (field) clearFieldError(field);
+    else setValidation(null);
   }
 
   function updateSpecific<K extends keyof EbayListingItemSpecifics>(key: K, value: EbayListingItemSpecifics[K]) {
@@ -656,6 +777,113 @@ function EbayListingWorkspace({
     clearFieldError("shippingCost");
   }
 
+  function withQuantityMembership(
+    current: ListingForm,
+    copyIds: string[],
+    images = current.images,
+  ): ListingForm {
+    const previousCopy = listingCopyTextInput(target, printing, copy, current.copyIds.length);
+    const nextCopy = listingCopyTextInput(target, printing, copy, copyIds.length);
+    return {
+      ...current,
+      cardConditionDescriptorValueId: conditionId(copy.condition),
+      copyIds,
+      description: current.description === buildHomogeneousQuantityDescription(previousCopy)
+        ? buildHomogeneousQuantityDescription(nextCopy)
+        : current.description,
+      images,
+      title: current.title === buildHomogeneousQuantityTitle(previousCopy)
+        ? buildHomogeneousQuantityTitle(nextCopy)
+        : current.title,
+    };
+  }
+
+  function selectAllCompatibleCopies() {
+    const compatibleIds = bulkCompatibleCandidates.map((candidate) => candidate.copy.id);
+    const nextIds = Array.from(new Set([...form.copyIds, ...compatibleIds])).slice(0, 100);
+    importedSelectionsRef.current.clear();
+    setForm((current) => withQuantityMembership(current, nextIds));
+    setValidation(null);
+    setMessage(null);
+  }
+
+  async function keepOnlyAnchorCopy() {
+    const sourcedPhotos = form.images.filter((image) =>
+      image.sourceInventoryCopyId && image.sourceInventoryCopyId !== copy.id,
+    );
+    for (const photo of sourcedPhotos) {
+      const response = await fetch("/api/ebay/image", {
+        body: JSON.stringify({ archiveKey: photo.archiveKey, copyId: copy.id }),
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        setPhotoMessage("Prepared photos could not be removed safely, so the current Copy selection was kept.");
+        return;
+      }
+    }
+    importedSelectionsRef.current.clear();
+    setForm((current) => withQuantityMembership(
+      current,
+      [copy.id],
+      current.images.filter((image) => !image.sourceInventoryCopyId || image.sourceInventoryCopyId === copy.id),
+    ));
+    setValidation(null);
+    setMessage(null);
+  }
+
+  function regenerateQuantityCopy() {
+    const quantityCopy = listingCopyTextInput(target, printing, copy, form.copyIds.length);
+    setForm((current) => ({
+      ...current,
+      description: buildHomogeneousQuantityDescription(quantityCopy),
+      title: buildHomogeneousQuantityTitle(quantityCopy),
+    }));
+    setValidation(null);
+  }
+
+  async function toggleQuantityCopy(copyId: string, checked: boolean) {
+    if (copyId === copy.id && !checked) return;
+    const candidate = candidates.find((item) => item.copy.id === copyId);
+    if (checked && (!candidate || candidate.reason)) return;
+    if (!checked) {
+      const sourcedPhotos = form.images.filter((image) => image.sourceInventoryCopyId === copyId);
+      for (const photo of sourcedPhotos) {
+        const response = await fetch("/api/ebay/image", {
+          body: JSON.stringify({ archiveKey: photo.archiveKey, copyId: copy.id }),
+          headers: { "Content-Type": "application/json" },
+          method: "DELETE",
+        });
+        if (!response.ok) {
+          setPhotoMessage("This Copy's prepared photos could not be removed safely, so the Copy remains selected.");
+          return;
+        }
+      }
+    }
+    importedSelectionsRef.current.clear();
+    setForm((current) => withQuantityMembership(
+      current,
+      checked
+        ? Array.from(new Set([...current.copyIds, copyId]))
+        : current.copyIds.filter((id) => id !== copyId),
+      checked
+        ? current.images
+        : current.images.filter((image) => image.sourceInventoryCopyId !== copyId),
+    ));
+    setValidation(null);
+    setMessage(null);
+    setPhotoMessage(null);
+  }
+
+  function moveQuantityCopy(copyId: string, offset: -1 | 1) {
+    const copyIds = moveHomogeneousQuantityMember(form.copyIds, copyId, offset);
+    if (copyIds === form.copyIds) return;
+    setForm((current) => ({ ...current, copyIds }));
+    setValidation(null);
+    const position = copyIds.indexOf(copyId) + 1;
+    setArrangeAnnouncement(`Copy #${copyShortReference(copyId)} moved to fulfilment position ${position} of ${copyIds.length}.`);
+  }
+
   async function createListingPhoto(body: FormData) {
     const response = await fetch("/api/ebay/image", { body, method: "POST" });
     const payload = await response.json() as Partial<ListingPhoto> & { message?: string };
@@ -663,6 +891,38 @@ function EbayListingWorkspace({
       throw new Error(payload.message || "Image upload failed.");
     }
     return payload as ListingPhoto;
+  }
+
+  async function preparePhotosForEbay() {
+    if (form.images.every((image) => image.ebayUrl)) return form;
+    setPreparing(true);
+    try {
+      const images: ListingPhoto[] = [];
+      for (const photo of form.images) {
+        if (photo.ebayUrl) {
+          images.push(photo);
+          continue;
+        }
+        const body = new FormData();
+        body.append("copyId", copy.id);
+        body.append("archiveKey", photo.archiveKey);
+        const response = await fetch("/api/ebay/image", { body, method: "POST" });
+        const payload = await response.json() as Partial<ListingPhoto> & { message?: string };
+        if (!response.ok || !payload.archiveKey || !payload.ebayUrl) {
+          setForm((current) => ({
+            ...current,
+            images: [...images, ...current.images.slice(images.length)],
+          }));
+          throw new Error(payload.message || "A prepared inventory photo could not be sent to eBay.");
+        }
+        images.push({ ...photo, ebayUrl: payload.ebayUrl });
+      }
+      const prepared = { ...form, images };
+      setForm(prepared);
+      return prepared;
+    } finally {
+      setPreparing(false);
+    }
   }
 
   async function uploadListingPhotos(files: File[]) {
@@ -745,8 +1005,31 @@ function EbayListingWorkspace({
     return true;
   }
 
-  async function reviewListing(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function continueWizard() {
+    setMessage(null);
+    if (!selection.valid || selection.issues.length || selection.selectedIds.length !== form.copyIds.length) {
+      setStep(1);
+      setMessage(selection.issues[0]?.message ?? "Review the exact Copy selection before continuing.");
+      return;
+    }
+    if (step === 1) {
+      setStep(2);
+      return;
+    }
+    if (step === 2) {
+      const nextErrors = validateForm(form);
+      setErrors(nextErrors);
+      const first = Object.keys(nextErrors)[0] as FieldKey | undefined;
+      if (first) {
+        window.requestAnimationFrame(() => document.getElementById(fieldIds[first])?.focus());
+        return;
+      }
+      setStep(3);
+    }
+  }
+
+  async function reviewListing(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
     setMessage(null);
     const nextErrors = validateForm(form);
     setErrors(nextErrors);
@@ -755,8 +1038,16 @@ function EbayListingWorkspace({
       window.requestAnimationFrame(() => document.getElementById(fieldIds[first])?.focus());
       return;
     }
+    if (!selection.valid || selection.issues.length) {
+      setMessage(selection.issues[0]?.message ?? "Review the exact Copy selection before continuing.");
+      return;
+    }
     try {
-      setValidation(await validate.mutateAsync(listingInput(copy, form)));
+      const prepared = await preparePhotosForEbay();
+      const reviewedForm = { ...prepared, copyIds: selection.selectedIds };
+      setValidation(isQuantity
+        ? await validateQuantity.mutateAsync(quantityListingInput(copy, reviewedForm))
+        : await validate.mutateAsync(listingInput(copy, reviewedForm)));
     } catch (error) {
       setValidation(null);
       setMessage(error instanceof Error ? error.message : "eBay validation failed.");
@@ -765,10 +1056,18 @@ function EbayListingWorkspace({
 
   async function publishListing() {
     if (publishActionRef.current) return;
+    if (!selection.valid || selection.issues.length || selection.selectedIds.length !== form.copyIds.length) {
+      setValidation(null);
+      setMessage(selection.issues[0]?.message ?? "The exact Copy selection changed after validation. Refresh and review it again before publishing.");
+      return;
+    }
     publishActionRef.current = true;
-    let result: Awaited<ReturnType<typeof publish.mutateAsync>>;
+    let result: { listingUrl: string };
     try {
-      result = await publish.mutateAsync(listingInput(copy, form));
+      const reviewedForm = { ...form, copyIds: form.copyIds };
+      result = isQuantity
+        ? await publishQuantity.mutateAsync(quantityListingInput(copy, reviewedForm))
+        : await publish.mutateAsync(listingInput(copy, reviewedForm));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The listing could not be published.");
       publishActionRef.current = false;
@@ -805,7 +1104,9 @@ function EbayListingWorkspace({
     setValidation(null);
     setMessage("Draft reset.");
     setPhotoMessage(null);
-    importedRef.current = true;
+    importedSelectionsRef.current.clear();
+    setCopyPage(1);
+    setStep(1);
   }
 
   function resumeDifferentCopyDraft() {
@@ -872,21 +1173,88 @@ function EbayListingWorkspace({
         </div>
       </section>
 
-      <form className="grid min-w-0 max-w-full items-start gap-5 lg:grid-cols-[minmax(0,1fr)_19rem]" noValidate onSubmit={reviewListing}>
-        <div className="grid min-w-0 gap-5">
+      <form className="grid min-w-0 max-w-full gap-5" noValidate onSubmit={(event) => { event.preventDefault(); if (step === 3) void reviewListing(); }}>
+        <WizardProgress labels={["Choose Copies", "Listing & Photos", "Review"]} step={step} />
+
+        {message ? <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-950" role="alert">{message}</p> : null}
+
+        {step === 1 ? <StepPanel step={step}>
+          <FormSection description="Choose the exact physical Copies included in this offer, then save the order used to fulfil future sales." number={1} title="Choose Copies">
+            <div className="flex flex-col gap-4" id="ebay-exact-copies">
+              <div aria-live="polite" className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div><strong>{selection.selectedIds.length} {selection.selectedIds.length === 1 ? "Copy" : "Copies"} selected</strong><span className="mt-0.5 block text-sm font-medium text-zinc-600">Copy #{copyShortReference(copy.id)} is the anchor and cannot be removed.</span></div>
+                <span className="inline-flex min-h-9 w-fit items-center rounded-full bg-emerald-50 px-3 text-sm font-bold text-emerald-800">Quantity {selection.selectedIds.length}</span>
+              </div>
+
+              {selection.issues.length ? <ul className="grid gap-2" role="alert">{selection.issues.map((issue, index) => <li className="rounded-md border border-rose-200 bg-rose-50 p-2 text-sm font-semibold text-rose-950" key={`${issue.code}-${issue.copyId}-${index}`}>{issue.message}</li>)}</ul> : null}
+
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3" id="quantity-copy-picker">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <label className="relative min-w-0 flex-1">
+                    <span className="sr-only">Search physical Copies</span>
+                    <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+                    <input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-9 pr-3 text-base font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 sm:text-sm" onChange={(event) => { setCopyQuery(event.target.value); setCopyPage(1); }} placeholder="Search Copy number, ref, set, edition, or condition" type="search" value={copyQuery} />
+                  </label>
+                  <button className="min-h-11 shrink-0 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-45" disabled={bulkCompatibleCandidates.every((candidate) => form.copyIds.includes(candidate.copy.id))} onClick={selectAllCompatibleCopies} type="button">{compatibleCandidates.length > 100 ? "Select maximum 100" : `Select all ${compatibleCandidates.length}`}</button>
+                  {selection.selectedIds.length > 1 ? <button className="min-h-11 shrink-0 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700" onClick={() => void keepOnlyAnchorCopy()} type="button">Keep anchor only</button> : null}
+                </div>
+                <div aria-label="Copy compatibility" className="mt-3 grid grid-cols-2 rounded-md border border-zinc-200 bg-white p-1" role="group">
+                  <button aria-pressed={copyView === "compatible"} className={`min-h-11 rounded px-2 text-sm font-bold ${copyView === "compatible" ? "bg-zinc-950 text-white" : "text-zinc-700 hover:bg-zinc-100"}`} onClick={() => { setCopyView("compatible"); setCopyPage(1); }} type="button">Compatible ({compatibleCandidates.length})</button>
+                  <button aria-pressed={copyView === "issues"} className={`min-h-11 rounded px-2 text-sm font-bold ${copyView === "issues" ? "bg-zinc-950 text-white" : "text-zinc-700 hover:bg-zinc-100"}`} onClick={() => { setCopyView("issues"); setCopyPage(1); }} type="button">Cannot add ({issueCandidates.length})</button>
+                </div>
+                <p className="mt-3 text-xs font-semibold text-zinc-600" role="status">Showing {copyResultStart}–{copyResultEnd} of {filteredCandidates.length} matching Copies.</p>
+                {visibleCandidates.length ? <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {visibleCandidates.map((candidate) => {
+                    const checked = form.copyIds.includes(candidate.copy.id);
+                    const anchor = candidate.copy.id === copy.id;
+                    const disabled = anchor || Boolean(candidate.reason && !checked);
+                    return <li className="min-w-0" key={candidate.copy.id}>
+                      <label className={`flex min-h-28 h-full items-start gap-3 rounded-lg border p-3 transition ${checked ? "border-[#8a1f2d] bg-rose-50/60" : "border-zinc-200 bg-white hover:border-zinc-400"} ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                        <input checked={checked} className="mt-0.5 size-5 shrink-0 accent-[#8a1f2d]" disabled={disabled} onChange={(event) => void toggleQuantityCopy(candidate.copy.id, event.target.checked)} type="checkbox" />
+                        <span className="min-w-0 flex-1">
+                          <strong className="block text-sm">{copyNumberLabel(candidate.copy.id)}{anchor ? " · Anchor" : ""}</strong>
+                          <span className="mt-1 block break-words text-xs font-medium leading-5 text-zinc-600">Ref #{copyShortReference(candidate.copy.id)} · {candidate.printing.setCode || candidate.printing.setName || "Printing missing"} · {candidate.target.edition} · {candidate.copy.condition}</span>
+                          {candidate.reason ? <span className="mt-1 block text-xs font-semibold leading-5 text-amber-900">{candidate.reason}</span> : <span className={`mt-2 block text-xs font-black ${checked ? "text-[#8a1f2d]" : "text-emerald-700"}`}>{checked ? "Selected" : "Available"}</span>}
+                        </span>
+                      </label>
+                    </li>;
+                  })}
+                </ul> : <div className="mt-2 rounded-md border border-dashed border-zinc-300 bg-white p-6 text-center"><p className="text-sm font-semibold text-zinc-700">No Copies match this search.</p>{copyQuery ? <button className="mt-2 min-h-11 rounded-md px-3 text-sm font-bold text-[#8a1f2d] hover:bg-rose-50" onClick={() => { setCopyQuery(""); setCopyPage(1); }} type="button">Clear search</button> : null}</div>}
+                <nav aria-label="Copy result pages" className="mt-4 flex min-w-0 items-center justify-between gap-2">
+                  <button className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3" disabled={currentCopyPage <= 1} onClick={() => setCopyPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft aria-hidden="true" className="size-4" />Previous</button>
+                  <span className="shrink-0 text-xs font-bold text-zinc-600 sm:text-sm">Page {currentCopyPage} of {copyPageCount}</span>
+                  <button className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3" disabled={currentCopyPage >= copyPageCount} onClick={() => setCopyPage((current) => Math.min(copyPageCount, current + 1))} type="button">Next<ChevronRight aria-hidden="true" className="size-4" /></button>
+                </nav>
+              </div>
+
+              <div className="rounded-lg border border-zinc-200 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div><h3 className="text-sm font-black">Fulfilment order</h3><p className="mt-1 text-xs font-medium leading-5 text-zinc-600">Future eBay orders allocate exact Copies from position 1 downward.</p></div>
+                  <button aria-controls="quantity-fulfilment-order" aria-expanded={fulfilmentOpen} className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setFulfilmentOpen((open) => !open)} type="button">{fulfilmentOpen ? "Done arranging" : `Review & arrange ${selected.length}`}</button>
+                </div>
+                <p aria-live="polite" className="sr-only">{arrangeAnnouncement}</p>
+                {!fulfilmentOpen ? <p className="mt-3 break-words text-sm font-semibold text-zinc-700">{selected.slice(0, 5).map((item, index) => `${index + 1}. ${copyNumberLabel(item.copy.id)} · Ref #${copyShortReference(item.copy.id)}`).join(" · ")}{selected.length > 5 ? ` · +${selected.length - 5} more` : ""}</p> : null}
+                {fulfilmentOpen ? <ol className="mt-3 grid gap-2" id="quantity-fulfilment-order">{selected.map((item, index) => <li className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-200 p-2" key={item.copy.id}><span className="grid size-7 shrink-0 place-items-center rounded-full bg-zinc-100 text-xs font-black">{index + 1}</span><span className="min-w-0 flex-1 text-sm font-semibold">{copyNumberLabel(item.copy.id)} · Ref #{copyShortReference(item.copy.id)}{item.copy.id === copy.id ? " · Anchor" : ""}</span><button aria-label={`Move Copy ${copyShortReference(item.copy.id)} up`} className="grid size-11 place-items-center rounded-md border border-zinc-200 disabled:opacity-35" disabled={index === 0} onClick={() => moveQuantityCopy(item.copy.id, -1)} type="button"><ArrowUp aria-hidden="true" className="size-4" /></button><button aria-label={`Move Copy ${copyShortReference(item.copy.id)} down`} className="grid size-11 place-items-center rounded-md border border-zinc-200 disabled:opacity-35" disabled={index === selected.length - 1} onClick={() => moveQuantityCopy(item.copy.id, 1)} type="button"><ArrowDown aria-hidden="true" className="size-4" /></button></li>)}</ol> : null}
+              </div>
+            </div>
+          </FormSection>
+        </StepPanel> : null}
+
+        {step === 2 ? <StepPanel step={step}>
+          <div className="grid min-w-0 gap-5">
           <CardPhotoManager
             canManage
             cardName={target.name}
-            changing={uploading || importing || Boolean(deletingKey)}
+            changing={uploading || importing || preparing || Boolean(deletingKey)}
             configured={imageArchiveConfigured}
-            description="Saved Copy photos appear automatically. Put the clearest front image first."
+            description="Saved photos are aggregated from every selected physical Copy. Put the clearest front image first."
             emptyText="No listing photos yet."
             error={errors.images}
-            eyebrow="Step 1"
+            eyebrow="Step 2"
             id={fieldIds.images}
             images={form.images.map((image) => ({ id: image.archiveKey, previewUrl: image.previewUrl }))}
             loading={importing}
-            loadingText="Preparing saved Copy photos…"
+            loadingText="Aggregating saved Copy photos…"
             maxImages={12}
             message={photoMessage}
             onRemove={removeImage}
@@ -909,18 +1277,20 @@ function EbayListingWorkspace({
           />
 
           <section className="min-w-0 max-w-full rounded-xl border border-zinc-300 bg-white p-4 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Step 2</p>
-            <h2 className="mt-1 text-lg font-black">Listing details</h2>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Shared offer details</p><h2 className="mt-1 text-lg font-black">Listing details</h2><p className="mt-1 text-sm font-medium text-zinc-600">The price is per Copy; the title and description describe the full quantity.</p></div>
+              {isQuantity ? <button className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-zinc-500" onClick={regenerateQuantityCopy} type="button">Regenerate quantity title & description</button> : null}
+            </div>
             <div className="mt-4 grid min-w-0 items-start gap-4 md:grid-cols-2">
               <label className="grid min-w-0 gap-1.5 text-sm font-bold md:col-span-2">Title
                 <input aria-invalid={Boolean(errors.title)} className={inputClass} id={fieldIds.title} maxLength={80} onChange={(event) => update("title", event.target.value, "title")} value={form.title} />
-                <span className="flex justify-between text-xs font-medium text-zinc-500"><span>{errorText("title")}</span><span>{form.title.length}/80</span></span>
+                <span className="flex justify-between gap-3 text-xs font-medium text-zinc-500"><span>{errorText("title") ?? (isQuantity ? `Suggested titles include x${selection.selectedIds.length}. Manual edits are preserved when membership changes.` : "")}</span><span>{form.title.length}/80</span></span>
               </label>
               <label className="grid min-w-0 gap-1.5 text-sm font-bold">Condition
-                <select className={inputClass} onChange={(event) => update("cardConditionDescriptorValueId", event.target.value as ConditionId)} value={form.cardConditionDescriptorValueId}>
+                <select className={inputClass} disabled={isQuantity} onChange={(event) => update("cardConditionDescriptorValueId", event.target.value as ConditionId)} value={form.cardConditionDescriptorValueId}>
                   {cardConditionOptions.map((option) => <option key={option.value} value={option.ebayDescriptorValueId}>{option.label}</option>)}
                 </select>
-                <span className="text-xs font-medium text-zinc-500">Mapped from {copy.condition}.</span>
+                <span className="text-xs font-medium text-zinc-500">Mapped from {copy.condition}.{isQuantity ? " Shared and locked for every selected Copy." : ""}</span>
               </label>
               <label className="grid min-w-0 gap-1.5 text-sm font-bold">Language
                 <select className={inputClass} onChange={(event) => update("language", event.target.value as EbayListingLanguage)} value={form.language}>{ebayListingLanguages.map((language) => <option key={language} value={language}>{language}</option>)}</select>
@@ -998,42 +1368,60 @@ function EbayListingWorkspace({
             </div>
           </section>
           <p className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-700"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#8a1f2d]" />Returns are set to “No returns accepted” for this listing flow.</p>
-        </div>
+          </div>
+        </StepPanel> : null}
 
-        <aside className="grid gap-4 lg:sticky lg:top-5">
-          <section className="rounded-xl border border-zinc-300 bg-white p-4 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Step 3</p>
-            <h2 className="mt-1 text-lg font-black">{publishedUrl ? "Published" : "Review and publish"}</h2>
-            {!publishedUrl ? <p className="mt-2 text-sm font-medium leading-5 text-zinc-600">Check the key details, then ask eBay to validate policies and fees.</p> : null}
+        {step === 3 ? <StepPanel step={step}>
+          <FormSection description="Review the exact Copies and shared offer details, then validate policies and fees with eBay before publishing." number={3} title={publishedUrl ? "Published" : "Review and publish"}>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">Offer</p><h3 className="mt-1 font-black">Quantity {selection.selectedIds.length} · £{form.price || "0.00"} each</h3></div><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(1)} type="button">Edit Copies</button></div>
+                <p className="mt-3 text-sm font-bold text-zinc-800">{form.title}</p>
+                <p className="mt-2 text-sm font-medium text-zinc-600">{printing.setCode || printing.setName} · {target.edition} · {copy.condition} · {form.language}</p>
+                <ol className="mt-3 grid gap-1 text-xs font-semibold text-zinc-700">{selected.slice(0, 5).map((item, index) => <li key={item.copy.id}>{index + 1}. {copyNumberLabel(item.copy.id)} · Ref #{copyShortReference(item.copy.id)}</li>)}</ol>
+                {selected.length > 5 ? <details className="mt-2"><summary className="min-h-11 cursor-pointer py-3 text-xs font-bold text-[#8a1f2d]">View all {selected.length} exact Copies</summary><ol className="grid gap-1 border-t border-zinc-200 pt-2 text-xs font-semibold text-zinc-700">{selected.map((item, index) => <li key={item.copy.id}>{index + 1}. {copyNumberLabel(item.copy.id)} · Ref #{copyShortReference(item.copy.id)}</li>)}</ol></details> : null}
+              </section>
+              <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">Listing</p><h3 className="mt-1 font-black">{form.images.length} {form.images.length === 1 ? "photo" : "photos"} · £{form.shippingCost || "0.00"} postage</h3></div><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold" onClick={() => setStep(2)} type="button">Edit listing</button></div>
+                <p className="mt-3 line-clamp-5 whitespace-pre-line text-sm font-medium leading-6 text-zinc-700">{form.description}</p>
+                <p className="mt-3 text-xs font-semibold text-zinc-600">Dispatch within {form.dispatchTimeMax} days from {form.postalCode}. No returns accepted.</p>
+              </section>
+            </div>
             {Object.keys(errors).length ? (
               <div className="mt-4 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-950" role="alert">
                 <p className="font-black">Fix {Object.keys(errors).length} field{Object.keys(errors).length === 1 ? "" : "s"}</p>
                 <ul className="mt-2 grid gap-1">{Object.entries(errors).map(([key, value]) => <li key={key}><a className="font-semibold underline" href={`#${fieldIds[key as FieldKey]}`}>{value}</a></li>)}</ul>
               </div>
             ) : null}
-            {message ? <p className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-950" role="alert">{message}</p> : null}
             {publishedUrl ? (
               <div className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-emerald-950" role="status">
                 <CheckCircle2 className="size-6 text-emerald-700" />
                 <p className="mt-2 font-black">Listing is live</p>
                 <a className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-bold text-white" href={publishedUrl} rel="noreferrer" target="_blank">View on eBay<ExternalLink className="size-4" /></a>
               </div>
-            ) : (
-              <>
-                <button className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60" disabled={importing || validate.isPending || publish.isPending} type="submit"><ShieldCheck className="size-4" />{importing ? "Preparing photos…" : validate.isPending ? "Validating…" : "Validate with eBay"}</button>
-                {validation ? (
-                  <div className="mt-4 border-t border-zinc-200 pt-4 text-sm">
+            ) : validation ? (
+                  <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4 text-sm">
                     <p className={validation.readyToPublish ? "font-black text-emerald-800" : "font-black text-rose-800"}>{validation.readyToPublish ? "Ready to publish" : "Changes required"}</p>
                     {validation.errors.length ? <ul className="mt-2 grid gap-2">{validation.errors.map((error, index) => <li className="rounded-md bg-rose-50 p-2 text-rose-950" key={`${error.code}-${index}`}>{error.message || "eBay returned a validation message."}</li>)}</ul> : null}
                     {visibleFees.length ? <dl className="mt-3 divide-y divide-zinc-100 rounded-md border border-zinc-200">{visibleFees.map((fee, index) => <div className="flex justify-between gap-3 p-2" key={`${fee.name}-${index}`}><dt>{feeName(fee.name)}</dt><dd className="font-black">{feeAmount(fee.amount, fee.currency)}</dd></div>)}</dl> : null}
-                    {validation.readyToPublish ? <button className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 font-bold text-white disabled:opacity-60" disabled={publish.isPending} onClick={() => void publishListing()} type="button"><Send className="size-4" />{publish.isPending ? "Publishing…" : "Publish listing"}</button> : null}
                   </div>
-                ) : null}
-              </>
-            )}
-          </section>
-          <a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 hover:border-zinc-950" href={soldUrl} rel="noreferrer" target="_blank">Compare sold listings<ExternalLink className="size-4" /></a>
-        </aside>
+            ) : <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm font-medium text-zinc-700">Validation has not been run for these details yet.</p>}
+            {!publishedUrl ? <a className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 hover:border-zinc-950" href={soldUrl} rel="noreferrer" target="_blank">Compare sold listings<ExternalLink className="size-4" /></a> : null}
+          </FormSection>
+        </StepPanel> : null}
+
+        {!publishedUrl ? <WizardActions
+          confirmDisabled={false}
+          finalLabel={validation?.readyToPublish ? (isQuantity ? `Publish quantity ${selection.selectedIds.length} listing` : "Publish listing") : validation ? "Validate again with eBay" : "Validate with eBay"}
+          nextDisabled={step === 1 ? !selection.valid || Boolean(selection.issues.length) : importing || uploading || preparing}
+          onBack={() => { setMessage(null); setStep((current) => Math.max(1, current - 1)); }}
+          onConfirm={validation?.readyToPublish ? () => void publishListing() : () => void reviewListing()}
+          onNext={continueWizard}
+          pending={importing || uploading || preparing || validate.isPending || validateQuantity.isPending || publish.isPending || publishQuantity.isPending}
+          pendingLabel={importing ? "Preparing photos…" : preparing ? "Sending photos to eBay…" : validate.isPending || validateQuantity.isPending ? "Validating…" : publish.isPending || publishQuantity.isPending ? "Publishing…" : "Working…"}
+          step={step}
+          totalSteps={3}
+        /> : null}
       </form>
 
     </div>

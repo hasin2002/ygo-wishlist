@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const saleFormSource = readFileSync(new URL("../src/components/records/sale-form.tsx", import.meta.url), "utf8");
+const copySelectionPickerSource = readFileSync(new URL("../src/components/records/copy-selection-picker.tsx", import.meta.url), "utf8");
 const exposureSource = readFileSync(new URL("../src/components/records/ebay-copy-exposure.tsx", import.meta.url), "utf8");
 const listingActionSource = readFileSync(new URL("../src/components/records/ebay-listing-action.tsx", import.meta.url), "utf8");
 const recordsAppSource = readFileSync(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8");
@@ -15,10 +16,11 @@ const draftConflictSource = readFileSync(new URL("../src/components/records/form
 const paidSaleDialogSource = readFileSync(new URL("../src/components/records/paid-ebay-sale-review-dialog.tsx", import.meta.url), "utf8");
 
 test("Sale Copy selectors expose physical and eBay status in visible and accessible text", () => {
-  assert.match(saleFormSource, /Physical · \{item\.exposure \? physicalCopyStateLabel/);
-  assert.match(saleFormSource, /eBay exposure · \{exposurePresentation\?\.label/);
-  assert.match(saleFormSource, /aria-label=\{`Select \$\{copyExposureSelectorLabel/);
-  assert.match(saleFormSource, /eBay status \$\{exposurePresentation\?\.label/);
+  assert.match(saleFormSource, /<CopySelectionPicker/);
+  assert.match(copySelectionPickerSource, /Physical · \{item\.exposure \? physicalCopyStateLabel/);
+  assert.match(copySelectionPickerSource, /eBay exposure · \{exposurePresentation\?\.label/);
+  assert.match(copySelectionPickerSource, /aria-label=\{`Select \$\{copyExposureSelectorLabel/);
+  assert.match(copySelectionPickerSource, /eBay status \$\{exposurePresentation\?\.label/);
 });
 
 test("changing Sale selection and result counts use a polite atomic live region", () => {

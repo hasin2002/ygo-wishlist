@@ -14,8 +14,14 @@ import type {
   EbayListingItemSpecifics,
   EbayListingLanguage,
 } from "@/lib/ebay-listing-options";
+import { cardConditionOptions } from "@/lib/records/types";
 import { decideEbayCopyListingEligibility } from "@/lib/records/ebay-copy-listing-eligibility";
 import { ebayLotXmlContract } from "@/lib/records/ebay-lot";
+import {
+  ebayQuantityXmlContract,
+  homogeneousQuantityBounds,
+  validateHomogeneousQuantityMembers,
+} from "@/lib/records/ebay-quantity-listing";
 import {
   copyListingImageDraftsToArchive,
   deleteArchivedListingImages,
@@ -79,6 +85,13 @@ export type EbayLotListingDetails = Omit<EbayListingDetails, "copyId" | "categor
   copyIds: string[];
 };
 
+export type EbayQuantityListingDetails = Omit<EbayListingDetails, "copyId"> & {
+  /** The selected Copy whose private listing-draft prefix owns every image. */
+  imageDraftCopyId: string;
+  /** Ordered exact membership and future fulfilment order. */
+  copyIds: string[];
+};
+
 type EbayError = {
   code: string | null;
   message: string | null;
@@ -118,6 +131,8 @@ export type EbayListingEligibility =
       | "suspended"
       | "sync_unavailable";
   };
+
+type DatabaseTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export class EbayListingError extends Error {}
 
@@ -173,8 +188,12 @@ async function tradingCall(ownerId: string, callName: "AddItem" | "VerifyAddItem
   };
 }
 
-export function listingItemXml(details: EbayListingDetails | EbayLotListingDetails) {
-  const isLot = "copyIds" in details;
+export function listingItemXml(
+  details: EbayListingDetails | EbayLotListingDetails | EbayQuantityListingDetails,
+  composition: "bundle" | "individual" | "quantity" = "individual",
+) {
+  const isLot = composition === "bundle";
+  const isQuantity = composition === "quantity";
   const pictures = details.images
     .map((image) => `<PictureURL>${ebayXmlEscape(image.ebayUrl)}</PictureURL>`)
     .join("");
@@ -195,12 +214,14 @@ export function listingItemXml(details: EbayListingDetails | EbayLotListingDetai
     ? `<Location>${ebayXmlEscape(details.location)}</Location>`
     : "";
 
-  const lotContract = isLot ? ebayLotXmlContract(details.copyIds.length) : null;
+  const memberCount = "copyIds" in details ? details.copyIds.length : 1;
+  const lotContract = isLot ? ebayLotXmlContract(memberCount) : null;
+  const quantityContract = isQuantity ? ebayQuantityXmlContract(memberCount) : null;
   const lotSize = lotContract?.lotSizeXml ?? "";
   const condition = isLot
     ? lotContract!.conditionXml
     : `<ConditionDescriptors><ConditionDescriptor><Name>40001</Name><Value>${details.cardConditionDescriptorValueId}</Value></ConditionDescriptor></ConditionDescriptors><ConditionID>4000</ConditionID>`;
-  return `<Item><Title>${ebayXmlEscape(details.title)}</Title><Description>${descriptionHtml(details.description)}</Description><PrimaryCategory><CategoryID>${ebayXmlEscape(details.categoryId)}</CategoryID></PrimaryCategory>${condition}<ItemSpecifics>${specifics}</ItemSpecifics><StartPrice currencyID="GBP">${formatPrice(details.pricePence)}</StartPrice><CategoryMappingAllowed>${lotContract ? String(lotContract.categoryMappingAllowed) : "true"}</CategoryMappingAllowed><Country>GB</Country><Currency>GBP</Currency><DispatchTimeMax>${details.dispatchTimeMax}</DispatchTimeMax><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType>${location}<PostalCode>${ebayXmlEscape(details.postalCode)}</PostalCode><PictureDetails>${pictures}</PictureDetails>${lotContract?.quantityXml ?? "<Quantity>1</Quantity>"}${lotSize}<ReturnPolicy><ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption></ReturnPolicy><ShippingDetails><ShippingType>Flat</ShippingType><ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority><ShippingService>${ebayXmlEscape(details.shippingService)}</ShippingService><ShippingServiceCost currencyID="GBP">${formatPrice(details.shippingCostPence)}</ShippingServiceCost><FreeShipping>${details.shippingCostPence === 0 ? "true" : "false"}</FreeShipping></ShippingServiceOptions></ShippingDetails><Site>UK</Site><UUID>${crypto.randomUUID().replaceAll("-", "").toUpperCase()}</UUID></Item>`;
+  return `<Item><Title>${ebayXmlEscape(details.title)}</Title><Description>${descriptionHtml(details.description)}</Description><PrimaryCategory><CategoryID>${ebayXmlEscape(details.categoryId)}</CategoryID></PrimaryCategory>${condition}<ItemSpecifics>${specifics}</ItemSpecifics><StartPrice currencyID="GBP">${formatPrice(details.pricePence)}</StartPrice><CategoryMappingAllowed>${lotContract ? String(lotContract.categoryMappingAllowed) : "true"}</CategoryMappingAllowed><Country>GB</Country><Currency>GBP</Currency><DispatchTimeMax>${details.dispatchTimeMax}</DispatchTimeMax><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType>${location}<PostalCode>${ebayXmlEscape(details.postalCode)}</PostalCode><PictureDetails>${pictures}</PictureDetails>${lotContract?.quantityXml ?? quantityContract?.quantityXml ?? "<Quantity>1</Quantity>"}${lotSize}<ReturnPolicy><ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption></ReturnPolicy><ShippingDetails><ShippingType>Flat</ShippingType><ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority><ShippingService>${ebayXmlEscape(details.shippingService)}</ShippingService><ShippingServiceCost currencyID="GBP">${formatPrice(details.shippingCostPence)}</ShippingServiceCost><FreeShipping>${details.shippingCostPence === 0 ? "true" : "false"}</FreeShipping></ShippingServiceOptions></ShippingDetails><Site>UK</Site><UUID>${crypto.randomUUID().replaceAll("-", "").toUpperCase()}</UUID></Item>`;
 }
 
 async function loadOwnedCopy(ownerId: string, copyId: string) {
@@ -494,6 +515,227 @@ export async function publishEbayListing(ownerId: string, details: EbayListingDe
   return { archivedImageCount: archivedKeys.length, itemId: publishedItemId, listingUrl: `https://www.ebay.co.uk/itm/${publishedItemId}` };
 }
 
+function assertQuantityCopyIds(copyIds: string[], imageDraftCopyId: string) {
+  if (copyIds.length < homogeneousQuantityBounds.min) {
+    throw new EbayListingError("Choose at least two identical physical Copies for a quantity offer.");
+  }
+  if (copyIds.length > homogeneousQuantityBounds.max) {
+    throw new EbayListingError(`Choose no more than ${homogeneousQuantityBounds.max} physical Copies for a quantity offer.`);
+  }
+  if (new Set(copyIds).size !== copyIds.length) {
+    throw new EbayListingError("Each physical Copy can appear only once in a quantity offer.");
+  }
+  if (!copyIds.includes(imageDraftCopyId)) {
+    throw new EbayListingError("The anchor Copy holding this draft's photos must remain selected.");
+  }
+}
+
+async function lockHomogeneousQuantityMembers(
+  tx: DatabaseTransaction,
+  ownerId: string,
+  details: EbayQuantityListingDetails,
+) {
+  let copies: Awaited<ReturnType<typeof lockReconciledCopies>>;
+  try {
+    copies = await lockReconciledCopies(tx, ownerId, details.copyIds, homogeneousQuantityBounds);
+  } catch (error) {
+    if (error instanceof CopySelectionError) {
+      throw new EbayListingError(`${error.message} Refresh the quantity offer and review it again.`);
+    }
+    throw error;
+  }
+  const printingIds = [...new Set(copies.map((copy) => copy.printingId))];
+  const printings = await tx.select().from(cardPrintings).where(and(
+    eq(cardPrintings.ownerId, ownerId),
+    inArray(cardPrintings.id, printingIds),
+  ));
+  const targetIds = [...new Set(printings.map((printing) => printing.targetId))];
+  const targets = await tx.select().from(cardTargets).where(and(
+    eq(cardTargets.ownerId, ownerId),
+    inArray(cardTargets.id, targetIds),
+  ));
+  const printingById = new Map(printings.map((printing) => [printing.id, printing]));
+  const targetById = new Map(targets.map((target) => [target.id, target]));
+  const members = copies.map((copy) => {
+    const printing = printingById.get(copy.printingId);
+    const target = printing ? targetById.get(printing.targetId) : null;
+    if (!printing || !target) {
+      throw new EbayListingError("Printing or edition details changed for a selected Copy. Refresh and review the quantity offer again.");
+    }
+    return { copy, printing, target };
+  });
+  const incompatibility = validateHomogeneousQuantityMembers(members)[0];
+  if (incompatibility) {
+    throw new EbayListingError(`Copy #${incompatibility.copyId.slice(-6)} is incompatible: ${incompatibility.message}`);
+  }
+  const expectedCondition = cardConditionOptions.find(
+    (option) => option.value === members[0]!.copy.condition,
+  )?.ebayDescriptorValueId;
+  if (!expectedCondition || details.cardConditionDescriptorValueId !== expectedCondition) {
+    throw new EbayListingError("The shared eBay condition no longer matches every selected Copy. Refresh and review the quantity offer again.");
+  }
+  return members;
+}
+
+async function assertQuantityMembersHaveNoBlockingExposure(
+  tx: DatabaseTransaction,
+  ownerId: string,
+  copyIds: string[],
+) {
+  const related = await tx.select({
+    copyId: ebayListingMembers.copyId,
+    fulfilmentPosition: ebayListingMembers.fulfilmentPosition,
+    listing: ebayListings,
+    memberId: ebayListingMembers.id,
+  })
+    .from(ebayListingMembers)
+    .innerJoin(ebayListings, and(
+      eq(ebayListingMembers.listingId, ebayListings.id),
+      eq(ebayListingMembers.ownerId, ebayListings.ownerId),
+    ))
+    .where(and(
+      eq(ebayListingMembers.ownerId, ownerId),
+      eq(ebayListings.ownerId, ownerId),
+      inArray(ebayListingMembers.copyId, copyIds),
+    ))
+    .for("update");
+  const legacy = await tx.select().from(ebayListings).where(and(
+    eq(ebayListings.ownerId, ownerId),
+    inArray(ebayListings.copyId, copyIds),
+  )).for("update");
+  const normalized: EbayListingForCopy[] = related.map((row) => ({
+    ...row,
+    relationSource: "member" as const,
+  }));
+  for (const listing of legacy) {
+    if (!normalized.some((row) => row.copyId === listing.copyId && row.listing.id === listing.id)) {
+      normalized.push({
+        copyId: listing.copyId,
+        fulfilmentPosition: null,
+        listing,
+        memberId: null,
+        relationSource: "legacy",
+      });
+    }
+  }
+  if (copyIds.some((copyId) => !decideRelatedListingEligibility(
+    normalized.filter((row) => row.copyId === copyId),
+  ).eligible)) {
+    throw new EbayListingError("A selected Copy is reserved by an order or has a live or unresolved eBay offer. Refresh and replace it before publishing.");
+  }
+}
+
+async function recheckQuantityMembers(
+  ownerId: string,
+  details: EbayQuantityListingDetails,
+) {
+  await db.transaction(async (tx) => {
+    await lockHomogeneousQuantityMembers(tx, ownerId, details);
+    await assertQuantityMembersHaveNoBlockingExposure(tx, ownerId, details.copyIds);
+  });
+}
+
+export async function verifyEbayQuantityListing(
+  ownerId: string,
+  details: EbayQuantityListingDetails,
+) {
+  assertQuantityCopyIds(details.copyIds, details.imageDraftCopyId);
+  if (!await hasEbayCompositionSchema()) {
+    throw new EbayListingError("Quantity publishing needs the eBay composition data upgrade.");
+  }
+  await recheckQuantityMembers(ownerId, details);
+  return verificationResult(await tradingCall(
+    ownerId,
+    "VerifyAddItem",
+    listingItemXml(details, "quantity"),
+  ));
+}
+
+export async function publishEbayQuantityListing(
+  ownerId: string,
+  details: EbayQuantityListingDetails,
+) {
+  assertQuantityCopyIds(details.copyIds, details.imageDraftCopyId);
+  if (!await hasEbayCompositionSchema()) {
+    throw new EbayListingError("Quantity publishing needs the eBay composition data upgrade.");
+  }
+  await recheckQuantityMembers(ownerId, details);
+  const itemXml = listingItemXml(details, "quantity");
+  const verification = verificationResult(await tradingCall(ownerId, "VerifyAddItem", itemXml));
+  if (!verification.readyToPublish) {
+    throw new EbayListingError("eBay has not approved this quantity offer for publishing. Review the validation messages and fees.");
+  }
+
+  const listingId = `ebay-listing-${crypto.randomUUID()}`;
+  const draftKeys = details.images.map((image) => image.archiveKey);
+  const archivedKeys = await copyListingImageDraftsToArchive({
+    copyId: details.imageDraftCopyId,
+    draftKeys,
+    listingId,
+    ownerId,
+  });
+  const accessToken = await getEbaySellerAccessToken(ownerId);
+  const now = new Date();
+  let remoteAddAttempted = false;
+  let publishedItemId: string | null = null;
+  try {
+    await db.transaction(async (tx) => {
+      await lockHomogeneousQuantityMembers(tx, ownerId, details);
+      await assertQuantityMembersHaveNoBlockingExposure(tx, ownerId, details.copyIds);
+      remoteAddAttempted = true;
+      const result = await tradingCall(ownerId, "AddItem", itemXml, accessToken);
+      if (!result.itemId || result.errors.some((error) => error.severity === "Error")) {
+        throw new EbayListingError(result.errors.find((error) => error.message)?.message ?? "eBay did not publish the quantity offer.");
+      }
+      publishedItemId = result.itemId;
+      const listingUrl = `https://www.ebay.co.uk/itm/${result.itemId}`;
+      await tx.insert(ebayListings).values({
+        id: listingId,
+        ownerId,
+        copyId: details.copyIds[0]!,
+        kind: "quantity",
+        itemId: result.itemId,
+        listingUrl,
+        title: details.title,
+        status: "active",
+        listingState: "active",
+        saleState: "none",
+        listingStartedAt: now,
+        lastRemoteEventAt: now,
+        lastSyncedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx.insert(ebayListingMembers).values(details.copyIds.map(
+        (copyId, fulfilmentPosition) => ({
+          id: `ebay-listing-member-${crypto.randomUUID()}`,
+          ownerId,
+          listingId,
+          copyId,
+          fulfilmentPosition,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      ));
+    });
+  } catch (error) {
+    if (!remoteAddAttempted) {
+      await deleteArchivedListingImages(archivedKeys);
+      throw error;
+    }
+    throw new EbayListingError("eBay may have published this quantity offer, but its ordered local membership could not be confirmed. Do not retry until you have reviewed the eBay offer.");
+  }
+  await deleteListingImageDrafts(ownerId, details.imageDraftCopyId, draftKeys);
+  if (!publishedItemId) {
+    throw new EbayListingError("eBay did not return an item ID for this quantity offer. Do not relist; review the eBay offer.");
+  }
+  return {
+    archivedImageCount: archivedKeys.length,
+    itemId: publishedItemId,
+    listingUrl: `https://www.ebay.co.uk/itm/${publishedItemId}`,
+  };
+}
+
 function assertLotCopyIds(copyIds: string[], imageDraftCopyId: string) {
   if (copyIds.length < 2) throw new EbayListingError("Choose at least two physical Copies for a card lot.");
   if (copyIds.length > 100) throw new EbayListingError("Choose no more than 100 physical Copies for a card lot.");
@@ -531,7 +773,7 @@ export async function verifyEbayLotListing(ownerId: string, details: EbayLotList
   if (details.categoryId !== "183455") throw new EbayListingError("Use the approved card-lot category for a heterogeneous lot.");
   if (!await hasEbayCompositionSchema()) throw new EbayListingError("Card-lot publishing needs the eBay composition data upgrade.");
   await recheckLotMembers(ownerId, details.copyIds);
-  return verificationResult(await tradingCall(ownerId, "VerifyAddItem", listingItemXml(details)));
+  return verificationResult(await tradingCall(ownerId, "VerifyAddItem", listingItemXml(details, "bundle")));
 }
 
 export async function publishEbayLotListing(ownerId: string, details: EbayLotListingDetails) {
@@ -539,7 +781,7 @@ export async function publishEbayLotListing(ownerId: string, details: EbayLotLis
   if (details.categoryId !== "183455") throw new EbayListingError("Use the approved card-lot category for a heterogeneous lot.");
   if (!await hasEbayCompositionSchema()) throw new EbayListingError("Card-lot publishing needs the eBay composition data upgrade.");
   await recheckLotMembers(ownerId, details.copyIds);
-  const itemXml = listingItemXml(details);
+  const itemXml = listingItemXml(details, "bundle");
   const verification = verificationResult(await tradingCall(ownerId, "VerifyAddItem", itemXml));
   if (!verification.readyToPublish) throw new EbayListingError("eBay has not approved this listing for publishing. Review the validation messages and fees.");
 

@@ -38,6 +38,7 @@ import {
   type CardContentsDraft,
 } from "@/components/records/card-contents-editor";
 import { CardInventoryImages } from "@/components/records/card-inventory-images";
+import { CopySelectionPicker } from "@/components/records/copy-selection-picker";
 import { EbayCopyExposure } from "@/components/records/ebay-copy-exposure";
 import {
   copyRemovalDecision,
@@ -441,27 +442,21 @@ function RecordCardItemsEditor({
 
 function SaleCopyItemsEditor({ record, source }: { record: RecordEntry; source: RecordsDataSource }) {
   const [selectedIds, setSelectedIds] = useState(() => record.lines.flatMap((line) => line.entityIds));
-  const [query, setQuery] = useState("");
-  const [selectedOnly, setSelectedOnly] = useState(false);
-  const [page, setPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const exposures = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
   const candidates = source.snapshot.copies.flatMap((copy) => {
     if (copy.status !== "available" && copy.soldRecordId !== record.id) return [];
     const printing = source.snapshot.printings.find((item) => item.id === copy.printingId);
     const target = printing ? source.snapshot.targets.find((item) => item.id === printing.targetId) : null;
     if (!printing || !target) return [];
-    return [{ copy, printing, target }];
+    return [{ copy, exposure: exposures.get(copy.id), imageUrl: printing.imageUrl || target.imageUrl, printing, target }];
   });
-  const search = query.trim().toLowerCase();
-  const filtered = candidates.filter((item) => (!selectedOnly || selectedIds.includes(item.copy.id)) && (!search || [item.target.name, item.target.rarity, item.printing.setCode].join(" ").toLowerCase().includes(search)));
-  const pageSize = 12;
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  function toggle(copyId: string) {
-    setSelectedIds((current) => current.includes(copyId) ? current.filter((id) => id !== copyId) : [...current, copyId]);
+  function toggle(copyId: string, checked: boolean) {
+    setSelectedIds((current) => checked
+      ? Array.from(new Set([...current, copyId]))
+      : current.filter((id) => id !== copyId));
   }
 
   async function saveCopies() {
@@ -475,19 +470,23 @@ function SaleCopyItemsEditor({ record, source }: { record: RecordEntry; source: 
     <section className="grid gap-3">
       <div><h3 className="font-bold">Cards sold</h3><p className="mt-1 text-sm font-medium text-zinc-500">Select the exact physical Copies included in this Sale. Removing one returns it to available inventory.</p></div>
       {message ? <p className={`rounded-md border px-3 py-2 text-sm font-bold ${message === "Sold Copies saved." ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-300 bg-rose-50 text-rose-900"}`} role="status">{message}</p> : null}
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <label className="relative"><span className="sr-only">Search available Copies</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" /><input className="h-11 w-full rounded-md border border-zinc-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search cards, rarity, or code" value={query} /></label>
-        <label className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold"><input checked={selectedOnly} className="size-4 accent-[#8a1f2d]" onChange={(event) => { setSelectedOnly(event.target.checked); setPage(1); }} type="checkbox" /> Selected only</label>
+      <div aria-atomic="true" aria-live="polite" className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm font-bold text-zinc-700">
+        {selectedIds.length} physical {selectedIds.length === 1 ? "Copy" : "Copies"} selected
       </div>
-      <p className="text-sm font-bold text-zinc-600">{selectedIds.length} physical {selectedIds.length === 1 ? "Copy" : "Copies"} selected</p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {visible.map(({ copy, printing, target }) => {
-          const selected = selectedIds.includes(copy.id);
-          return <button aria-pressed={selected} className={`min-w-0 rounded-lg border p-2 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${selected ? "border-[#8a1f2d] bg-rose-50" : "border-zinc-300 bg-white hover:border-zinc-500"}`} key={copy.id} onClick={() => toggle(copy.id)} type="button"><div className="flex items-start gap-2">{target.imageUrl ? <Image alt="" className="h-16 w-11 shrink-0 rounded object-cover" height={64} src={`/api/image-proxy?url=${encodeURIComponent(target.imageUrl)}`} unoptimized width={44} /> : <span className="grid h-16 w-11 shrink-0 place-items-center rounded bg-zinc-100 text-[10px] font-bold text-zinc-400">CARD</span>}<div className="min-w-0"><p className="line-clamp-2 text-xs font-bold leading-4">{target.name}</p><p className="mt-1 text-[11px] font-semibold text-zinc-500">{printing.setCode}</p><p className="mt-1 text-[10px] font-bold text-[#8a1f2d]">{selected ? "Selected" : "Available"}</p></div></div></button>;
-        })}
-      </div>
-      {!visible.length ? <div className="rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-8 text-center text-sm font-bold text-zinc-500">No matching Copies</div> : null}
-      {pageCount > 1 ? <nav aria-label="Sale Copy pages" className="flex items-center justify-between rounded-md border border-zinc-300 bg-white p-2 text-sm font-bold"><button className="grid size-11 place-items-center rounded border border-zinc-300 disabled:opacity-40" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button"><ChevronLeft className="size-4" /></button><span>Page {currentPage} of {pageCount}</span><button className="grid size-11 place-items-center rounded border border-zinc-300 disabled:opacity-40" disabled={currentPage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} type="button"><ChevronRight className="size-4" /></button></nav> : null}
+      <CopySelectionPicker
+        candidates={candidates}
+        emptyDescription={candidates.length ? "Clear the filters or search for a different card." : "There are no eligible Copies to add to this Sale."}
+        emptyTitle={candidates.length ? "No Copies match this search" : "No available Copies"}
+        getCopyCaption={(item) => {
+          const copiesForTarget = source.snapshot.copies.filter((candidate) => {
+            const printing = source.snapshot.printings.find((value) => value.id === candidate.printingId);
+            return printing?.targetId === item.target.id;
+          });
+          return `${copyDisplayLabel(copiesForTarget, item.copy.id)} · #${copyShortReference(item.copy.id)}`;
+        }}
+        onToggle={toggle}
+        selectedIds={selectedIds}
+      />
       <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60 sm:justify-self-start" disabled={saving} onClick={saveCopies} type="button">{saving ? "Saving…" : "Save sold Copies"}</button>
     </section>
   );

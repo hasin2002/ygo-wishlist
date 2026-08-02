@@ -20,8 +20,10 @@ import {
   getEbayListingEligibility,
   publishEbayLotListing,
   publishEbayListing,
+  publishEbayQuantityListing,
   verifyEbayLotListing,
   verifyEbayListing,
+  verifyEbayQuantityListing,
 } from "@/server/ebay-listing";
 import {
   EbayListingReconciliationError,
@@ -79,6 +81,11 @@ const listingSchema = z.object({
 
 const lotListingSchema = listingSchema.omit({ copyId: true, categoryId: true }).extend({
   categoryId: z.literal(ebayLotCategory.id),
+  copyIds: z.array(z.string().min(1)).min(2).max(100),
+  imageDraftCopyId: z.string().min(1),
+});
+
+const quantityListingSchema = listingSchema.omit({ copyId: true }).extend({
   copyIds: z.array(z.string().min(1)).min(2).max(100),
   imageDraftCopyId: z.string().min(1),
 });
@@ -219,6 +226,22 @@ export const ebayRouter = router({
     await requireEbayExternalCapability(ctx.session);
     try {
       return await publishEbayListing(ctx.session.user.id, input);
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
+  validateQuantity: authenticatedProcedure.input(quantityListingSchema).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
+    try {
+      return await verifyEbayQuantityListing(ctx.collectionOwnerId, input);
+    } catch (error) {
+      throw ebayFailure(error);
+    }
+  }),
+  publishQuantity: authenticatedProcedure.input(quantityListingSchema).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
+    try {
+      return await publishEbayQuantityListing(ctx.collectionOwnerId, input);
     } catch (error) {
       throw ebayFailure(error);
     }

@@ -43,16 +43,23 @@ test("paid Sale review keeps deterministic Copy, membership, Listing, and order-
   assert.match(source, /eq\(ebayOrderLineAllocations\.ownerId, ownerId\)/);
 });
 
-test("both selector forms expose the same condition and eBay-status filtering contract", async () => {
-  const [sale, lot] = await Promise.all([
+test("Sale, Sale editing, and mixed lots render one shared Copy picker contract", async () => {
+  const [sale, lot, records, picker] = await Promise.all([
     readFile(new URL("../src/components/records/sale-form.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/records/ebay-lot-listing.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/records/copy-selection-picker.tsx", import.meta.url), "utf8"),
   ]);
-  for (const source of [sale, lot]) {
-    assert.match(source, /Condition[\s\S]*All conditions/);
-    assert.match(source, /filterCopySelectionCandidates\([\s\S]*condition[\s\S]*searchTerms:/);
-    assert.match(source, /ebayExposurePresentation[\s\S]*ebayExposureSummary/);
+  for (const source of [sale, lot, records]) {
+    assert.match(source, /<CopySelectionPicker/);
   }
+  assert.match(picker, /copySelectionPickerPageSize = 4/);
+  assert.match(picker, /grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4/);
+  assert.match(picker, /Condition[\s\S]*All conditions/);
+  assert.match(picker, /filterCopySelectionCandidates\([\s\S]*condition[\s\S]*searchTerms:/);
+  assert.match(picker, /ebayExposurePresentation[\s\S]*ebayExposureSummary/);
+  assert.match(picker, /aria-label="Copy result pages"/);
+  assert.match(picker, /Page \{currentPage\} of \{pageCount\}/);
 });
 
 test("stale photo anchors can move safely after the old Copy disappears", async () => {
