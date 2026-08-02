@@ -148,10 +148,10 @@ test("lot sold-listing research opens in the shared viewport modal", async () =>
 });
 
 test("lot UI keeps focused actions in dialogs and automatically checks selected Copies for saved photos", async () => {
-  const source = await readFile(
-    new URL("../src/components/records/ebay-lot-listing.tsx", import.meta.url),
-    "utf8",
-  );
+  const [source, picker] = await Promise.all([
+    readFile(new URL("../src/components/records/ebay-lot-listing.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/records/copy-selection-picker.tsx", import.meta.url), "utf8"),
+  ]);
   assert.match(source, /id="selected-manifest-dialog"/);
   assert.match(source, /id="saved-copy-photo-picker-dialog"/);
   assert.match(source, /aria-modal="true"/);
@@ -168,8 +168,9 @@ test("lot UI keeps focused actions in dialogs and automatically checks selected 
   assert.match(source, /sourceInventoryKey/);
   assert.match(source, /Clear all/);
   assert.match(source, /Select 2–100 physical Copies/);
-  assert.match(source, /Condition[\s\S]*All conditions/);
-  assert.match(source, /setCondition\("all"\)/);
+  assert.match(source, /<CopySelectionPicker/);
+  assert.match(picker, /Condition[\s\S]*All conditions/);
+  assert.match(picker, /setCondition\("all"\)/);
   assert.match(source, /fromCopyId: copyId[\s\S]*toCopyId: replacementCopyId/);
   assert.match(source, /method: "PATCH"/);
   assert.match(source, /Your staged lot photos are being kept safe/);

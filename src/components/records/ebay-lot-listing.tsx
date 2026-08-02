@@ -7,8 +7,6 @@ import {
   ArrowUp,
   Check,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ExternalLink,
   Images,
   Info,
@@ -16,7 +14,6 @@ import {
   LoaderCircle,
   Pencil,
   Plus,
-  Search,
   X,
 } from "lucide-react";
 import Image from "next/image";
@@ -25,12 +22,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
-import {
-  copyExposureSelectorLabel,
-  ebayExposurePresentation,
-  ebayExposureSummary,
-  physicalCopyStateLabel,
-} from "@/components/records/ebay-copy-exposure-presentation";
+import { CopySelectionPicker } from "@/components/records/copy-selection-picker";
 import {
   DestructiveToast,
   fieldClass,
@@ -59,7 +51,7 @@ import {
   copyDisplayLabel,
   copyShortReference,
 } from "@/lib/records/copy-display";
-import { copySelectionAvailabilityReason, copySelectionValidationFingerprint, copySelectionValidationIsCurrent, filterCopySelectionCandidates, mixedLotCopyBounds, pageCopySelection, reanchorCopySelectionPhotos, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
+import { copySelectionAvailabilityReason, copySelectionValidationFingerprint, copySelectionValidationIsCurrent, mixedLotCopyBounds, reanchorCopySelectionPhotos, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import { trpc } from "@/trpc/client";
 import { useCollectionChange, collectionRefreshFailureMessage } from "@/lib/use-collection-change";
 import { taskReturnHref } from "@/lib/navigation-intent";
@@ -109,8 +101,6 @@ type EbayVerification = {
   }>;
   readyToPublish: boolean;
 };
-
-const pageSize = 20;
 
 function pence(value: string) {
   return Math.round(Number(value.replace(/[£,\s]/g, "")) * 100) || 0;
@@ -408,11 +398,6 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const draft = lifecycle.data;
   const setDraft = lifecycle.setData;
   const [step, setStep] = useState(1);
-  const [query, setQuery] = useState("");
-  const [condition, setCondition] = useState("all");
-  const [rarity, setRarity] = useState("all");
-  const [selectedOnly, setSelectedOnly] = useState(false);
-  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<EbayVerification | null>(null);
   const [validatedFingerprint, setValidatedFingerprint] = useState<string | null>(null);
@@ -541,23 +526,6 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
   const eligibleCandidates = candidates.filter(({ copy, exposure }) => (
     copySelectionAvailabilityReason({ copyId: copy.id, exposure, status: copy.status }) === null
   ));
-  const rarityOptions = Array.from(
-    new Set(
-      eligibleCandidates
-        .map((item) => item.target.rarity)
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right));
-  const conditionOptions = Array.from(
-    new Set(eligibleCandidates.map((item) => item.copy.condition)),
-  ).sort((left, right) => left.localeCompare(right));
-  const filtered = filterCopySelectionCandidates(eligibleCandidates, {
-    condition, query, rarity, selectedIds: selection.selectedIds, selectedOnly,
-    searchTerms: (item) => item.exposure
-      ? [ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount).label, ebayExposureSummary(item.exposure)]
-      : ["exposure unavailable"],
-  });
-  const { currentPage, items: visible, pageCount, resultEnd, resultStart } = pageCopySelection(filtered, page, pageSize);
   const visibleFees =
     currentValidation?.fees.filter(
       (fee) => Number.isFinite(fee.amount) && fee.amount !== 0,
@@ -680,8 +648,6 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
     });
     setManifestOpen(false);
     setClearSelectionOpen(false);
-    setSelectedOnly(false);
-    setPage(1);
     setError(null);
   }
 
@@ -1291,201 +1257,18 @@ function EbayLotForm({ returnHref }: { returnHref: string }) {
                   </div>
                 ) : null}
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.3fr)_minmax(180px,0.35fr)_auto] lg:items-end">
-                  <label>
-                    <span className="text-sm font-bold text-zinc-700">Search cards</span>
-                    <div className="relative mt-1">
-                      <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-                      <input
-                        className={`${fieldClass} mt-0 min-w-0 pl-9`}
-                        onChange={(event) => {
-                          setQuery(event.target.value);
-                          setPage(1);
-                        }}
-                        placeholder="Name, set, code, edition, rarity, condition"
-                        type="search"
-                        value={query}
-                      />
-                    </div>
-                  </label>
-                  <label>
-                    <span className="text-sm font-bold text-zinc-700">Condition</span>
-                    <select
-                      className={fieldClass}
-                      onChange={(event) => {
-                        setCondition(event.target.value);
-                        setPage(1);
-                      }}
-                      value={condition}
-                    >
-                      <option value="all">All conditions</option>
-                      {conditionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    <span className="text-sm font-bold text-zinc-700">Rarity</span>
-                    <select
-                      className={fieldClass}
-                      onChange={(event) => {
-                        setRarity(event.target.value);
-                        setPage(1);
-                      }}
-                      value={rarity}
-                    >
-                      <option value="all">All rarities</option>
-                      {rarityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-bold text-zinc-700">
-                    <input
-                      checked={selectedOnly}
-                      className="size-4 accent-[#8a1f2d]"
-                      onChange={(event) => {
-                        setSelectedOnly(event.target.checked);
-                        setPage(1);
-                      }}
-                      type="checkbox"
-                    />
-                    Selected only
-                  </label>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between gap-3 text-sm font-medium text-zinc-500">
-                  <span>Available inventory</span>
-                  <span>Showing {resultStart}–{resultEnd} of {filtered.length}</span>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-                  {visible.map(
-                    ({ copy, exposure, imageUrl, printing, target }, index) => {
-                      const chosen = selection.selectedIds.includes(copy.id);
-                      const exposurePresentation = exposure
-                        ? ebayExposurePresentation(
-                            exposure.aggregateState,
-                            exposure.liveOfferCount,
-                          )
-                        : null;
-                      const copiesForTarget = source.snapshot.copies.filter((candidate) => {
-                        const candidatePrinting = source.snapshot.printings.find(
-                          (value) => value.id === candidate.printingId,
-                        );
-                        return candidatePrinting?.targetId === target.id;
-                      });
-                      const copyLabel = `${target.name}, ${printing.setCode || "unknown set"}, Copy ${copyReference(copy.id)}`;
-                      return (
-                        <label
-                          className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-white transition focus-within:ring-2 focus-within:ring-[#8a1f2d] focus-within:ring-offset-2 ${
-                            chosen
-                              ? "border-[#8a1f2d] ring-1 ring-[#8a1f2d]"
-                              : "border-zinc-200 hover:border-zinc-400 hover:shadow-sm"
-                          }`}
-                          key={copy.id}
-                        >
-                          <div className="relative aspect-[3/4] bg-zinc-100">
-                            {imageUrl ? (
-                              <Image
-                                alt=""
-                                className="object-contain p-2"
-                                fill
-                                loading={index < 4 ? "eager" : "lazy"}
-                                sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                                src={`/api/image-proxy?url=${encodeURIComponent(imageUrl)}`}
-                                unoptimized
-                              />
-                            ) : (
-                              <span className="grid h-full place-items-center text-xs font-black text-zinc-400">CARD</span>
-                            )}
-                            <input
-                              aria-label={`Select ${copyExposureSelectorLabel(copyLabel, exposure)}. eBay status ${exposurePresentation?.label ?? "Unavailable"}.`}
-                              checked={chosen}
-                              className="sr-only"
-                              onChange={(event) =>
-                                toggleCopy(copy.id, event.target.checked)
-                              }
-                              type="checkbox"
-                            />
-                            <span aria-hidden="true" className={`absolute right-2 top-2 z-10 grid size-9 place-items-center rounded-full border shadow-sm ${chosen ? "border-[#8a1f2d] bg-[#8a1f2d] text-white" : "border-zinc-300 bg-white text-zinc-600"}`}>
-                              {chosen ? <Check className="size-4" /> : <Plus className="size-4" />}
-                            </span>
-                            {chosen ? (
-                              <span className="absolute left-2 top-2 z-10 rounded-full bg-[#8a1f2d] px-2 py-1 text-[11px] font-black text-white shadow-sm">
-                                Selected
-                              </span>
-                            ) : null}
-                          </div>
-                          <span className="block p-3">
-                            <span className="line-clamp-2 block min-h-10 text-sm font-black leading-5 text-zinc-950">{target.name}</span>
-                            <span className="mt-1 block text-xs font-bold text-[#8a1f2d]">{target.rarity || "Unknown rarity"}</span>
-                            <span className="mt-1 block text-xs font-medium text-zinc-500">{printing.setCode || "Unknown set"} · {target.edition || "Unknown edition"}</span>
-                            <span className="mt-1 block text-xs font-medium text-zinc-500">{copyDisplayLabel(copiesForTarget, copy.id)} · #{copyShortReference(copy.id)} · {copy.condition}</span>
-                            <span className="mt-2 block text-xs font-bold text-zinc-700">Physical · {exposure ? physicalCopyStateLabel(exposure) : "Status unavailable"}</span>
-                            <span className="mt-1 block break-words text-xs font-bold text-zinc-700">eBay exposure · {exposurePresentation?.label ?? "Unavailable"}{exposure ? ` · ${ebayExposureSummary(exposure)}` : ""}</span>
-                          </span>
-                        </label>
-                      );
-                    },
-                  )}
-                </div>
-
-                {!visible.length ? (
-                  <div className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center">
-                    <p className="font-bold text-zinc-800">
-                      No Copies match this search
-                    </p>
-                    <button
-                      className="mt-2 min-h-11 rounded-md px-3 text-sm font-bold text-[#8a1f2d] hover:bg-rose-50"
-                      onClick={() => {
-                        setQuery("");
-                        setCondition("all");
-                        setRarity("all");
-                        setSelectedOnly(false);
-                        setPage(1);
-                      }}
-                      type="button"
-                    >
-                      Clear search
-                    </button>
-                  </div>
-                ) : null}
-
-                {pageCount > 1 ? (
-                  <nav
-                    aria-label="Copy result pages"
-                    className="mt-4 flex min-w-0 items-center justify-between gap-2"
-                  >
-                    <button
-                      className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3"
-                      disabled={currentPage <= 1}
-                      onClick={() =>
-                        setPage((current) => current - 1)
-                      }
-                      type="button"
-                    >
-                      <ChevronLeft
-                        aria-hidden="true"
-                        className="size-4"
-                      />
-                      Previous
-                    </button>
-                    <span className="shrink-0 text-xs font-bold text-zinc-600 sm:text-sm">
-                      Page {currentPage} of {pageCount}
-                    </span>
-                    <button
-                      className="inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-bold disabled:opacity-40 sm:px-3"
-                      disabled={currentPage >= pageCount}
-                      onClick={() =>
-                        setPage((current) => current + 1)
-                      }
-                      type="button"
-                    >
-                      Next
-                      <ChevronRight
-                        aria-hidden="true"
-                        className="size-4"
-                      />
-                    </button>
-                  </nav>
-                ) : null}
+                <CopySelectionPicker
+                  candidates={eligibleCandidates}
+                  getCopyCaption={(item) => {
+                    const copiesForTarget = source.snapshot.copies.filter((candidate) => {
+                      const candidatePrinting = source.snapshot.printings.find((value) => value.id === candidate.printingId);
+                      return candidatePrinting?.targetId === item.target.id;
+                    });
+                    return `${copyDisplayLabel(copiesForTarget, item.copy.id)} · #${copyShortReference(item.copy.id)}`;
+                  }}
+                  onToggle={toggleCopy}
+                  selectedIds={selection.selectedIds}
+                />
               </div>
 
               <aside

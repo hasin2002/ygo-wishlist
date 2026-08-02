@@ -2,15 +2,10 @@
 
 import {
   Boxes,
-  Check,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   CreditCard,
   Info,
   Pencil,
-  Plus,
-  Search,
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -35,8 +30,8 @@ import {
   type DraftConflictCardSummary,
 } from "@/components/records/form-draft-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { CopySelectionPicker } from "@/components/records/copy-selection-picker";
 import {
-  copyExposureSelectorLabel,
   ebayExposurePresentation,
   ebayExposureSummary,
   physicalCopyStateLabel,
@@ -51,7 +46,7 @@ import {
 } from "@/lib/navigation-intent";
 import { hasFields, isOneOf, isRecord, isString } from "@/lib/records/form-draft-validators";
 import { copyDisplayLabel, copyPhysicalIdentifier, copyShortReference } from "@/lib/records/copy-display";
-import { copySelectionAvailabilityReason, filterCopySelectionCandidates, pageCopySelection, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
+import { copySelectionAvailabilityReason, reconcileCopySelection, removeDuplicateCopySelectionId } from "@/lib/records/copy-selection";
 import type {
   CardCopy,
   CardPrinting,
@@ -59,8 +54,6 @@ import type {
   WishlistTarget,
 } from "@/lib/records/types";
 import { trpc } from "@/trpc/client";
-
-const salePageSize = 20;
 
 type SaleKind = "single" | "bulk";
 
@@ -293,11 +286,7 @@ function SaleFormWorkflow({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [paidReviewActive, setPaidReviewActive] = useState(paidReviewReady);
-  const [query, setQuery] = useState("");
-  const [condition, setCondition] = useState("all");
-  const [rarity, setRarity] = useState("all");
-  const [selectedOnly, setSelectedOnly] = useState(false);
-  const [page, setPage] = useState(1);
+  const [visiblePhotoCopyIds, setVisiblePhotoCopyIds] = useState<string[]>([]);
   const [photoSummaries, setPhotoSummaries] = useState<Record<string, CopyPhotoSummary>>({});
 
   const allCopies = useMemo<AvailableCopy[]>(() => {
@@ -334,14 +323,6 @@ function SaleFormWorkflow({
   const availableCopies = useMemo(() => allCopies.filter((item) => (
     selectionReason(item) === null
   )), [allCopies, selectionReason]);
-  const rarityOptions = useMemo(
-    () => Array.from(new Set(availableCopies.map((item) => item.target.rarity).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
-    [availableCopies],
-  );
-  const conditionOptions = useMemo(
-    () => Array.from(new Set(availableCopies.map((item) => item.copy.condition))).sort((left, right) => left.localeCompare(right)),
-    [availableCopies],
-  );
 
   const selectedCopies = selection.selected;
   const copiesForTarget = (item: AvailableCopy) => source.snapshot.copies.filter((copy) => {
@@ -349,17 +330,9 @@ function SaleFormWorkflow({
     return printing?.targetId === item.target.id;
   });
 
-  const filteredCopies = useMemo(() => filterCopySelectionCandidates(availableCopies, {
-    condition, query, rarity, selectedIds: selection.selectedIds, selectedOnly,
-    searchTerms: (item) => item.exposure
-      ? [ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount).label, ebayExposureSummary(item.exposure)]
-      : ["exposure unavailable"],
-  }), [availableCopies, condition, query, rarity, selectedOnly, selection.selectedIds]);
-  const pagination = pageCopySelection(filteredCopies, page, salePageSize);
-  const { currentPage, items: visibleCopies, pageCount, resultEnd, resultStart } = pagination;
   const conflictCopyIds = lifecycle.conflict?.data.copyIds ?? [];
   const photoCopyIds = Array.from(new Set([
-    ...visibleCopies.map((item) => item.copy.id),
+    ...visiblePhotoCopyIds,
     ...selectedCopies.map((item) => item.copy.id),
     ...conflictCopyIds,
     ...(requestedCopyId ? [requestedCopyId] : []),
@@ -483,14 +456,6 @@ function SaleFormWorkflow({
       // selection remains valid when the transaction type changes.
       copyIds: current.copyIds.slice(0, 1),
     }));
-  }
-
-  function clearInventoryFilters() {
-    setQuery("");
-    setCondition("all");
-    setRarity("all");
-    setSelectedOnly(false);
-    setPage(1);
   }
 
   const saleLabel = draft.kind === "single" ? "Single card" : "Bulk cards";
@@ -644,40 +609,6 @@ function SaleFormWorkflow({
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.3fr)_minmax(180px,0.35fr)_auto] lg:items-end">
-              <label>
-                <span className="text-sm font-bold text-zinc-700">Search cards</span>
-                <div className="relative mt-1">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    className={`${fieldClass} mt-0 pl-9`}
-                    onChange={(event) => { setQuery(event.target.value); setPage(1); }}
-                    placeholder="Name, set, code, edition, rarity, condition"
-                    type="search"
-                    value={query}
-                  />
-                </div>
-              </label>
-              <label>
-                <span className="text-sm font-bold text-zinc-700">Condition</span>
-                <select className={fieldClass} onChange={(event) => { setCondition(event.target.value); setPage(1); }} value={condition}>
-                  <option value="all">All conditions</option>
-                  {conditionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="text-sm font-bold text-zinc-700">Rarity</span>
-                <select className={fieldClass} onChange={(event) => { setRarity(event.target.value); setPage(1); }} value={rarity}>
-                  <option value="all">All rarities</option>
-                  {rarityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </label>
-              <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-bold text-zinc-700">
-                <input checked={selectedOnly} className="size-4 accent-[#8a1f2d]" onChange={(event) => { setSelectedOnly(event.target.checked); setPage(1); }} type="checkbox" />
-                Selected only
-              </label>
-            </div>
-
             <div aria-atomic="true" aria-live="polite" className="mt-4 flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <strong>{selection.selectedIds.length} {selection.selectedIds.length === 1 ? "copy" : "copies"} selected</strong>
@@ -691,7 +622,6 @@ function SaleFormWorkflow({
                         : `Choose ${remainingCopies} more ${remainingCopies === 1 ? "copy" : "copies"} to continue`}
                 </span>
               </div>
-              <span className="text-sm font-medium text-zinc-500">Showing {resultStart}–{resultEnd} of {filteredCopies.length}</span>
             </div>
 
             {selection.issues.length ? (
@@ -709,81 +639,26 @@ function SaleFormWorkflow({
               </div>
             ) : null}
 
-            {visibleCopies.length ? (
-              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-                {visibleCopies.map((item, index) => {
-                  const selected = selection.selectedIds.includes(item.copy.id);
-                  const exposurePresentation = item.exposure
-                    ? ebayExposurePresentation(item.exposure.aggregateState, item.exposure.liveOfferCount)
-                    : null;
-                  const copyLabel = `${item.target.name}, ${item.printing.setCode || "unknown set"}, Copy ${item.copy.id.slice(-6)}`;
-                  return (
-                    <label
-                      className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-white transition focus-within:ring-2 focus-within:ring-[#8a1f2d] focus-within:ring-offset-2 ${selected ? "border-[#8a1f2d] ring-1 ring-[#8a1f2d]" : "border-zinc-200 hover:border-zinc-400 hover:shadow-sm"}`}
-                      key={item.copy.id}
-                    >
-                      <div className="relative aspect-[3/4] bg-zinc-100">
-                        {photoSummaries[item.copy.id]?.primary?.previewUrl || item.imageUrl ? (
-                          <Image
-                            alt=""
-                            className="object-contain p-2"
-                            fill
-                            loading={index < 4 ? "eager" : "lazy"}
-                            sizes="(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw"
-                            src={photoSummaries[item.copy.id]?.primary?.previewUrl || `/api/image-proxy?url=${encodeURIComponent(item.imageUrl!)}`}
-                            unoptimized
-                          />
-                        ) : (
-                          <span className="grid h-full place-items-center text-xs font-black text-zinc-400">CARD</span>
-                        )}
-                        <input
-                          aria-label={`Select ${copyExposureSelectorLabel(copyLabel, item.exposure)}. eBay status ${exposurePresentation?.label ?? "Unavailable"}.`}
-                          checked={selected}
-                          className="sr-only"
-                          disabled={paidReviewActive}
-                          name={draft.kind === "single" ? "sale-copy" : undefined}
-                          onChange={(event) => toggleCopy(item.copy.id, event.target.checked)}
-                          type={draft.kind === "single" ? "radio" : "checkbox"}
-                        />
-                        <span aria-hidden="true" className={`absolute right-2 top-2 z-10 grid size-9 place-items-center rounded-full border shadow-sm transition ${selected ? "border-[#8a1f2d] bg-[#8a1f2d] text-white" : "border-zinc-300 bg-white text-zinc-600 group-hover:border-zinc-500"}`}>
-                          {selected ? <Check className="size-4" /> : <Plus className="size-4" />}
-                        </span>
-                        {selected ? (
-                          <span className="absolute left-2 top-2 z-10 inline-flex items-center rounded-full bg-[#8a1f2d] px-2 py-1 text-[11px] font-black text-white shadow-sm">
-                            Selected
-                          </span>
-                        ) : null}
-                        {photoSummaries[item.copy.id]?.primary ? <span className="absolute bottom-2 left-2 z-10 rounded-full bg-zinc-950/80 px-2 py-1 text-[10px] font-black text-white">Copy photo</span> : null}
-                      </div>
-                      <span className="block p-3">
-                        <span className="line-clamp-2 block min-h-10 text-sm font-black leading-5 text-zinc-950">{item.target.name}</span>
-                        <span className="mt-1 block text-xs font-bold text-[#8a1f2d]">{item.target.rarity || "Unknown rarity"}</span>
-                        <span className="mt-1 block text-xs font-medium text-zinc-500">{item.printing.setCode || "Unknown set"} · {item.target.edition || "Unknown edition"}</span>
-                        <span className="mt-1 block text-xs font-medium text-zinc-500">{copyDisplayLabel(copiesForTarget(item), item.copy.id)} · #{copyShortReference(item.copy.id)} · {item.copy.condition}</span>
-                        <span className="mt-2 block text-xs font-bold text-zinc-700">Physical · {item.exposure ? physicalCopyStateLabel(item.exposure) : "Status unavailable"}</span>
-                        <span className="mt-1 block break-words text-xs font-bold text-zinc-700">eBay exposure · {exposurePresentation?.label ?? "Unavailable"}{item.exposure ? ` · ${ebayExposureSummary(item.exposure)}` : ""}</span>
-                        {item.copy.privateNote ? <span className="mt-1 block text-[11px] font-medium text-zinc-500">{item.copy.privateNote}</span> : null}
-                        {photoSummaries[item.copy.id]?.count ? <span className="mt-1 block text-[11px] font-bold text-zinc-500">{photoSummaries[item.copy.id].count} saved {photoSummaries[item.copy.id].count === 1 ? "photo" : "photos"}</span> : null}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-10 text-center">
-                <p className="font-black text-zinc-800">{availableCopies.length ? "No cards match these filters" : "No available card copies"}</p>
-                <p className="mt-1 text-sm font-medium text-zinc-500">{availableCopies.length ? "Clear the filters or search for a different card." : "Record an acquisition before creating a Sale."}</p>
-                {availableCopies.length ? <button className="mt-4 min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold" onClick={clearInventoryFilters} type="button">Clear filters</button> : null}
-              </div>
-            )}
-
-            {filteredCopies.length > salePageSize ? (
-              <nav aria-label="Card results pages" className="mt-4 flex items-center justify-between gap-3 border-t border-zinc-200 pt-4">
-                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /> Previous</button>
-                <span className="text-sm font-bold text-zinc-600">Page {currentPage} of {pageCount}</span>
-                <button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button">Next <ChevronRight className="size-4" /></button>
-              </nav>
-            ) : null}
+            <div className="mt-3">
+              <CopySelectionPicker
+                candidates={availableCopies}
+                disabled={paidReviewActive}
+                emptyDescription={availableCopies.length ? "Clear the filters or search for a different card." : "Record an acquisition before creating a Sale."}
+                emptyTitle={availableCopies.length ? "No cards match these filters" : "No available card copies"}
+                getCopyCaption={(item) => `${copyDisplayLabel(copiesForTarget(item), item.copy.id)} · #${copyShortReference(item.copy.id)}`}
+                getPrimaryImageUrl={(item) => photoSummaries[item.copy.id]?.primary?.previewUrl}
+                onToggle={toggleCopy}
+                onVisibleCopyIdsChange={setVisiblePhotoCopyIds}
+                photoBadgeLabel={(item) => photoSummaries[item.copy.id]?.primary ? "Copy photo" : null}
+                renderCardFooter={(item) => <>
+                  {item.copy.privateNote ? <span className="mt-1 block text-[11px] font-medium text-zinc-500">{item.copy.privateNote}</span> : null}
+                  {photoSummaries[item.copy.id]?.count ? <span className="mt-1 block text-[11px] font-bold text-zinc-500">{photoSummaries[item.copy.id].count} saved {photoSummaries[item.copy.id].count === 1 ? "photo" : "photos"}</span> : null}
+                </>}
+                selectedIds={selection.selectedIds}
+                selectionMode={draft.kind === "single" ? "single" : "multiple"}
+                selectionName={draft.kind === "single" ? "sale-copy" : undefined}
+              />
+            </div>
 
             <LibraryImpactNotice impacts={libraryImpacts} />
           </FormSection>
