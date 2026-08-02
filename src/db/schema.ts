@@ -553,9 +553,6 @@ export const ebayListings = pgTable(
       foreignColumns: [recordEntries.ownerId, recordEntries.id],
     }).onDelete("restrict"),
     uniqueIndex("ebay_listings_item_id_unique").on(table.itemId),
-    uniqueIndex("ebay_listings_owner_copy_open_unique")
-      .on(table.ownerId, table.copyId)
-      .where(sql`${table.status} = 'active'`),
     uniqueIndex("ebay_listings_owner_order_line_unique")
       .on(table.ownerId, table.orderId, table.orderLineItemId)
       .where(sql`${table.orderId} is not null and ${table.orderLineItemId} is not null`),
@@ -580,6 +577,100 @@ export const ebayListings = pgTable(
       sql`${table.quantitySold} is null or ${table.quantitySold} >= 0`,
     ),
     check("ebay_listings_retry_count_nonnegative", sql`${table.retryCount} >= 0`),
+  ],
+);
+
+/**
+ * One immutable cross-list plan. The plan is persisted before the first
+ * AddItem call so later sibling offers can share only the exact Copies that
+ * were reviewed together.
+ */
+export const ebayListingPublicationGroups = pgTable(
+  "ebay_listing_publication_groups",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    planFingerprint: text("plan_fingerprint").notNull(),
+    plan: jsonb("plan").$type<Array<{
+      copyIds: string[];
+      kind: "individual" | "quantity" | "bundle";
+      offerId: string;
+    }>>().notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_listing_publication_groups_owner_id_unique").on(
+      table.ownerId,
+      table.id,
+    ),
+    check(
+      "ebay_listing_publication_groups_plan_nonempty",
+      sql`jsonb_array_length(${table.plan}) >= 2`,
+    ),
+  ],
+);
+
+/**
+ * Durable identity for one eBay AddItem attempt in a cross-list set. Rows with
+ * the same batchId deliberately share exact Copies between one full lot and
+ * its policy-safe standalone offers. planFingerprint freezes that membership
+ * before the first remote publication.
+ */
+export const ebayListingPublications = pgTable(
+  "ebay_listing_publications",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: text("batch_id").notNull(),
+    offerId: text("offer_id").notNull(),
+    publicationUuid: text("publication_uuid").notNull(),
+    planFingerprint: text("plan_fingerprint").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    listingId: text("listing_id").notNull(),
+    kind: text("kind", { enum: ["individual", "quantity", "bundle"] }).notNull(),
+    copyIds: jsonb("copy_ids").$type<string[]>().notNull(),
+    state: text("state", {
+      enum: ["prepared", "publishing", "recorded", "failed", "uncertain"],
+    }).notNull().default("prepared"),
+    itemId: text("item_id"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_listing_publications_owner_id_unique").on(table.ownerId, table.id),
+    foreignKey({
+      name: "ebay_listing_publications_owner_group_fk",
+      columns: [table.ownerId, table.batchId],
+      foreignColumns: [ebayListingPublicationGroups.ownerId, ebayListingPublicationGroups.id],
+    }).onDelete("cascade"),
+    uniqueIndex("ebay_listing_publications_owner_batch_offer_unique").on(
+      table.ownerId,
+      table.batchId,
+      table.offerId,
+    ),
+    uniqueIndex("ebay_listing_publications_owner_uuid_unique").on(
+      table.ownerId,
+      table.publicationUuid,
+    ),
+    uniqueIndex("ebay_listing_publications_listing_id_unique").on(table.listingId),
+    uniqueIndex("ebay_listing_publications_item_id_unique")
+      .on(table.itemId)
+      .where(sql`${table.itemId} is not null`),
+    index("ebay_listing_publications_owner_state_idx").on(table.ownerId, table.state),
+    check(
+      "ebay_listing_publications_uuid_format",
+      sql`${table.publicationUuid} ~ '^[A-F0-9]{32}$'`,
+    ),
+    check(
+      "ebay_listing_publications_copy_ids_nonempty",
+      sql`jsonb_array_length(${table.copyIds}) >= 1`,
+    ),
   ],
 );
 
@@ -1108,6 +1199,8 @@ export type TargetBinderSlotRow = typeof targetBinderSlots.$inferSelect;
 export type TargetWheelEntryRow = typeof targetWheelEntries.$inferSelect;
 export type TargetMonthlyFavoriteRow = typeof targetMonthlyFavorites.$inferSelect;
 export type EbayListingRow = typeof ebayListings.$inferSelect;
+export type EbayListingPublicationGroupRow = typeof ebayListingPublicationGroups.$inferSelect;
+export type EbayListingPublicationRow = typeof ebayListingPublications.$inferSelect;
 export type EbayListingMemberRow = typeof ebayListingMembers.$inferSelect;
 export type EbayOrderLineRow = typeof ebayOrderLines.$inferSelect;
 export type EbayOrderLineAllocationRow = typeof ebayOrderLineAllocations.$inferSelect;

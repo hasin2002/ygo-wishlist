@@ -5,7 +5,8 @@ export type FormDraftWorkflow =
   | "pack-opening"
   | "sale"
   | "ebay-listing"
-  | "ebay-mixed-lot";
+  | "ebay-mixed-lot"
+  | "ebay-batch";
 
 export type FormDraftIntent = {
   kind: "none" | "wishlist-target" | "sealed-unit" | "copy";

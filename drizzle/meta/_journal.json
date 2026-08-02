@@ -36,6 +36,13 @@
       "when": 1785442800000,
       "tag": "0004_sealed_unit_cost_allocations",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785704736921,
+      "tag": "0005_ebay_cross_listing_publications",
+      "breakpoints": true
     }
   ]
 }

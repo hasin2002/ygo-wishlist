@@ -106,7 +106,7 @@ export function protectedLoginHref(
   return loginHref(parseNavigationIntent(proxyIntent) ?? fallback);
 }
 
-export function addTaskHref(taskPathname: "/wishlist/new" | "/records/new/purchase" | "/records/new/opening" | "/records/new/sale" | "/records/listings/new-lot", origin: string | NavigationIntent | null | undefined) {
+export function addTaskHref(taskPathname: "/wishlist/new" | "/records/new/purchase" | "/records/new/opening" | "/records/new/sale" | "/records/listings/new-lot" | "/records/listings/new-batch", origin: string | NavigationIntent | null | undefined) {
   const intent = typeof origin === "string" ? parseNavigationIntent(origin) : origin;
   if (!intent) return taskPathname;
   return `${taskPathname}?origin=${encodeURIComponent(serializeNavigationIntent(intent))}`;

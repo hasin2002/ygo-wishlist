@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:browser": "playwright test",
     "test:auth": "node --experimental-strip-types --test tests/auth-hosts.test.ts",
+    "test:ebay-batch": "node --experimental-strip-types --test tests/ebay-batch.test.ts",
     "test:feature-ideas": "node scripts/test-feature-ideas-migration.mjs",
     "test:transactions": "node scripts/test-records-transactions.mjs",
     "check": "npm run test:auth && npm run test:records && npm run test:purchase-accounting-audit && npm run test:ebay-sandbox && npm run test:transactions && npm run test:feature-ideas && npm run test:migration-release-guard && npm run lint && tsc --noEmit --incremental false && npm run build -- --webpack && npm run test:browser",

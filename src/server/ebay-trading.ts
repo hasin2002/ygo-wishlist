@@ -17,6 +17,7 @@ export class EbayTradingError extends Error {
   constructor(
     message: string,
     readonly details: EbayTradingErrorDetail[] = [],
+    readonly xml: string | null = null,
   ) {
     super(message);
   }
@@ -104,10 +105,42 @@ export async function callEbayTradingApi({
     throw new EbayTradingError(
       firstError?.message ?? `eBay ${callName} failed (${response.status}).`,
       errors,
+      xml,
     );
   }
 
   return { ack, errors, xml };
+}
+
+/**
+ * Error 488 is safe recovery evidence only when eBay says the UUID came from
+ * this application and supplies the original numeric ItemID.
+ */
+export function duplicateEbayItemId(error: unknown) {
+  if (!(error instanceof EbayTradingError) || !error.details.some((detail) => detail.code === "488")) {
+    return null;
+  }
+  const duplicateErrors = ebayXmlContainers(error.xml ?? "", "Errors")
+    .filter((container) => ebayXmlText(container, "ErrorCode") === "488");
+  for (const container of duplicateErrors) {
+    const parameters = [...container.matchAll(
+      /<ErrorParameters\b([^>]*)>([\s\S]*?)<\/ErrorParameters>/gi,
+    )].map((match) => ({
+      id: match[1]?.match(/\bParamID\s*=\s*["']([^"']+)["']/i)?.[1] ?? null,
+      value: ebayXmlText(match[2] ?? "", "Value"),
+    }));
+    const sameApplication = parameters.find((parameter) => parameter.id === "0")?.value;
+    const itemId = parameters.find((parameter) => parameter.id === "1")?.value;
+    if (
+      sameApplication
+      && ["1", "true"].includes(sameApplication.toLowerCase())
+      && itemId
+      && /^[0-9]+$/.test(itemId)
+    ) {
+      return itemId;
+    }
+  }
+  return null;
 }
 
 function xmlNumber(xml: string, name: string) {

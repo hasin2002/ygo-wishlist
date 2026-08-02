@@ -2,6 +2,7 @@
 
 import {
   Layers3,
+  ListChecks,
   Menu,
   PackageOpen,
   Plus,
@@ -22,6 +23,7 @@ const addItems = [
   { description: "Cards, sealed, bulk, and supplies", href: "/records/new/purchase", icon: Plus, label: "Purchase" },
   { description: "Open sealed product and record pulls", href: "/records/new/opening", icon: PackageOpen, label: "Pack opening" },
   { description: "Sell exact physical card copies", href: "/records/new/sale", icon: ReceiptText, label: "Sale" },
+  { description: "Create a full lot plus separate single or quantity eBay listings", href: "/records/listings/new-batch", icon: ListChecks, label: "List card multiple ways" },
   { description: "Create one eBay offer containing several exact Copies", href: "/records/listings/new-lot", icon: Layers3, label: "Mixed card lot" },
 ] as const;
 
@@ -142,17 +144,17 @@ function GlobalAddMenu() {
           let menuItemIndex = 0;
           return addItems.map((item) => {
           const Icon = item.icon;
-          const isMixedLot = item.href === "/records/listings/new-lot";
-          const unavailable = isMixedLot && (recordsPreview || ebayStatus.isError || !ebayCapability?.ebay.allowed);
+          const isEbayListingTask = item.href === "/records/listings/new-lot" || item.href === "/records/listings/new-batch";
+          const unavailable = isEbayListingTask && (recordsPreview || ebayStatus.isError || !ebayCapability?.ebay.allowed);
           const reason = recordsPreview
-            ? "Mixed eBay lots are unavailable in preview mode."
+            ? "eBay listing tools are unavailable in preview mode."
             : ebayStatus.isError
               ? "eBay readiness could not be checked."
               : ebayStatus.isPending
                 ? "Checking eBay readiness…"
                 : ebayCapability
                   ? `${ebayCapability.ebay.message} ${ebayCapability.ebay.remedy}`
-                  : "Seller permission is required to create an eBay mixed lot.";
+                  : "Seller permission is required to create an eBay offer.";
           const itemIndex = menuItemIndex++;
           const retryIndex = unavailable && ebayStatus.isError ? menuItemIndex++ : null;
           const href = addTaskHref(item.href, origin);
