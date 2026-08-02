@@ -199,6 +199,7 @@ export function ebayListingStatusSummary(row: EbayListingRow) {
     cancelledAt: row.cancelledAt,
     copyId: row.copyId,
     endingReason: row.endingReason,
+    id: row.id,
     itemId: row.itemId,
     lastError: row.lastError,
     lastErrorAt: row.lastErrorAt,

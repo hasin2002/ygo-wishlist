@@ -11,6 +11,19 @@ export function copyShortReference(copyId: string) {
   return copyId.slice(-6).toUpperCase();
 }
 
+export function copyPhysicalIdentifier(
+  copy: Pick<CardCopy, "id" | "location" | "stickerNumber">,
+) {
+  const storedDetails = [
+    copy.stickerNumber ? `Sticker ${copy.stickerNumber}` : null,
+    copy.location?.trim() || null,
+  ].filter((detail): detail is string => Boolean(detail));
+
+  return storedDetails.length
+    ? storedDetails.join(" · ")
+    : `Copy #${copyShortReference(copy.id)}`;
+}
+
 export function copyDisplayLabel(copies: CardCopy[], copyId: string) {
   const ordered = orderCopies(copies);
   const position = ordered.findIndex((copy) => copy.id === copyId);

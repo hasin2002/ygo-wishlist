@@ -305,6 +305,10 @@ export type SaleInput = {
   netProceedsPence: number;
   notes: string;
   copyIds: string[];
+  paidEbayReview?: {
+    copyId: string;
+    listingId: string;
+  };
 };
 
 export type RecordsDrafts = Partial<

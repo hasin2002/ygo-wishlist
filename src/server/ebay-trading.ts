@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getEbaySellerAccessToken } from "@/server/ebay-seller";
+import { suggestEbayPaidSaleProceeds } from "@/lib/records/ebay-paid-sale-proceeds";
 
 const tradingApiUrl = "https://api.ebay.com/ws/api.dll";
 const tradingCompatibilityLevel = "1423";
@@ -116,6 +117,11 @@ function xmlNumber(xml: string, name: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function xmlPence(xml: string, name: string) {
+  const amount = xmlNumber(xml, name);
+  return amount === null || amount < 0 ? null : Math.round(amount * 100);
+}
+
 function xmlDate(xml: string, name: string) {
   const value = ebayXmlText(xml, name);
   if (!value) return null;
@@ -132,6 +138,8 @@ export type EbayRemoteTransaction = {
   checkoutStatus: string | null;
   completeStatus: string | null;
   ebayPaymentStatus: string | null;
+  estimatedProceedsPence: number | null;
+  estimateIncludesReportedFee: boolean;
   orderId: string | null;
   orderLineItemId: string | null;
   paid: boolean;
@@ -166,12 +174,19 @@ function transactionFromXml(xml: string): EbayRemoteTransaction {
     || completeStatus === "Complete"
     || ebayPaymentStatus === "NoPaymentFailure",
   );
+  const proceeds = suggestEbayPaidSaleProceeds({
+    finalValueFeePence: xmlPence(xml, "FinalValueFee"),
+    itemPricePence: xmlPence(xml, "TransactionPrice"),
+    shippingChargedPence: xmlPence(xml, "ShippingServiceCost"),
+  });
 
   return {
     cancelled,
     checkoutStatus,
     completeStatus,
     ebayPaymentStatus,
+    estimatedProceedsPence: proceeds?.amountPence ?? null,
+    estimateIncludesReportedFee: proceeds?.includesReportedFee ?? false,
     orderId: ebayXmlText(xml, "OrderID"),
     orderLineItemId: ebayXmlText(xml, "OrderLineItemID"),
     paid,

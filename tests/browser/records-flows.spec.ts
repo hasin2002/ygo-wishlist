@@ -286,6 +286,57 @@ test("Sale flow selects one exact physical Copy and reaches a reviewable confirm
   await expect(page.getByRole("heading", { name: "sale saved" })).toBeVisible();
 });
 
+test("a Sale draft conflict compares the saved and newly opened physical Copies without crowding the actions", async ({ page }) => {
+  await page.goto("/records/new/sale?copyId=copy-preview-partial-1");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Record name/).fill("Saved Alternative Dragon draft");
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("ygo-library:form-draft:v2:preview:sale"))).toContain("copy-preview-partial-1");
+
+  await page.goto("/records/new/sale?copyId=copy-preview-dark-2");
+  const dialog = page.getByRole("dialog", { name: "Choose which work to continue" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Blue-Eyes Alternative White Dragon", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Gold Rare · Near Mint", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Sticker 0101", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Dark Magician", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Ultra Rare · Near Mint", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Copy #DARK-2", { exact: true })).toBeVisible();
+  await expect(dialog.locator("article img")).toHaveCount(2);
+  await expect(dialog.locator("footer button")).toHaveText([
+    "Cancel",
+    "Resume previous draft",
+    "Start new with this item",
+  ]);
+});
+
+test("an unavailable paid eBay Sale review explains recovery and selects no Copy", async ({ page }) => {
+  await page.goto("/records/new/sale?intent=paid-ebay-sale&listingId=missing-listing&copyId=copy-preview-dark-2");
+  await expect(page.getByRole("status")).toHaveText(
+    "Paid eBay Sale review is available in live Records. No physical Copy has been selected in preview.",
+  );
+  const saleType = page.getByRole("button", { name: /^Single card/ });
+  await saleType.getByText("Single card", { exact: true }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Net proceeds/).fill("2.50");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("0 copies selected")).toBeVisible();
+  await expect(page.getByText("Choose one copy to continue")).toBeVisible();
+  await expect(page.getByRole("radio", { checked: true })).toHaveCount(0);
+});
+
+test("a malformed paid eBay Sale review cannot fall back to its unvalidated Copy", async ({ page }) => {
+  await page.goto("/records/new/sale?intent=paid-ebay-sale&copyId=copy-preview-dark-2");
+  await expect(page.getByRole("status")).toHaveText(
+    "This paid Sale review link is incomplete. Return to the eBay listing and choose Review Sale record again.",
+  );
+  await page.getByRole("button", { name: /^Single card/ }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Net proceeds/).fill("2.50");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByText("0 copies selected")).toBeVisible();
+  await expect(page.getByRole("radio", { checked: true })).toHaveCount(0);
+});
+
 test("protected Records routes retain their exact return destination through an expired session cookie", async ({ browser }) => {
   const context = await browser.newContext({ extraHTTPHeaders: { "x-records-test-live": "1" } });
   await context.addCookies([{

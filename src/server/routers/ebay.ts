@@ -37,6 +37,8 @@ import {
   getEbayCapabilityForSession,
   requireEbayExternalCapability,
 } from "@/server/ebay-capabilities";
+import { getEbayRemoteListing } from "@/server/ebay-trading";
+import { inspectPaidEbaySaleReviewIntent } from "@/server/records/paid-ebay-sale-review";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 const itemSpecificValue = z.string().trim().min(1).max(65);
@@ -120,6 +122,50 @@ export const ebayRouter = router({
       input.copyId,
     );
     return listing ? ebayListingStatusSummary(listing) : null;
+  }),
+  estimatePaidSaleProceeds: authenticatedProcedure.input(z.object({
+    copyId: z.string().min(1).max(160),
+    listingId: z.string().min(1).max(160),
+  })).query(async ({ ctx, input }) => {
+    const inspected = await inspectPaidEbaySaleReviewIntent(ctx.collectionOwnerId, input);
+    if (!inspected.ok) return inspected;
+    await requireEbayExternalCapability(ctx.session);
+    try {
+      const remote = await getEbayRemoteListing(ctx.collectionOwnerId, inspected.remote.itemId);
+      const matches = remote.transactions.filter((transaction) => {
+        if (inspected.remote.orderLineItemId) {
+          return transaction.orderLineItemId === inspected.remote.orderLineItemId;
+        }
+        if (inspected.remote.transactionId) {
+          return transaction.transactionId === inspected.remote.transactionId;
+        }
+        return Boolean(
+          inspected.remote.orderId
+          && transaction.orderId === inspected.remote.orderId,
+        );
+      });
+      const transaction = matches.length === 1 ? matches[0] : null;
+      if (
+        !transaction
+        || transaction.cancelled
+        || !transaction.paid
+        || transaction.quantityPurchased !== 1
+        || transaction.estimatedProceedsPence === null
+      ) {
+        return {
+          ok: false as const,
+          code: "estimate_unavailable" as const,
+          message: "eBay did not return a reliable amount for this exact paid item. Enter the net proceeds manually.",
+        };
+      }
+      return {
+        ok: true as const,
+        amountPence: transaction.estimatedProceedsPence,
+        includesReportedFee: transaction.estimateIncludesReportedFee,
+      };
+    } catch (error) {
+      throw ebayFailure(error);
+    }
   }),
   refreshListingStatus: authenticatedProcedure.input(z.object({ copyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
     await requireEbayExternalCapability(ctx.session);

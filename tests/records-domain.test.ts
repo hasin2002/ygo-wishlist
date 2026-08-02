@@ -2,12 +2,39 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { allocatePence, allocatePenceAt } from "../src/lib/records/allocation.ts";
+import { copyPhysicalIdentifier } from "../src/lib/records/copy-display.ts";
+import { suggestEbayPaidSaleProceeds } from "../src/lib/records/ebay-paid-sale-proceeds.ts";
 import { ownedCardTotalLabel, paidCostSummary } from "../src/lib/records/paid-cost-summary.ts";
 import { ordinaryPurchaseCopyAllocations } from "../src/lib/records/purchase-accounting.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
 import { applyOpening, applyPurchase, changeRecordStatus, createPreviewSnapshot, deleteWishlistTarget, removeCardCopy, replaceRecordCards, updateCardCopy, updateRecordDetails, updateRecordLine } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
+
+test("physical Copy identifiers prefer sticker and location details over an opaque Copy code", () => {
+  assert.equal(copyPhysicalIdentifier({ id: "copy-abcdef", stickerNumber: "00042", location: "Binder 2 · Page 7" }), "Sticker 00042 · Binder 2 · Page 7");
+  assert.equal(copyPhysicalIdentifier({ id: "copy-abcdef", stickerNumber: "00042", location: null }), "Sticker 00042");
+  assert.equal(copyPhysicalIdentifier({ id: "copy-abcdef", stickerNumber: null, location: "Binder 2 · Page 7" }), "Binder 2 · Page 7");
+  assert.equal(copyPhysicalIdentifier({ id: "copy-abcdef", stickerNumber: null, location: null }), "Copy #ABCDEF");
+});
+
+test("paid eBay proceeds suggestions remain deterministic and tolerate missing fee data", () => {
+  assert.deepEqual(suggestEbayPaidSaleProceeds({
+    finalValueFeePence: 135,
+    itemPricePence: 1_000,
+    shippingChargedPence: 155,
+  }), { amountPence: 1_020, includesReportedFee: true });
+  assert.deepEqual(suggestEbayPaidSaleProceeds({
+    finalValueFeePence: null,
+    itemPricePence: 1_000,
+    shippingChargedPence: null,
+  }), { amountPence: 1_000, includesReportedFee: false });
+  assert.equal(suggestEbayPaidSaleProceeds({
+    finalValueFeePence: 10,
+    itemPricePence: null,
+    shippingChargedPence: 100,
+  }), null);
+});
 
 function twoCopyPurchase(): RecordsSnapshot {
   return {

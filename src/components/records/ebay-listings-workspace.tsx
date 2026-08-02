@@ -21,9 +21,10 @@ import {
 } from "@/lib/records/ebay-listings-route-state";
 import { inventoryCardDetailHref, inventoryCopySellHref } from "@/lib/records/inventory-route-state";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { PaidEbaySaleReviewDialog } from "@/components/records/paid-ebay-sale-review-dialog";
 import { DataLoadError } from "@/components/data-load-error";
 import { useCollectionChange } from "@/lib/use-collection-change";
-import { reviewSaleHref } from "@/lib/navigation-intent";
+import { reviewSaleHref, type PaidEbaySaleReviewIntent } from "@/lib/navigation-intent";
 import { trpc } from "@/trpc/client";
 
 const lifecycleOptions = [
@@ -122,6 +123,7 @@ function ListingActions({
     listingState: string;
     listingUrl: string;
     kind: string;
+    memberCount: number;
     members: Array<{ copyId: string; copyStatus: string; targetId: string }>;
     saleRecordId: string | null;
     saleState: string;
@@ -133,8 +135,15 @@ function ListingActions({
   const collectionChanged = useCollectionChange();
   const refresh = trpc.ebay.refreshListingStatusById.useMutation();
   const [error, setError] = useState<string | null>(null);
+  const [paidReview, setPaidReview] = useState<PaidEbaySaleReviewIntent | null>(null);
+  const [recordedSale, setRecordedSale] = useState<{ id: string; warning?: string } | null>(null);
   const member = listing.members[0];
   const canRelist = listing.kind === "individual" && listing.members.length === 1 && member?.copyStatus === "available" && listing.listingState === "ended" && (listing.saleState === "none" || listing.saleState === "cancelled") && !listing.saleRecordId;
+  const canReviewPaidSale = listing.kind === "individual"
+    && listing.memberCount === 1
+    && member?.copyStatus === "available"
+    && listing.saleState === "paid"
+    && !listing.saleRecordId;
 
   async function refreshStatus() {
     setError(null);
@@ -151,8 +160,11 @@ function ListingActions({
       {listing.listingUrl ? <a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]" href={listing.listingUrl} rel="noreferrer" target="_blank"><ExternalLink aria-hidden="true" className="size-4" />Open on eBay<span className="sr-only"> (opens in a new tab)</span></a> : null}
       {session?.user.role === "admin" ? <button aria-describedby={!ebayActionsAllowed && ebayStatus.data ? "ebay-actions-paused" : undefined} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-60" disabled={!ebayActionsAllowed || refresh.isPending} onClick={() => void refreshStatus()} type="button"><RefreshCw aria-hidden="true" className={`size-4 ${refresh.isPending ? "animate-spin" : ""}`} />{refresh.isPending ? "Refreshing…" : "Refresh status"}</button> : null}
       {listing.saleRecordId ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]" href={reviewSaleHref(listing.saleRecordId)}>Review Sale</Link> : null}
+      {canReviewPaidSale && member ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826]" onClick={() => { setRecordedSale(null); setPaidReview({ copyId: member.copyId, listingId: listing.id }); }} type="button">Review Sale record</button> : null}
       {canRelist && member ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826]" href={inventoryCopySellHref(member.targetId, member.copyId, { card: "", copyQuantity: "all", edition: "all", kind: "cards", page: 1, rarity: [], status: "all" })}>Relist from Copy</Link> : null}
       {error ? <p className="basis-full text-sm font-semibold text-rose-700" role="alert">{error}</p> : null}
+      {recordedSale ? <p className="basis-full rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900" role="status">Sale recorded. {recordedSale.id ? <Link className="font-black underline" href={reviewSaleHref(recordedSale.id)}>Review Sale</Link> : null}{recordedSale.warning ? ` ${recordedSale.warning}` : null}</p> : null}
+      {paidReview ? <PaidEbaySaleReviewDialog intent={paidReview} onClose={() => setPaidReview(null)} onRecorded={(id, warning) => { setPaidReview(null); setRecordedSale({ id, ...(warning ? { warning } : {}) }); }} /> : null}
     </div>
   );
 }

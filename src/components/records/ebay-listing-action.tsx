@@ -36,6 +36,7 @@ import {
   inventoryCopySellHref,
   parseInventoryListState,
 } from "@/lib/records/inventory-route-state";
+import { reviewSaleHref, type PaidEbaySaleReviewIntent } from "@/lib/navigation-intent";
 import {
   cardConditionOptions,
   isCardCondition,
@@ -47,6 +48,7 @@ import {
 import { copyShortReference } from "@/lib/records/copy-display";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { DraftConflictDialog } from "@/components/records/form-draft-ui";
+import { PaidEbaySaleReviewDialog } from "@/components/records/paid-ebay-sale-review-dialog";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
 import { ebayOffersDialogEventName } from "@/components/records/ebay-copy-exposure";
 import {
@@ -406,6 +408,8 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
   const collectionChanged = useCollectionChange();
   const status = trpc.ebay.status.useQuery(undefined, { enabled: canCheckEbayCapability });
   const eligibility = trpc.ebay.eligibility.useQuery({ copyId }, { enabled: status.data?.capability.ebay.allowed === true });
+  const [paidReview, setPaidReview] = useState<PaidEbaySaleReviewIntent | null>(null);
+  const [recordedSale, setRecordedSale] = useState<{ id: string; warning?: string } | null>(null);
 
   async function refreshEbayStatus() {
     await eligibility.refetch();
@@ -417,6 +421,9 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
   }
   if (source.status === "error") {
     return <StatusCard title="Records could not be loaded"><p>{source.errorMessage || "Nothing has been changed. Refresh and try again."}</p><button className="mt-4 min-h-11 rounded-md bg-zinc-950 px-4 font-bold text-white" onClick={() => void source.refresh()} type="button">Refresh Records</button></StatusCard>;
+  }
+  if (recordedSale) {
+    return <StatusCard title="Sale recorded"><p>The paid eBay Sale is linked to its exact physical Copy.</p><div className="mt-4 flex flex-wrap justify-center gap-2">{recordedSale.id ? <Link className="inline-flex min-h-11 items-center rounded-md bg-[#8a1f2d] px-4 font-bold text-white" href={reviewSaleHref(recordedSale.id)}>Review Sale</Link> : null}<Link className="inline-flex min-h-11 items-center rounded-md border border-zinc-300 px-4 font-bold" href={backHref}>Back to inventory</Link></div>{recordedSale.warning ? <p className="mt-3 text-sm font-semibold text-amber-800">{recordedSale.warning}</p> : null}</StatusCard>;
   }
   if (!context.ok) {
     return <StatusCard title="This Copy cannot be listed"><p>{context.message}</p><Link className="mt-4 inline-flex min-h-11 items-center rounded-md bg-zinc-950 px-4 font-bold text-white" href={backHref}>Back to inventory</Link></StatusCard>;
@@ -451,7 +458,8 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
     const listing = eligibilityResult?.listing;
     if (listing) {
       return (
-        <EbayListingStatusPanel
+        <>
+          <EbayListingStatusPanel
           copyState={context.copy.status}
           ebayUrl={listing.listingUrl}
           endedAt={toEbayListingTimestamp(listing.listingEndedAt)}
@@ -467,14 +475,22 @@ export function EbayListingPage({ copyId, targetId }: { copyId: string; targetId
             ? () => window.location.assign(ebaySettingsHref(backHref))
             : undefined}
           onRefresh={() => { void refreshEbayStatus(); }}
-          onReview={() => window.location.assign(backHref)}
+          onReview={() => {
+            if (listing.saleState === "paid" && !listing.saleRecordId) {
+              setPaidReview({ copyId: context.copy.id, listingId: listing.id });
+              return;
+            }
+            window.location.assign(backHref);
+          }}
           paidAt={toEbayListingTimestamp(listing.paidAt)}
           requiresReconnect={eligibilityResult.reconnectRequired}
           saleRecordId={listing.saleRecordId}
           saleState={listing.saleState}
           syncing={eligibility.isFetching}
           title="This Copy’s eBay status"
-        />
+          />
+          {paidReview ? <PaidEbaySaleReviewDialog intent={paidReview} onClose={() => setPaidReview(null)} onRecorded={(id, warning) => { setPaidReview(null); setRecordedSale({ id, ...(warning ? { warning } : {}) }); }} /> : null}
+        </>
       );
     }
     const message = eligibilityResult?.status === "active_listing"
