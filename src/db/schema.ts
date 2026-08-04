@@ -1130,6 +1130,47 @@ export const targetMonthlyFavorites = pgTable(
   ],
 );
 
+/**
+ * Durable state for Records Actions.  The domain remains the authority for
+ * whether an action is currently applicable; this table records its stable
+ * identity and user decisions (not a second task system).
+ */
+export const recordsActions = pgTable(
+  "records_actions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    dedupeKey: text("dedupe_key").notNull(),
+    kind: text("kind", { enum: [
+      "metadata",
+      "unknown_cost",
+      "copy_link_confirm",
+      "copy_link_review",
+      "listing_sync",
+      "order_conflict",
+      "proceeds_review",
+      "ebay_authorization",
+      "set_offer",
+      "relist",
+    ] }).notNull(),
+    category: text("category", { enum: ["required", "suggestion"] }).notNull(),
+    area: text("area", { enum: ["records", "inventory", "listings", "orders", "sales", "ebay"] }).notNull(),
+    severity: text("severity", { enum: ["urgent", "warning", "info"] }).notNull(),
+    status: text("status", { enum: ["open", "resolved", "dismissed"] }).notNull().default("open"),
+    reason: jsonb("reason").notNull(),
+    references: jsonb("references").notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+    resolvedAt: timestamp("resolved_at", { mode: "date" }),
+    dismissedAt: timestamp("dismissed_at", { mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("records_actions_owner_dedupe_unique").on(table.ownerId, table.dedupeKey),
+    index("records_actions_owner_status_idx").on(table.ownerId, table.status),
+  ],
+);
+
 export type Card = typeof cards.$inferSelect;
 export type NewCard = typeof cards.$inferInsert;
 export type BinderSlot = typeof binderSlots.$inferSelect;

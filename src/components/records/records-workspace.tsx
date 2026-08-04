@@ -11,6 +11,7 @@ import {
   type RecordsView,
 } from "@/components/records/records-app";
 import { RecordsContentLoading } from "@/components/records/records-loading-screen";
+import { RecordsActionsWorkspace } from "@/components/records/records-actions-workspace";
 
 function viewForPathname(pathname: string): RecordsView {
   if (pathname === "/records/history") return "history";
@@ -49,6 +50,8 @@ export function RecordsWorkspace({ children }: { children: React.ReactNode }) {
         ? "Inventory"
         : pathname === "/records/listings"
           ? "Listings"
+          : pathname === "/records/actions"
+            ? "Actions"
           : null;
 
   return (
@@ -59,6 +62,8 @@ export function RecordsWorkspace({ children }: { children: React.ReactNode }) {
         <Suspense fallback={<RecordsContentLoading />}>
           {isListingsWorkspacePath(pathname)
             ? children
+            : pathname === "/records/actions"
+              ? <RecordsActionsWorkspace />
             : ebayListing
             ? <EbayListingPage copyId={ebayListing.copyId} key={`${ebayListing.targetId}:${ebayListing.copyId}`} targetId={ebayListing.targetId} />
             : inventoryCardDetail

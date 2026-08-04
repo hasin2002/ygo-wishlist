@@ -45,6 +45,7 @@ const navItems = [
 ] satisfies Array<{ href: string; icon: LucideIcon; label: string }>;
 
 const recordsSubNavItems = [
+  { href: "/records/actions", label: "Actions" },
   { href: "/records/history", label: "History" },
   { href: "/records/inventory", label: "Inventory" },
   { href: "/records/listings", label: "Listings" },
@@ -149,10 +150,12 @@ function RecordsSubNavigation({
   mobile = false,
   onSelect,
   pathname,
+  urgentCount = 0,
 }: {
   mobile?: boolean;
   onSelect: (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
   pathname: string;
+  urgentCount?: number;
 }) {
   return (
     <div className={`ml-5 grid gap-1 border-l border-zinc-200 pl-3 ${mobile ? "mt-1" : "mt-1.5"}`}>
@@ -173,7 +176,7 @@ function RecordsSubNavigation({
             onClick={(event) => onSelect(item.href, event)}
             prefetch
           >
-            {item.label}
+            {item.label}{item.href === "/records/actions" && urgentCount > 0 ? <span aria-label={`${urgentCount} needs attention`} className={`ml-auto rounded-full px-2 py-0.5 text-xs font-black ${active ? "bg-white text-[#8a1f2d]" : "bg-amber-100 text-amber-900"}`}>{urgentCount}</span> : null}
             <NavPendingIndicator active={active} />
           </Link>
         );
@@ -281,6 +284,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     enabled: clientReady && hasSession && !localPreviewReview,
     staleTime: 60_000,
   });
+  const urgentActions = trpc.records.urgentActionCount.useQuery(undefined, {
+    enabled: clientReady && hasSession && !localPreviewReview,
+    staleTime: 30_000,
+  });
+  const urgentActionCount = urgentActions.data?.count ?? 0;
   const monthlyTotal = currentMonth.data?.total ?? 0;
   const monthlyLabel = currentMonth.data?.label ?? "This month";
   const monthlyUnknownCount = currentMonth.data?.unknownCount ?? 0;
@@ -333,7 +341,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {visibleNavItems.map((item) => {
                   const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`));
                   const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href);
-                  return <div key={item.href}><PrimaryNavLink active={active} expanded={desktopMenuOpen} item={item} onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" && desktopMenuOpen ? <RecordsSubNavigation onSelect={selectNavigation} pathname={activePathname} /> : null}</div>;
+                  return <div key={item.href}><PrimaryNavLink active={active} expanded={desktopMenuOpen} item={item} onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" && desktopMenuOpen ? <RecordsSubNavigation onSelect={selectNavigation} pathname={activePathname} urgentCount={urgentActionCount} /> : null}</div>;
                 })}
               </nav>
               <div className="mt-4 flex shrink-0 flex-col gap-2 border-t border-zinc-200 pt-3">
@@ -347,7 +355,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   : null}
               </div>
             </aside>
-            {mobileMenuOpen && typeof document !== "undefined" ? createPortal(<div className="fixed inset-0 z-50 bg-zinc-950/35 p-4 backdrop-blur-sm lg:hidden" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMobileMenu(); }}><section aria-label="Primary navigation" aria-modal="true" className="mx-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-y-auto rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-xl" id={mobileNavId} ref={mobileNavRef} role="dialog" tabIndex={-1}><div className="flex items-center justify-between gap-3"><span className="font-black text-zinc-950">Yu-Gi-Oh! Collection hub</span><button aria-label="Close navigation" className="inline-flex size-11 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={closeMobileMenu} type="button"><X className="size-4" /></button></div><nav aria-label="Primary" className="mt-3 grid gap-1">{visibleNavItems.map((item) => { const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`)); const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href); return <div key={item.href}><PrimaryNavLink active={active} item={item} mobile onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" ? <RecordsSubNavigation mobile onSelect={selectNavigation} pathname={activePathname} /> : null}</div>; })}</nav><div className="mt-3 border-t border-zinc-200 pt-3">{showSpendSummary ? currentMonth.isError || !currentMonth.data ? <SpendSummaryState expanded onRetry={() => currentMonth.refetch()} pending={spendSummaryPending || currentMonth.isFetching} /> : <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} /> : null}<div className={isAuthenticated ? "mt-2" : ""}><ThemeToggle mobile /></div>{isAuthenticated ? <button className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={() => void signOut()} type="button"><LogOut className="size-4" />Sign out</button> : sessionPending ? null : <Link className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" href="/login"><LogIn className="size-4" />Owner sign in</Link>}</div></section></div>, document.body) : null}
+            {mobileMenuOpen && typeof document !== "undefined" ? createPortal(<div className="fixed inset-0 z-50 bg-zinc-950/35 p-4 backdrop-blur-sm lg:hidden" onMouseDown={(event) => { if (event.target === event.currentTarget) closeMobileMenu(); }}><section aria-label="Primary navigation" aria-modal="true" className="mx-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-y-auto rounded-xl border border-zinc-300 bg-[#fdfcf8] p-3 shadow-xl" id={mobileNavId} ref={mobileNavRef} role="dialog" tabIndex={-1}><div className="flex items-center justify-between gap-3"><span className="font-black text-zinc-950">Yu-Gi-Oh! Collection hub</span><button aria-label="Close navigation" className="inline-flex size-11 items-center justify-center rounded-lg border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950" onClick={closeMobileMenu} type="button"><X className="size-4" /></button></div><nav aria-label="Primary" className="mt-3 grid gap-1">{visibleNavItems.map((item) => { const recordsChildActive = item.href === "/records" && recordsSubNavItems.some((subItem) => activePathname === subItem.href || activePathname.startsWith(`${subItem.href}/`)); const active = item.href === "/records" && recordsChildActive ? false : isActive(activePathname, item.href); return <div key={item.href}><PrimaryNavLink active={active} item={item} mobile onSelect={selectNavigation} parentActive={recordsChildActive} />{item.href === "/records" ? <RecordsSubNavigation mobile onSelect={selectNavigation} pathname={activePathname} urgentCount={urgentActionCount} /> : null}</div>; })}</nav><div className="mt-3 border-t border-zinc-200 pt-3">{showSpendSummary ? currentMonth.isError || !currentMonth.data ? <SpendSummaryState expanded onRetry={() => currentMonth.refetch()} pending={spendSummaryPending || currentMonth.isFetching} /> : <SpendSummaryLink monthlyLabel={monthlyLabel} monthlyTotal={monthlyTotal} monthlyUnknownCount={monthlyUnknownCount} onSelect={(event) => selectNavigation("/records", event)} /> : null}<div className={isAuthenticated ? "mt-2" : ""}><ThemeToggle mobile /></div>{isAuthenticated ? <button className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={() => void signOut()} type="button"><LogOut className="size-4" />Sign out</button> : sessionPending ? null : <Link className="mt-2 flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" href="/login"><LogIn className="size-4" />Owner sign in</Link>}</div></section></div>, document.body) : null}
           </>
         ) : null}
         <div id="main-content" tabIndex={-1}>{children}</div>

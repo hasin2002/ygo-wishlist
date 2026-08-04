@@ -14,6 +14,8 @@ const listingStatusSource = readFileSync(new URL("../src/components/records/ebay
 const listingsWorkspaceSource = readFileSync(new URL("../src/components/records/ebay-listings-workspace.tsx", import.meta.url), "utf8");
 const draftConflictSource = readFileSync(new URL("../src/components/records/form-draft-ui.tsx", import.meta.url), "utf8");
 const paidSaleDialogSource = readFileSync(new URL("../src/components/records/paid-ebay-sale-review-dialog.tsx", import.meta.url), "utf8");
+const actionsWorkspaceSource = readFileSync(new URL("../src/components/records/records-actions-workspace.tsx", import.meta.url), "utf8");
+const actionsModelSource = readFileSync(new URL("../src/lib/records/actions.ts", import.meta.url), "utf8");
 
 test("Sale Copy selectors expose physical and eBay status in visible and accessible text", () => {
   assert.match(saleFormSource, /<CopySelectionPicker/);
@@ -158,13 +160,23 @@ test("eBay data-safety failures do not misleadingly suggest reconnecting", () =>
   assert.match(listingActionSource, /await collectionChanged\("listing"\)/);
 });
 
-test("the overview keeps missing eBay Copy links in the central attention queue", () => {
-  assert.match(recordsAppSource, /Confirm Copy link/);
-  assert.match(recordsAppSource, /Review eBay status/);
-  assert.match(recordsAppSource, /Confirm physical Copy/);
-  assert.match(recordsAppSource, /Open this Copy in Inventory/);
-  assert.match(recordsAppSource, /inventoryCardDetailHref\(target\.id, defaultInventoryListState, copy\.id\)/);
-  assert.match(recordsAppSource, /const attentionCount = snapshot\.attention\.length/);
-  assert.match(recordsAppSource, /item\.field === "ebay_copy_link" \|\| item\.field === "ebay_status"/);
-  assert.match(recordsAppSource, /snapshot\.attention\.map/);
+test("the Actions workspace keeps missing eBay Copy links in the central queue", () => {
+  assert.match(actionsWorkspaceSource, /Confirm Copy link/);
+  assert.match(actionsWorkspaceSource, /resolveEbayCopyLinkAttention/);
+  assert.match(actionsWorkspaceSource, /Resolve action/);
+  assert.match(actionsWorkspaceSource, /aria-expanded=\{referencesOpen\}/);
+  assert.match(actionsWorkspaceSource, />\s*References\s*<\/button>/);
+  assert.match(actionsWorkspaceSource, /Exact Copy IDs/);
+  assert.match(actionsWorkspaceSource, /referencesOpen && references\.length \? \(/);
+  assert.match(actionsModelSource, /copy_link_confirm/);
+  assert.match(actionsModelSource, /copy_link_review/);
+  assert.match(actionsModelSource, /copyIds: item\.copyId \? \[item\.copyId\]/);
+  assert.match(recordsAppSource, /records\.actions\.useQuery/);
+  assert.doesNotMatch(recordsAppSource, /aria-label="Filter actions by type"/);
+  assert.match(recordsAppSource, /left\.category === "required" \? 0 : 1/);
+  assert.match(recordsAppSource, /const visibleActions = openActions\.slice\(0, 5\)/);
+  assert.match(recordsAppSource, /visibleActions\.map/);
+  assert.match(recordsAppSource, /href="\/records\/actions"/);
+  assert.ok(recordsAppSource.indexOf('href="/records/actions"') < recordsAppSource.indexOf("visibleActions.map"));
+  assert.doesNotMatch(recordsAppSource, /snapshot\.attention\.map/);
 });
