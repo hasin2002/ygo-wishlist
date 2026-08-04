@@ -80,6 +80,11 @@ When changing Next.js APIs, routing, configuration, or conventions, read the rel
 - Do not modify `.env*` files or expose secrets unless directly instructed.
 - Keep changes scoped to the requested task.
 
+# eBay Listing Test Safety
+
+- Never create, verify, or publish an auction-style eBay listing for testing. Test listings must always use the fixed-price, Good 'Til Cancelled format.
+- Before publishing any test listing to the live eBay marketplace, verify that eBay reports no upfront listing or optional-upgrade fee. Refuse publication when any non-zero upfront fee is reported.
+
 # eBay Media Boundaries
 
 - Keep inventory-photo discovery and local listing-photo staging independent of eBay authorization. Require eBay credentials only for eBay operations such as upload, validation, or publication.
