@@ -48,11 +48,14 @@ import {
 } from "@/server/ebay-trading";
 
 export class EbayListingReconciliationError extends Error {
+  readonly reconnectRequired: boolean;
+
   constructor(
     message: string,
-    readonly reconnectRequired = false,
+    reconnectRequired = false,
   ) {
     super(message);
+    this.reconnectRequired = reconnectRequired;
   }
 }
 

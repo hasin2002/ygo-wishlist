@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -929,6 +929,16 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
 
 export const recordsRouter = router({
   snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
+
+  ebayLifecycleChangeMarker: adminProcedure.query(async ({ ctx }) => {
+    const [row] = await db.select({
+      marker: sql<string | null>`max(${ebayListings.updatedAt})::text`,
+    }).from(ebayListings).where(eq(
+      ebayListings.ownerId,
+      ctx.collectionOwnerId,
+    ));
+    return { marker: row?.marker ?? null };
+  }),
 
   listEbayListings: adminProcedure.input(ebayListingsWorkspaceSchema).query(({ ctx, input }) =>
     listEbayListingsWorkspace(ctx.collectionOwnerId, input)),

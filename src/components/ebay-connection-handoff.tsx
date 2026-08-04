@@ -5,18 +5,20 @@ import { useRouter } from "next/navigation";
 import { shouldRefreshEbaySettings } from "@/lib/ebay-connection-state";
 
 /**
- * The local OAuth consent page opens separately. Refresh the settings RSC when
- * the owner comes back so its HttpOnly pending-state cookie can reveal and
- * focus the completion field without asking the owner to reload manually.
+ * An eBay authorization page opens separately. Refresh the settings RSC when
+ * the owner comes back so its HttpOnly pending-state cookie can reveal the
+ * correct completion action without asking the owner to reload manually.
  */
 export function EbayConnectionHandoff({
   children,
   className,
   href,
+  refreshOnSettled = true,
 }: {
   children: ReactNode;
   className: string;
   href: string;
+  refreshOnSettled?: boolean;
 }) {
   const router = useRouter();
   const awaitingReturnRef = useRef(false);
@@ -64,7 +66,9 @@ export function EbayConnectionHandoff({
           leftForEbay.current = false;
           awaitingReturnRef.current = true;
           setAwaitingReturn(true);
-          window.setTimeout(() => refreshAfterReturn("settled"), 400);
+          if (refreshOnSettled) {
+            window.setTimeout(() => refreshAfterReturn("settled"), 400);
+          }
         }}
         rel="noreferrer"
         target="_blank"

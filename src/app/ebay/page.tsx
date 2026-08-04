@@ -15,13 +15,24 @@ import {
   safeEbayReturnTo,
 } from "@/lib/ebay-connection-state";
 import { ebayOAuthStateCookieName } from "@/lib/ebay-oauth-route-state";
-import { getEbayNotificationSubscriptionStatus } from "@/server/ebay-notification-service";
+import { ebayTradingAuthSessionCookieName } from "@/lib/ebay-trading-auth-route-state";
+import { getEbayTradingNotificationHealth } from "@/server/ebay-trading-notification-service";
+import { parseEbayTradingAuthorizationCookie } from "@/server/ebay-trading-authorization";
 import {
   getEbayConnectionStatus,
   isEbayOAuthConfigured,
   parseEbayOAuthState,
 } from "@/server/ebay-seller";
 import { getCurrentSession } from "@/server/session";
+
+const tradingAuthorizationMessages = {
+  trading_authorization: "eBay rejected the Trading authorization exchange. Start it again and finish the eBay approval before returning here.",
+  trading_configuration: "eBay rejected the Trading authorization setup. Check the Production RuName and application keyset, then start again.",
+  trading_consent: "This Trading authorization attempt could not be verified. Start it again from this page.",
+  trading_expired: "This Trading authorization attempt expired. Start again and finish eBay sign-in and approval within five minutes.",
+  trading_incomplete: "eBay has not confirmed the sign-in and Agree step yet. Finish it in the eBay tab, then complete here.",
+  trading_temporary: "eBay could not complete the Trading authorization right now. Retry with the same open eBay approval, or start again if it has expired.",
+} as const;
 
 const messages = {
   configuration: "The app is missing its eBay connection settings. Add the server environment variables shown below, then try again.",
@@ -31,8 +42,15 @@ const messages = {
   local: "Paste the complete eBay success-page URL, including its state and code values.",
   temporary: "eBay is temporarily unavailable. Retry the completion with the same URL shortly; your stored connection was not changed.",
   security: "The disconnect request was rejected for safety. Open this page from the configured site address and try again.",
+  ...tradingAuthorizationMessages,
   unknown: "The connection could not be completed. Try again, and check the server logs if it persists.",
 } as const;
+
+function isTradingAuthorizationError(
+  error: keyof typeof messages | undefined,
+): error is keyof typeof tradingAuthorizationMessages {
+  return Boolean(error && Object.hasOwn(tradingAuthorizationMessages, error));
+}
 
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -49,6 +67,7 @@ export default async function EbayPage({
     disconnected?: string;
     error?: keyof typeof messages;
     returnTo?: string;
+    tradingAuthorized?: string;
   }>;
 }) {
   const session = await getCurrentSession();
@@ -57,12 +76,19 @@ export default async function EbayPage({
   const [params, connection, notifications, cookieStore] = await Promise.all([
     searchParams,
     getEbayConnectionStatus(session.user.id),
-    getEbayNotificationSubscriptionStatus(session.user.id),
+    getEbayTradingNotificationHealth(session.user.id),
     cookies(),
   ]);
   const configured = isEbayOAuthConfigured();
   const localDevelopment = process.env.NODE_ENV !== "production";
-  const error = params.error && messages[params.error] ? messages[params.error] : null;
+  const tradingAuthorizationError = isTradingAuthorizationError(params.error)
+    ? tradingAuthorizationMessages[params.error]
+    : null;
+  const error = params.error
+    && !isTradingAuthorizationError(params.error)
+    && messages[params.error]
+    ? messages[params.error]
+    : null;
   const returnTo = safeEbayReturnTo(params.returnTo);
   const pendingCookie = cookieStore.get(ebayOAuthStateCookieName)?.value;
   const pendingState = pendingCookie ? parseEbayOAuthState(pendingCookie) : null;
@@ -72,6 +98,17 @@ export default async function EbayPage({
     && pendingState.purpose === "replacement",
   );
   const localCompletionPending = Boolean(pendingState && pendingState.ownerId === session.user.id);
+  const tradingCookie = cookieStore.get(ebayTradingAuthSessionCookieName)?.value;
+  const tradingSession = tradingCookie
+    ? parseEbayTradingAuthorizationCookie(tradingCookie)
+    : null;
+  const tradingState = tradingSession ? parseEbayOAuthState(tradingSession.state) : null;
+  const tradingAuthorizationPending = Boolean(
+    tradingSession
+    && tradingSession.ownerId === session.user.id
+    && tradingState?.ownerId === session.user.id
+    && tradingState.purpose === "trading_authorization",
+  );
   const presentation = ebayConnectionPresentation(connection?.health ?? null);
   const statusClasses = presentation.tone === "success"
     ? "bg-emerald-50 text-emerald-800"
@@ -96,7 +133,7 @@ export default async function EbayPage({
               </p>
               <h2 className="mt-2 text-2xl font-black tracking-tight">{connection ? "Your eBay connection is stored" : "Connect your eBay seller account"}</h2>
               <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-600">
-                Your normal Collection Hub sign-in remains separate. This connection only gives the signed-in administrator permission to manage listings for the eBay seller account you approve.
+                Your normal Collection Hub sign-in remains separate. This deployment supports one eBay seller account, managed by the signed-in administrator.
               </p>
             </div>
             <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-bold ${statusClasses}`}>{connection ? <CheckCircle2 className="size-4" /> : null}{presentation.label}</span>
@@ -118,28 +155,33 @@ export default async function EbayPage({
             <CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-800" />
             <div>
               <h2 className="text-xl font-black tracking-tight text-amber-950">Database update required</h2>
-              <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-amber-950">The app code is ready, but the eBay notification tables have not been added to this database yet. Apply the checked-in schema update before enabling immediate listing updates.</p>
-              <code className="mt-4 block w-fit rounded-lg bg-amber-950 px-3 py-2 text-sm font-bold text-amber-50">npm run db:push</code>
+              <p className="mt-2 max-w-2xl text-sm font-semibold leading-6 text-amber-950">The app code is ready, but the eBay notification tables have not been added to this database yet. Apply the checked-in migrations through the approved database release flow before enabling immediate listing updates.</p>
+              <code className="mt-4 block w-fit rounded-lg bg-amber-950 px-3 py-2 text-sm font-bold text-amber-50">npm run db:migrate:preflight</code>
             </div>
           </div>
         </section> : connection ? <EbayNotificationSetupCard
-          initialStatus={{
-            coverage: notifications.coverage,
-            enabled: notifications.enabled,
-            subscriptions: notifications.subscriptions.map((subscription) => ({
-              lastError: subscription.lastError,
-              status: subscription.status,
-              topic: subscription.topic,
-            })),
+          authorizationFlow={{
+            error: tradingAuthorizationError,
+            pending: tradingAuthorizationPending,
+            succeeded: params.tradingAuthorized === "1",
           }}
-          notificationReady={connection.notificationReady}
+          initialStatus={{
+            authorization: notifications.authorization,
+            configured: notifications.configured,
+            demonstrated: notifications.demonstrated,
+            events: notifications.events,
+            lastError: notifications.lastError,
+            lastNotificationAt: notifications.lastNotificationAt,
+            lastVerifiedAt: notifications.lastVerifiedAt,
+            state: notifications.state,
+          }}
         /> : null}
 
         {showLocalCompletion ? <section className="mt-5 rounded-2xl border border-sky-300 bg-sky-50 p-5 text-sky-950 sm:p-7"><h2 className="text-lg font-black">{connection ? "Complete replacement connection" : "Finish the local connection"}</h2><p className="mt-2 max-w-2xl text-sm font-medium leading-6">{localCompletionPending ? "eBay opened in a separate tab. After it says “Authorization successfully completed,” copy the full URL from that tab and paste it below within ten minutes." : "Start the connection above first. After eBay says “Authorization successfully completed,” return here and paste the full URL within ten minutes."} The app verifies its signed state and one-time code before changing anything. {connection ? "Your existing encrypted credential remains in place unless this replacement succeeds." : ""}</p><p className="mt-2 max-w-2xl text-sm font-semibold leading-6">This updates the database configured for this local server, not the deployed Production database.</p><form action="/api/ebay/manual-callback" className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" key={localCompletionPending ? "pending-oauth" : "idle-oauth"} method="post"><label className="grid gap-1.5 text-sm font-bold" htmlFor="ebay-replacement-success-url">{connection ? "Complete replacement connection URL" : "eBay success-page URL"}<input autoFocus={localCompletionPending} className="h-11 min-w-0 rounded-lg border border-sky-300 bg-white px-3 font-medium outline-none focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20" id="ebay-replacement-success-url" name="callbackUrl" placeholder="https://auth2.ebay.com/oauth2/ThirdPartyAuthSucessFailure?..." required type="url" /></label><button className="inline-flex min-h-11 items-center justify-center rounded-lg bg-sky-900 px-4 text-sm font-bold text-white hover:bg-sky-800" type="submit">{connection ? "Complete replacement" : "Complete connection"}</button></form></section> : null}
 
         {params.connected === "1" && returnTo ? <a className="mt-5 inline-flex min-h-11 items-center justify-center rounded-lg bg-[#8a1f2d] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#711826]" href={returnTo}>Return to this Copy</a> : null}
 
-        {!configured ? <section className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 sm:p-7"><h2 className="text-lg font-black">One-time server setup still needed</h2><p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-amber-950">Add these private values to the deployment environment. Do not add them to browser-visible variables and do not paste your manually generated token anywhere.</p><pre className="mt-4 overflow-x-auto rounded-lg bg-amber-950 px-4 py-3 text-xs font-semibold text-amber-50">{`EBAY_CLIENT_ID=…\nEBAY_CLIENT_SECRET=…\nEBAY_OAUTH_RU_NAME=…\nEBAY_OAUTH_LOCAL_RU_NAME=… # optional in development`}</pre><p className="mt-3 text-sm font-medium leading-6 text-amber-950">Use a production RuName whose Auth Accepted URL points to <code className="rounded bg-amber-100 px-1 py-0.5">https://your-site.example/api/ebay/callback</code>. A separate local RuName may retain eBay’s standard success page and uses the local completion form. The app encrypts the stored refresh token with the existing server-only <code className="rounded bg-amber-100 px-1 py-0.5">BETTER_AUTH_SECRET</code>.</p></section> : null}
+        {!configured ? <section className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 sm:p-7"><h2 className="text-lg font-black">One-time server setup still needed</h2><p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-amber-950">Add these private values only to the server environment. Never add them to browser-visible variables, source control, forms, or chat.</p><pre className="mt-4 overflow-x-auto rounded-lg bg-amber-950 px-4 py-3 text-xs font-semibold text-amber-50">{`EBAY_CLIENT_ID=…\nEBAY_CLIENT_SECRET=…\nEBAY_DEV_ID=…\nEBAY_OAUTH_RU_NAME=…\nEBAY_OAUTH_LOCAL_RU_NAME=… # optional in development`}</pre><p className="mt-3 text-sm font-medium leading-6 text-amber-950">Use a Production RuName whose Auth Accepted URL points to <code className="rounded bg-amber-100 px-1 py-0.5">https://your-site.example/api/ebay/callback</code>. The same consent setup powers OAuth and the in-app Trading authorization renewal. Both saved tokens are encrypted using the server-only <code className="rounded bg-amber-100 px-1 py-0.5">BETTER_AUTH_SECRET</code>.</p></section> : null}
 
         <section className="mt-5 rounded-2xl border border-zinc-300 bg-white p-5 sm:p-7"><h2 className="text-lg font-black">What happens next</h2><ol className="mt-3 grid gap-3 text-sm font-medium leading-6 text-zinc-700 sm:grid-cols-3"><li><span className="font-black text-[#8a1f2d]">1.</span> Connect eBay once and approve seller access.</li><li><span className="font-black text-[#8a1f2d]">2.</span> The app stores only an encrypted renewable credential.</li><li><span className="font-black text-[#8a1f2d]">3.</span> Listing drafts will use it only after an explicit publish review.</li></ol></section>
       </div>

@@ -81,6 +81,11 @@ Required Vercel environment variables:
 DATABASE_URL=postgres://...
 EBAY_CLIENT_ID=...
 EBAY_CLIENT_SECRET=...
+# Server-only Trading API developer identifier used to verify SOAP notifications.
+EBAY_DEV_ID=...
+# Optional one-time import for an existing Production Auth'n'Auth user token.
+# After /ebay verifies and stores it encrypted, remove this environment value.
+EBAY_TRADING_AUTH_TOKEN=...
 EBAY_MARKETPLACE_ID=EBAY_GB
 # Required only for the eBay seller connection/listing workflow.
 # This is the Production OAuth-enabled RuName (not the callback URL itself).
@@ -88,9 +93,7 @@ EBAY_OAUTH_RU_NAME=...
 # Optional development RuName whose accepted URL is eBay's standard success page.
 EBAY_OAUTH_LOCAL_RU_NAME=...
 # Optional when the production domain is not ygo-wishlist.vercel.app.
-EBAY_NOTIFICATION_ENDPOINT_URL=https://your-production-domain/api/ebay/notifications
-# Optional if eBay has no alert email configured and the admin uses a placeholder email.
-EBAY_NOTIFICATION_ALERT_EMAIL=you@example.com
+EBAY_TRADING_NOTIFICATION_ENDPOINT_URL=https://your-production-domain/api/ebay/trading-notifications
 CRON_SECRET=<a long random value>
 BETTER_AUTH_SECRET=<a new random secret>
 ```
@@ -100,7 +103,7 @@ notification setup locally, start the approved tunnel with `ngrok http 3000`,
 then add its exact webhook URL to `.env.local`:
 
 ```bash
-EBAY_NOTIFICATION_ENDPOINT_URL=https://armless-backslid-surrogate.ngrok-free.dev/api/ebay/notifications
+EBAY_TRADING_NOTIFICATION_ENDPOINT_URL=https://armless-backslid-surrogate.ngrok-free.dev/api/ebay/trading-notifications
 ```
 
 Restart the development server after changing `.env.local`, verify the tunnel
@@ -136,24 +139,54 @@ To enable the connection:
    `npm run db:push` only when you are ready to make the database change.
    Deploy after the schema command succeeds.
 4. Sign into the site as an administrator, open `/ebay`, and select **Connect
-   eBay**. eBay requests listing access plus read-only order and notification
-   permissions. Then open a physical Copy in Records → Inventory and select
-   **Sell on eBay**.
+   eBay**. OAuth requests only the seller permissions used by the listing
+   workflow. Then select **Authorize Trading notifications** to complete eBay's
+   separate Auth'n'Auth consent in the same settings page. Open a physical Copy
+   in Records → Inventory and select **Sell on eBay**.
 
-The app never stores the short-lived access token. It encrypts the eBay refresh
-token in the database using the existing server-only `BETTER_AUTH_SECRET` and
-obtains access tokens on demand. Do not paste a manually generated eBay token
-into environment files or source code.
+The app never stores the short-lived OAuth access token. It encrypts the eBay
+OAuth refresh token in the database using the existing server-only
+`BETTER_AUTH_SECRET`, obtains access tokens on demand, and refreshes them
+automatically. A deployment supports exactly one connected eBay seller; the
+database rejects a second seller connection even if two requests race.
 
-Existing seller connections must be reconnected once after this change so the
-stored grant includes the additional read-only scopes. The existing client ID,
-client secret, and RuName remain valid. The current production keyset supports
-an immediate `ORDER_CONFIRMATION` subscription. eBay advertises `LISTING`, but
-does not assign this keyset its required `sell.listing.read` consent scope, so
-the UI reports partial notification coverage instead of breaking connection.
-Listings are still reconciled when the user interacts with a Copy and by the
-daily safety-net job. Every delivered callback is validated against eBay's
-public key before it is persisted or processed.
+Platform Notifications are a legacy exception: eBay uses the user token from
+`SetNotificationPreferences` later when it generates each SOAP payload. A
+short-lived OAuth access token can therefore be accepted during setup and then
+rejected at delivery time as an invalidated token. Records therefore obtains a
+Production **Auth'n'Auth** token through eBay's `GetSessionID`/`FetchToken`
+consent flow, verifies that it belongs to the OAuth-connected seller, and stores
+it encrypted in the database. An existing `EBAY_TRADING_AUTH_TOKEN` may be
+imported once by running notification setup; it is not required for a new
+connection and can be removed after the encrypted import succeeds.
+
+Auth'n'Auth itself cannot renew silently. eBay normally requires the seller to
+agree again about every 18 months. Records checks the token daily, begins
+showing a renewal warning 90 days before expiry, and provides **Renew Trading
+authorization** on `/ebay`. Renewal still needs an eBay sign-in/consent click,
+but no token copying, environment-variable edit, or redeploy is needed.
+
+Trading Platform Notifications do not require `sell.listing.read`. Add the
+server-only DevID and stable HTTPS Trading callback, then
+use the explicit setup action on `/ebay` to read, merge, enable, and verify the
+five owned seller events. Setup compares the Auth'n'Auth token's seller with
+the normal OAuth connection before changing preferences. The receiver validates
+eBay's SOAP signature and a strict 10-minute timestamp-skew window, rejects
+malformed or oversized XML, stores only normalized routing fields,
+and then runs the existing authoritative Trading reconciler. The settings page
+distinguishes verified configuration from a real successful delivery. Listings
+are still reconciled when the user interacts with a Copy and by the daily
+safety-net job.
+
+The former Commerce REST `LISTING` and `ORDER_CONFIRMATION` receiver, setup
+client, parser, OAuth permissions, and capability probe were retired after a
+real Trading `ItemRevised` and `ItemClosed` delivery were verified. The
+application no longer reads `EBAY_NOTIFICATION_ENDPOINT_URL` or
+`EBAY_NOTIFICATION_ALERT_EMAIL`. Historical notification inbox and subscription
+rows remain available for audit and must not be deleted. Disabling any old
+remote Commerce subscriptions or destination, and removing obsolete deployment
+environment variables, are separate Production actions that require explicit
+approval before this code is deployed.
 
 Before deploying, create/update the tables:
 
@@ -202,12 +235,14 @@ than rolling the database back blindly.
 
 ## Scheduled eBay reconciliation
 
-Production checks unresolved eBay listings and retries failed notification work
-every day at 02:15 UTC through Vercel Cron. This is a safety net for missed or
-delayed eBay notifications; user selling and Sale-record actions also reconcile
-on demand. Add a `CRON_SECRET` environment variable in the Vercel project
-settings and use a long random value. Vercel sends it to the scheduled route
-automatically, and the route rejects requests without it.
+Production checks the stored Trading authorization, unresolved eBay listings,
+and failed Trading notification work every day at 02:15 UTC through Vercel
+Cron. This is a safety net for expired credentials, missed or delayed eBay
+notifications, and purchase events received before eBay's authoritative order
+data is ready. User selling and Sale-record actions also reconcile on demand.
+Add a `CRON_SECRET` environment variable in the Vercel project settings and use
+a long random value. Vercel sends it to the scheduled route automatically, and
+the route rejects requests without it.
 
 The schedule is configured in `vercel.json`. Vercel Cron runs only on production
 deployments and uses UTC.

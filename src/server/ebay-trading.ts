@@ -2,6 +2,11 @@ import "server-only";
 
 import { getEbaySellerAccessToken } from "@/server/ebay-seller";
 import { suggestEbayPaidSaleProceeds } from "@/lib/records/ebay-paid-sale-proceeds";
+import {
+  ebayTradingAuthTokenKeysetHeaders,
+  ebayTradingRequestAuthentication,
+} from "@/lib/records/ebay-trading-request";
+import { ebayOrderItemIdsFromXml } from "@/lib/records/ebay-trading-notification";
 
 const tradingApiUrl = "https://api.ebay.com/ws/api.dll";
 const tradingCompatibilityLevel = "1423";
@@ -14,11 +19,14 @@ export type EbayTradingErrorDetail = {
 };
 
 export class EbayTradingError extends Error {
+  readonly details: EbayTradingErrorDetail[];
+
   constructor(
     message: string,
-    readonly details: EbayTradingErrorDetail[] = [],
+    details: EbayTradingErrorDetail[] = [],
   ) {
     super(message);
+    this.details = details;
   }
 }
 
@@ -72,29 +80,7 @@ function errorsFromXml(xml: string): EbayTradingErrorDetail[] {
   }));
 }
 
-export async function callEbayTradingApi({
-  accessToken: suppliedAccessToken,
-  body,
-  callName,
-  ownerId,
-}: {
-  accessToken?: string;
-  body: string;
-  callName: string;
-  ownerId: string;
-}): Promise<EbayTradingResponse> {
-  const accessToken = suppliedAccessToken ?? await getEbaySellerAccessToken(ownerId);
-  const response = await fetch(tradingApiUrl, {
-    body: `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">${body}</${callName}Request>`,
-    headers: {
-      "Content-Type": "text/xml",
-      "X-EBAY-API-CALL-NAME": callName,
-      "X-EBAY-API-COMPATIBILITY-LEVEL": tradingCompatibilityLevel,
-      "X-EBAY-API-IAF-TOKEN": accessToken,
-      "X-EBAY-API-SITEID": tradingSiteId,
-    },
-    method: "POST",
-  });
+async function tradingResponse(response: Response, callName: string) {
   const xml = await response.text();
   const errors = errorsFromXml(xml);
   const ack = ebayXmlText(xml, "Ack");
@@ -107,7 +93,81 @@ export async function callEbayTradingApi({
     );
   }
 
-  return { ack, errors, xml };
+  return { ack, errors, xml } satisfies EbayTradingResponse;
+}
+
+/** Auth'n'Auth bootstrap calls authenticate with the server-only keyset. */
+export async function callEbayTradingKeysetApi({
+  body,
+  callName,
+}: {
+  body: string;
+  callName: "GetSessionID" | "FetchToken";
+}): Promise<EbayTradingResponse> {
+  const appId = process.env.EBAY_CLIENT_ID?.trim();
+  const certId = process.env.EBAY_CLIENT_SECRET?.trim();
+  const devId = process.env.EBAY_DEV_ID?.trim();
+  if (!appId || !certId || !devId) {
+    throw new EbayTradingError(
+      "The eBay Production AppID, DevID, and CertID must be configured before renewing Trading authorization.",
+    );
+  }
+  const response = await fetch(tradingApiUrl, {
+    body: `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">${body}</${callName}Request>`,
+    headers: {
+      "Content-Type": "text/xml",
+      "X-EBAY-API-APP-NAME": appId,
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-CERT-NAME": certId,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": tradingCompatibilityLevel,
+      "X-EBAY-API-DEV-NAME": devId,
+      "X-EBAY-API-SITEID": tradingSiteId,
+    },
+    method: "POST",
+  });
+  return tradingResponse(response, callName);
+}
+
+export async function callEbayTradingApi({
+  accessToken: suppliedAccessToken,
+  authToken,
+  body,
+  callName,
+  ownerId,
+}: {
+  accessToken?: string;
+  authToken?: string;
+  body: string;
+  callName: string;
+  ownerId: string;
+}): Promise<EbayTradingResponse> {
+  const accessToken = authToken
+    ? undefined
+    : suppliedAccessToken ?? await getEbaySellerAccessToken(ownerId);
+  const authentication = ebayTradingRequestAuthentication({
+    authToken,
+    oauthAccessToken: accessToken,
+  });
+  const keysetHeaders = ebayTradingAuthTokenKeysetHeaders({
+    appId: process.env.EBAY_CLIENT_ID,
+    authToken,
+    callName,
+    certId: process.env.EBAY_CLIENT_SECRET,
+    devId: process.env.EBAY_DEV_ID,
+  });
+  const response = await fetch(tradingApiUrl, {
+    body: `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents">${authentication.requesterCredentialsXml}${body}</${callName}Request>`,
+    headers: {
+      ...authentication.authorizationHeaders,
+      ...keysetHeaders,
+      "Content-Type": "text/xml",
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": tradingCompatibilityLevel,
+      "X-EBAY-API-SITEID": tradingSiteId,
+    },
+    method: "POST",
+  });
+  return tradingResponse(response, callName);
 }
 
 function xmlNumber(xml: string, name: string) {
@@ -226,4 +286,18 @@ export async function getEbayRemoteListing(ownerId: string, itemId: string) {
     quantitySold,
     transactions,
   } satisfies EbayRemoteListing;
+}
+
+/**
+ * eBay emits one AuctionCheckoutComplete notification for a multi-line order.
+ * Resolve the containing order so every tracked item can cross the existing
+ * authoritative listing reconciliation boundary.
+ */
+export async function getEbayOrderItemIds(ownerId: string, orderId: string) {
+  const result = await callEbayTradingApi({
+    body: `<OrderIDArray><OrderID>${ebayXmlEscape(orderId)}</OrderID></OrderIDArray><OrderRole>Seller</OrderRole><DetailLevel>ReturnAll</DetailLevel>`,
+    callName: "GetOrders",
+    ownerId,
+  });
+  return ebayOrderItemIdsFromXml(result.xml, orderId);
 }

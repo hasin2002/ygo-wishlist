@@ -24,6 +24,10 @@ import { useRecordsDataSource } from "@/components/records/records-preview-provi
 import { PaidEbaySaleReviewDialog } from "@/components/records/paid-ebay-sale-review-dialog";
 import { DataLoadError } from "@/components/data-load-error";
 import { useCollectionChange } from "@/lib/use-collection-change";
+import {
+  hasNonTerminalEbayListing,
+  useEbayListingFreshness,
+} from "@/lib/records/use-ebay-listing-freshness";
 import { reviewSaleHref, type PaidEbaySaleReviewIntent } from "@/lib/navigation-intent";
 import { trpc } from "@/trpc/client";
 
@@ -201,7 +205,21 @@ export function EbayListingsWorkspace({ initialState }: { initialState: EbayList
   const { data: session, isPending: sessionPending } = useSession();
   const liveAdmin = source.mode === "live" && session?.user.role === "admin";
   const listings = trpc.records.listEbayListings.useQuery(initialState, { enabled: liveAdmin, staleTime: 10_000 });
+  const shouldCheckFreshness = liveAdmin && Boolean(listings.data?.items.some(hasNonTerminalEbayListing));
+  const lifecycleMarker = trpc.records.ebayLifecycleChangeMarker.useQuery(undefined, {
+    enabled: shouldCheckFreshness,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
   const ebayStatus = trpc.ebay.status.useQuery(undefined, { enabled: liveAdmin, staleTime: 30_000 });
+
+  useEbayListingFreshness({
+    enabled: shouldCheckFreshness,
+    marker: lifecycleMarker.data?.marker,
+    onMarkerChange: () => { void listings.refetch(); },
+    refetchMarker: async () => (await lifecycleMarker.refetch()).data?.marker,
+  });
 
   useEffect(() => {
     if (listings.data && listings.data.page !== initialState.page) {
@@ -237,6 +255,19 @@ export function EbayListingDetail({ initialState, listingId }: { initialState: E
   const { data: session, isPending } = useSession();
   const liveAdmin = source.mode === "live" && session?.user.role === "admin";
   const listing = trpc.records.listEbayListings.useQuery({ ...initialState, listingId, page: 1 }, { enabled: liveAdmin, staleTime: 10_000 });
+  const shouldCheckFreshness = liveAdmin && Boolean(listing.data?.items.some(hasNonTerminalEbayListing));
+  const lifecycleMarker = trpc.records.ebayLifecycleChangeMarker.useQuery(undefined, {
+    enabled: shouldCheckFreshness,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
+  useEbayListingFreshness({
+    enabled: shouldCheckFreshness,
+    marker: lifecycleMarker.data?.marker,
+    onMarkerChange: () => { void listing.refetch(); },
+    refetchMarker: async () => (await lifecycleMarker.refetch()).data?.marker,
+  });
   if (isPending || source.status === "loading" || listing.isPending) return <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white font-bold" role="status">Loading listing detail…</div>;
   if (listing.isError) return <section className="rounded-lg border border-rose-300 bg-rose-50 p-6 text-center text-rose-950" role="alert"><h1 className="text-xl font-black">Listing detail could not be loaded</h1><p className="mt-2 text-sm font-medium">{listing.error.message}</p><button className="mt-4 min-h-11 rounded-md border border-rose-400 bg-white px-4 text-sm font-bold" onClick={() => void listing.refetch()} type="button">Try again</button></section>;
   const item = listing.data?.items[0];

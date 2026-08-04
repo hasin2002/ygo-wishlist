@@ -11,7 +11,7 @@ export type EbayOAuthState = {
   issuedAt: number;
   nonce: string;
   ownerId: string;
-  purpose: "connect" | "replacement";
+  purpose: "connect" | "replacement" | "trading_authorization";
   returnTo?: string;
 };
 
@@ -62,7 +62,7 @@ export function parseSignedEbayOAuthState(
     if (
       !parsed.ownerId
       || !parsed.nonce
-      || (parsed.purpose !== "connect" && parsed.purpose !== "replacement")
+      || !["connect", "replacement", "trading_authorization"].includes(parsed.purpose)
       || (parsed.returnTo !== undefined && (typeof parsed.returnTo !== "string" || !parsed.returnTo.startsWith("/records/")))
       || !Number.isFinite(parsed.issuedAt)
       || now - parsed.issuedAt > ebayOAuthStateLifetimeMs
