@@ -46,7 +46,7 @@ async function ownerSession(request: Request) {
   const session = await getSessionFromHeaders(request.headers);
   if (!session) return { response: NextResponse.json({ message: "Sign in to manage card images." }, { status: 401 }) };
   if (process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1") {
-    return { response: NextResponse.json({ message: "Card photos are unavailable in preview mode. Switch to live Records." }, { status: 403 }) };
+    return { response: NextResponse.json({ message: "Card Copy photos are unavailable in preview mode. Switch to live Records." }, { status: 403 }) };
   }
   return { session };
 }

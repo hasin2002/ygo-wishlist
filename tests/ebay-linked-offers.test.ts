@@ -170,14 +170,26 @@ test("Inventory preloads photo sets and switches them without remounting", () =>
   assert.match(photoManager, /const canArrange = canManage && !loading && images\.length > 1 && !reordering/);
   assert.match(photoManager, /surface = "card"/);
   assert.match(photoManager, /surface === "card" \? "rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" : "bg-transparent"/);
-  assert.match(photoManager, /<p className="mt-1 text-sm font-medium text-zinc-600">\{description\}<\/p>[\s\S]*?<div className="mt-3 grid gap-2 sm:grid-cols-\[max-content_max-content\] sm:items-center sm:justify-start">/);
+  assert.match(photoManager, /descriptionDisplay = "inline"/);
+  assert.match(photoManager, /headingDisplay = "visible"/);
+  assert.match(photoManager, /positionDescriptionPopover[\s\S]*?window\.innerWidth - width - gutter/);
+  assert.match(photoManager, /descriptionDisplay === "tooltip"[\s\S]*?aria-describedby=\{descriptionOpen \? descriptionId : undefined\}[\s\S]*?onMouseEnter=\{keepDescriptionOpen\}/);
+  assert.match(photoManager, /descriptionDisplay === "tooltip" && descriptionOpen \? createPortal\([\s\S]*?fixed z-\[90\][\s\S]*?document\.body/);
+  assert.match(photoManager, /descriptionDisplay === "inline" \? <p className="mt-1 text-sm font-medium text-zinc-600"/);
+  assert.match(photoManager, /headingDisplay === "visible" \? "mt-3 " : ""/);
   assert.match(photoManager, /<div className="flex min-h-11 items-center gap-2">[\s\S]*?Arrange photos[\s\S]*?\{secondaryAction \? \(/);
   assert.match(photoManager, /flex min-h-40 flex-1 items-center justify-center rounded-md border border-dashed/);
   assert.match(photoManager, /min-w-40 items-center justify-center/);
   assert.match(photoManager, /aria-disabled=\{!canArrange\}/);
   assert.match(photoManager, /Add at least two photos first, then you can arrange them\./);
   assert.match(photoManager, /fixed bottom-4 right-4 z-50[\s\S]*role="alert"/);
+  assert.match(photoManager, /createPortal\([\s\S]*?aria-modal="true"[\s\S]*?Close remove photo confirmation/);
+  assert.match(photoManager, /document\.body\.style\.overflow = "hidden"/);
+  assert.match(photoManager, /window\.addEventListener\("keydown", closeOnEscape\)/);
+  assert.match(photoManager, /removalTriggerRef\.current\?\.focus\(\)/);
   assert.match(photoSets, /surface="plain"/);
+  assert.match(photoSets, /descriptionDisplay="tooltip"/);
+  assert.match(photoSets, /secondaryAction=\{kind === "individual" && sourceCopyIds\.length \? \{/);
   assert.match(photoSets, /className="grid min-w-0 border-t border-zinc-200 p-4 sm:p-5"/);
 });
 

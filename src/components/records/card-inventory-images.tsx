@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown, Images } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { CardPhotoManager } from "@/components/records/card-photo-manager";
 import {
@@ -38,12 +39,12 @@ export function CardInventoryImages({
     try {
       const response = await fetch(`/api/inventory/card-images?copyId=${encodeURIComponent(copyId)}`);
       const payload = await response.json() as { configured?: boolean; images?: InventoryImage[]; message?: string };
-      if (!response.ok) throw new Error(payload.message || "Card photos could not be loaded.");
+      if (!response.ok) throw new Error(payload.message || "Card Copy photos could not be loaded.");
       setConfigured(payload.configured !== false);
       setImages(payload.images ?? []);
       setMessage(null);
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : "Card photos could not be loaded.";
+      const nextMessage = error instanceof Error ? error.message : "Card Copy photos could not be loaded.";
       setMessage(nextMessage === "That physical card Copy was not found." ? "This Copy is no longer available. Go back to inventory and choose another Copy." : nextMessage);
     } finally {
       setLoading(false);
@@ -158,29 +159,42 @@ export function CardInventoryImages({
   }
 
   return (
-    <CardPhotoManager
-      canManage={canUpload}
-      cardName={cardName}
-      changing={uploading || reordering || Boolean(removingKey)}
-      configured={configured}
-      description="Private photos saved against this physical Copy."
-      emptyText="No photos uploaded for this Copy yet."
-      id={`card-images-${copyId}`}
-      images={images.map((image) => ({ id: image.key, previewUrl: image.previewUrl }))}
-      loading={loading}
-      message={message}
-      onRemove={remove}
-      onReorder={reorder}
-      onUpload={upload}
-      previewSubtitle="Saved privately in S3"
-      previewNotice={isPreview ? "Upload photos or take a photo on your phone once this Copy is saved in your live collection. This preview does not store photos." : undefined}
-      removalDescription="It will also be removed from the private S3 archive."
-      removalTitle="Remove this photo from the Copy?"
-      removingId={removingKey}
-      reordering={reordering}
-      storageWarning="Private card-photo storage is not configured on this server."
-      title="Card photos"
-      uploading={uploading}
-    />
+    <details className="group overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
+      <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8a1f2d] [&::-webkit-details-marker]:hidden sm:px-5">
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600"><Images aria-hidden="true" className="size-5" /></span>
+          <span className="min-w-0"><strong className="block font-black text-zinc-950">Card Copy photos</strong><span className="mt-0.5 block text-sm font-medium text-zinc-500">{loading ? "Loading saved photos…" : `${images.length} ${images.length === 1 ? "photo" : "photos"} saved to this physical Copy`}</span></span>
+        </span>
+        <ChevronDown aria-hidden="true" className="size-5 shrink-0 text-zinc-500 transition-transform duration-150 motion-reduce:transition-none group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-zinc-200 p-4 sm:p-5">
+        <CardPhotoManager
+          canManage={canUpload}
+          cardName={cardName}
+          changing={uploading || reordering || Boolean(removingKey)}
+          configured={configured}
+          description="Private photos saved against this physical Copy."
+          emptyText="No Card Copy photos saved yet."
+          headingDisplay="sr-only"
+          id={`card-images-${copyId}`}
+          images={images.map((image) => ({ id: image.key, previewUrl: image.previewUrl }))}
+          loading={loading}
+          message={message}
+          onRemove={remove}
+          onReorder={reorder}
+          onUpload={upload}
+          previewSubtitle="Saved privately in S3"
+          previewNotice={isPreview ? "Upload photos or take a photo on your phone once this Copy is saved in your live collection. This preview does not store photos." : undefined}
+          removalDescription="It will also be removed from the private S3 archive."
+          removalTitle="Remove this Card Copy photo?"
+          removingId={removingKey}
+          reordering={reordering}
+          storageWarning="Private Card Copy photo storage is not configured on this server."
+          surface="plain"
+          title="Card Copy photos"
+          uploading={uploading}
+        />
+      </div>
+    </details>
   );
 }

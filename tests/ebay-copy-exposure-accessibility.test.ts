@@ -79,6 +79,11 @@ test("the Copy picker is one searchable, keyboard-accessible combobox", () => {
 test("preview Copy photos explain the limitation and retain phone-camera capture in live records", () => {
   assert.match(cardImagesSource, /if \(isPreview\)/);
   assert.match(cardImagesSource, /This preview does not store photos/);
+  assert.match(cardImagesSource, /<details className="group overflow-hidden rounded-xl/);
+  assert.match(cardImagesSource, /Card Copy photos/);
+  assert.match(cardImagesSource, /group-open:rotate-180/);
+  assert.match(cardImagesSource, /headingDisplay="sr-only"/);
+  assert.match(cardImagesSource, /surface="plain"/);
   assert.match(photoManagerSource, /capture="environment"/);
   assert.match(photoManagerSource, /Take photo on phone/);
 });

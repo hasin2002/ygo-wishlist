@@ -223,6 +223,7 @@ export function ListingPhotoSetManager({
     changing={uploading || reordering || importing || Boolean(removingKey)}
     configured={configured}
     description={`${kindCopy[kind].description} These stay available when listings end.`}
+    descriptionDisplay="tooltip"
     emptyText={`No ${kindCopy[kind].label.toLowerCase()} listing photos saved yet.`}
     id={`listing-photo-set-${printingId}-${condition}-${kind}`}
     images={images.map((image) => ({ id: image.key, previewUrl: image.previewUrl }))}
@@ -237,7 +238,7 @@ export function ListingPhotoSetManager({
     removalTitle="Remove this reusable listing photo?"
     removingId={removingKey}
     reordering={reordering}
-    secondaryAction={sourceCopyIds.length ? {
+    secondaryAction={kind === "individual" && sourceCopyIds.length ? {
       disabled: importing || images.length >= 12,
       icon: Images,
       label: importing ? "Adding saved photos…" : "Use saved Copy photos",
