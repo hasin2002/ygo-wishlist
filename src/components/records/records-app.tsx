@@ -8,7 +8,6 @@ import {
   Boxes,
   CalendarDays,
   Check,
-  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -52,6 +51,7 @@ import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
+import { deriveSnapshotRecordsActions, type RecordsAction } from "@/lib/records/actions";
 import { ownedCardTotalLabel, paidCostSummary } from "@/lib/records/paid-cost-summary";
 import { parseSaleReviewIntent } from "@/lib/navigation-intent";
 import {
@@ -82,11 +82,11 @@ import { copyDisplayLabel, copyShortReference, orderCopies } from "@/lib/records
 import {
   defaultInventoryListState,
   inventoryCardDetailHref,
-  inventoryCopySellHref,
   inventoryListHref,
   parseInventoryListState,
   type InventoryListState,
 } from "@/lib/records/inventory-route-state";
+import { trpc } from "@/trpc/client";
 
 export type RecordsView = "overview" | "history" | "inventory";
 
@@ -743,7 +743,7 @@ function overviewDateRange(period: OverviewPeriod, from: string, to: string) {
   return { from: localDateValue(thirtyDaysAgo), to: todayValue };
 }
 
-function CardAttentionDialog({
+export function CardAttentionDialog({
   item,
   onClose,
   onSaved,
@@ -836,7 +836,7 @@ function CardAttentionDialog({
   );
 }
 
-function EbayCopyLinkAttentionDialog({
+export function EbayCopyLinkAttentionDialog({
   item,
   onClose,
   onResolved,
@@ -905,17 +905,37 @@ function EbayCopyLinkAttentionDialog({
   );
 }
 
+function overviewActionDestination(action: RecordsAction) {
+  if (action.references.listingId) return `/records/listings/${action.references.listingId}`;
+  if (action.references.targetId) return `/records/inventory/cards/${action.references.targetId}`;
+  if (action.references.recordId) return `/records/history?recordId=${encodeURIComponent(action.references.recordId)}`;
+  return "/records/actions";
+}
+
+function overviewActionSubject(action: RecordsAction, snapshot: RecordsSnapshot) {
+  const copy = snapshot.copies.find((candidate) => action.references.copyIds?.includes(candidate.id));
+  const printing = snapshot.printings.find((candidate) => (
+    candidate.id === action.references.printingId || candidate.id === copy?.printingId
+  ));
+  const target = snapshot.targets.find((candidate) => (
+    candidate.id === action.references.targetId || candidate.id === printing?.targetId
+  ));
+  const record = snapshot.records.find((candidate) => candidate.id === action.references.recordId);
+  const offer = snapshot.copyEbayExposures
+    .flatMap((exposure) => exposure.offers)
+    .find((candidate) => candidate.listingId === action.references.listingId);
+  return target?.name ?? offer?.title ?? record?.title ?? null;
+}
+
 function Overview() {
   const source = useRecordsDataSource();
-  const router = useRouter();
   const { snapshot } = source;
+  const actionsQuery = trpc.records.actions.useQuery(undefined, {
+    enabled: source.mode === "live" && source.status === "ready",
+  });
   const [period, setPeriod] = useState<OverviewPeriod>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [attentionItemId, setAttentionItemId] = useState<string | null>(null);
-  const [attentionRecordId, setAttentionRecordId] = useState<string | null>(null);
-  const [ebayCopyLinkAttentionId, setEbayCopyLinkAttentionId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const range = overviewDateRange(period, customFrom, customTo);
   const activeRecords = snapshot.records.filter((record) => (
     record.status === "active"
@@ -932,7 +952,16 @@ function Overview() {
     .filter((record) => record.type === "sale")
     .reduce((sum, record) => sum + record.amountPence, 0);
   const availableCopies = snapshot.copies.filter((copy) => copy.status === "available").length;
-  const attentionCount = snapshot.attention.length;
+  const actions = source.mode === "preview"
+    ? deriveSnapshotRecordsActions(snapshot)
+    : actionsQuery.data ?? [];
+  const openActions = actions.filter((action) => action.status === "open").sort((left, right) => (
+    (left.category === "required" ? 0 : 1) - (right.category === "required" ? 0 : 1)
+    || ({ urgent: 0, warning: 1, info: 2 })[left.severity] - ({ urgent: 0, warning: 1, info: 2 })[right.severity]
+    || (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)
+  ));
+  const visibleActions = openActions.slice(0, 5);
+  const allOpenActionCount = openActions.length;
   const wishlistTargetCount = snapshot.targets.filter((target) => {
     const printingIds = snapshot.printings.filter((printing) => printing.targetId === target.id).map((printing) => printing.id);
     const ownedQuantity = snapshot.copies.filter((copy) => printingIds.includes(copy.printingId) && copy.status === "available").length;
@@ -966,9 +995,8 @@ function Overview() {
         <MetricCard detail={`${wishlistTargetCount} Wishlist target${wishlistTargetCount === 1 ? "" : "s"}`} icon={<WalletCards className="size-5" />} label="Physical copies" value={String(availableCopies)} />
       </section>
 
-      {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.7fr)]">
-        <section className="overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className="flex h-full flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm">
           <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
             <div>
               <h2 className="font-bold">Recent history</h2>
@@ -983,45 +1011,53 @@ function Overview() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700"><AlertTriangle className="size-5" /></span>
-              <div>
-                <h2 className="font-bold">Needs attention</h2>
-                <p className="mt-0.5 text-sm font-medium text-zinc-500">Items waiting for your review</p>
+        <section className="flex h-full flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-bold">Actions</h2>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-bold text-zinc-700">
+                  {allOpenActionCount} open
+                </span>
               </div>
+              <p className="mt-0.5 text-sm font-medium text-zinc-500">Needs attention first</p>
             </div>
-            {attentionCount ? <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">{attentionCount} open</span> : null}
+            <Link className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 text-sm font-bold text-[#8a1f2d] hover:bg-rose-50" href="/records/actions">
+              Open full Actions <ChevronRight className="size-4" />
+            </Link>
           </div>
-          <div className="mt-4 grid gap-2">
-            {snapshot.attention.length ? snapshot.attention.map((item) => (
-              <button className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-[#8a1f2d] hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" key={item.id} onClick={() => {
-                if (item.field === "ebay_copy_link" || item.field === "ebay_status") {
-                  if (item.ebayAttentionAction === "confirm_copy_link") setEbayCopyLinkAttentionId(item.id);
-                  else if (item.targetId && item.copyId) router.push(inventoryCopySellHref(item.targetId, item.copyId, defaultInventoryListState));
-                  else setMessage("This eBay listing needs investigation, but its saved physical Copy is no longer available.");
-                  return;
-                }
-                const recordId = item.field === "cost" ? item.id.replace(/^attention-cost-/, "") : null;
-                const record = recordId ? snapshot.records.find((value) => value.id === recordId) : null;
-                if (record) setAttentionRecordId(record.id);
-                else setAttentionItemId(item.id);
-              }} type="button">
-                <p className="text-sm font-bold text-zinc-800">{item.label}</p>
-                <p className="mt-0.5 text-xs font-medium leading-5 text-zinc-500">{item.detail}</p><span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[#8a1f2d]">{item.field === "ebay_copy_link" || item.field === "ebay_status" ? item.ebayAttentionAction === "confirm_copy_link" ? "Confirm Copy link" : "Review eBay status" : "Resolve details"} <ChevronRight className="size-3.5" /></span>
-              </button>
-            )) : (
-              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-4 text-sm font-bold text-emerald-800">
-                <CheckCircle2 className="mr-2 inline size-4" /> {source.mode === "preview" ? "Sample data is complete." : "No details need attention."}
-              </div>
-            )}
-          </div>
+          {source.mode === "live" && actionsQuery.isPending ? (
+            <div className="grid min-h-32 place-items-center p-4 text-sm font-bold text-zinc-600" role="status">Loading actions…</div>
+          ) : source.mode === "live" && actionsQuery.isError ? (
+            <div className="p-4">
+              <p className="text-sm font-bold text-rose-800">Actions could not be loaded.</p>
+            </div>
+          ) : visibleActions.length ? (
+            <div className="flex flex-1 flex-col divide-y divide-zinc-200">
+              {visibleActions.map((action) => {
+                const subject = overviewActionSubject(action, snapshot);
+                const required = action.category === "required";
+                return (
+                  <Link className="group flex min-h-16 flex-1 items-start gap-3 bg-white px-4 py-3 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#8a1f2d]/30" href={overviewActionDestination(action)} key={action.dedupeKey}>
+                    <span className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-full ${required ? "bg-amber-50 text-amber-800" : "bg-indigo-50 text-indigo-700"}`}>
+                      {required ? <AlertTriangle aria-hidden="true" className="size-4" /> : <Sparkles aria-hidden="true" className="size-4" />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className={`text-xs font-bold ${required ? "text-amber-800" : "text-indigo-700"}`}>{required ? "Needs attention" : "Suggestion"} · {action.area === "ebay" ? "eBay" : `${action.area.charAt(0).toUpperCase()}${action.area.slice(1)}`}</span>
+                      <span className="mt-0.5 block truncate font-bold leading-5 text-zinc-900">{action.title}</span>
+                      {subject && subject !== action.title ? <span className="mt-0.5 block truncate text-sm font-semibold text-zinc-700">{subject}</span> : null}
+                      <span className="mt-1 block truncate text-sm font-medium leading-5 text-zinc-500">{action.detail}</span>
+                    </span>
+                    <ChevronRight aria-hidden="true" className="mt-2 size-4 shrink-0 text-zinc-400 transition group-hover:translate-x-0.5 group-hover:text-zinc-700 motion-reduce:transform-none" />
+                  </Link>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="p-4 text-sm font-medium text-zinc-600">No open actions right now.</p>
+          )}
         </section>
       </div>
-      {attentionItemId ? <CardAttentionDialog item={snapshot.attention.find((item) => item.id === attentionItemId)!} onClose={() => setAttentionItemId(null)} onSaved={setMessage} source={source} /> : null}
-      {ebayCopyLinkAttentionId ? <EbayCopyLinkAttentionDialog item={snapshot.attention.find((item) => item.id === ebayCopyLinkAttentionId)!} onClose={() => setEbayCopyLinkAttentionId(null)} onResolved={setMessage} source={source} /> : null}
-      {attentionRecordId ? <RecordEditorDialog costOnly key={attentionRecordId} initialPanel="details" onClose={() => setAttentionRecordId(null)} onSaved={setMessage} record={snapshot.records.find((record) => record.id === attentionRecordId)!} source={source} /> : null}
     </div>
   );
 }

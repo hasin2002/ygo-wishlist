@@ -64,6 +64,7 @@ import {
   normalizePrintingValue,
 } from "@/server/printing-identity";
 import { adminProcedure, authenticatedProcedure, router } from "@/server/trpc";
+import { dismissRecordsSuggestion, listRecordsActions, urgentRecordsActionCount } from "@/server/records/actions";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -929,6 +930,22 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
 
 export const recordsRouter = router({
   snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
+
+  actions: authenticatedProcedure.query(async ({ ctx }) => (
+    listRecordsActions(ctx.collectionOwnerId, await loadRecordsSnapshot(ctx.collectionOwnerId))
+  )),
+
+  urgentActionCount: authenticatedProcedure.query(async ({ ctx }) => ({
+    count: await urgentRecordsActionCount(ctx.collectionOwnerId, await loadRecordsSnapshot(ctx.collectionOwnerId)),
+  })),
+
+  dismissSuggestion: authenticatedProcedure.input(z.object({ dedupeKey: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    const snapshot = await loadRecordsSnapshot(ctx.collectionOwnerId);
+    const action = (await listRecordsActions(ctx.collectionOwnerId, snapshot)).find((candidate) => candidate.dedupeKey === input.dedupeKey && candidate.status === "open");
+    if (!action || action.category !== "suggestion") throw new TRPCError({ code: "NOT_FOUND", message: "That suggestion is no longer available." });
+    await dismissRecordsSuggestion(ctx.collectionOwnerId, action);
+    return { ok: true };
+  }),
 
   ebayLifecycleChangeMarker: adminProcedure.query(async ({ ctx }) => {
     const [row] = await db.select({
