@@ -111,20 +111,60 @@ export const authRateLimits = pgTable(
  * table. The latter belongs to the site's sign-in system; this table holds the
  * eBay consent needed to act on a seller account.
  */
-export const ebayConnections = pgTable("ebay_connections", {
-  ownerId: text("owner_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  refreshTokenCiphertext: text("refresh_token_ciphertext").notNull(),
-  refreshTokenIv: text("refresh_token_iv").notNull(),
-  refreshTokenTag: text("refresh_token_tag").notNull(),
-  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
-    mode: "date",
-  }).notNull(),
-  scopes: text("scopes").notNull(),
-  createdAt: timestamp("created_at", { mode: "date" }).notNull(),
-  updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
-});
+export const ebayConnections = pgTable(
+  "ebay_connections",
+  {
+    ownerId: text("owner_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Records deliberately supports one eBay seller for the whole deployment.
+    // A constant unique slot makes that invariant race-safe in the database.
+    deploymentSlot: integer("deployment_slot").notNull().default(1),
+    ebayUserId: text("ebay_user_id"),
+    refreshTokenCiphertext: text("refresh_token_ciphertext").notNull(),
+    refreshTokenIv: text("refresh_token_iv").notNull(),
+    refreshTokenTag: text("refresh_token_tag").notNull(),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+      mode: "date",
+    }).notNull(),
+    scopes: text("scopes").notNull(),
+    tradingAuthTokenCiphertext: text("trading_auth_token_ciphertext"),
+    tradingAuthTokenIv: text("trading_auth_token_iv"),
+    tradingAuthTokenTag: text("trading_auth_token_tag"),
+    tradingAuthTokenExpiresAt: timestamp("trading_auth_token_expires_at", {
+      mode: "date",
+    }),
+    tradingAuthTokenStatus: text("trading_auth_token_status", {
+      enum: ["missing", "active", "revoked", "expired", "invalid"],
+    })
+      .notNull()
+      .default("missing"),
+    tradingAuthTokenCheckedAt: timestamp("trading_auth_token_checked_at", {
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_connections_single_deployment_unique").on(table.deploymentSlot),
+    check("ebay_connections_deployment_slot_one", sql`${table.deploymentSlot} = 1`),
+    check(
+      "ebay_connections_trading_token_complete",
+      sql`(
+        ${table.tradingAuthTokenCiphertext} is null
+        and ${table.tradingAuthTokenIv} is null
+        and ${table.tradingAuthTokenTag} is null
+        and ${table.tradingAuthTokenExpiresAt} is null
+      ) or (
+        ${table.tradingAuthTokenCiphertext} is not null
+        and ${table.tradingAuthTokenIv} is not null
+        and ${table.tradingAuthTokenTag} is not null
+        and ${table.tradingAuthTokenExpiresAt} is not null
+        and ${table.ebayUserId} is not null
+      )`,
+    ),
+  ],
+);
 
 export const cards = pgTable("cards", {
   id: serial("id").primaryKey(),

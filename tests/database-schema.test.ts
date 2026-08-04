@@ -4,6 +4,7 @@ import test from "node:test";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import {
   cardPrintings,
+  ebayConnections,
   ebayListingMembers,
   ebayListings,
   ebayOrderLineAllocations,
@@ -100,4 +101,16 @@ test("exact Printing identities are database-enforced while placeholders remain 
     fs.readFileSync("drizzle/0001_enforce_card_printing_identity.sql", "utf8"),
     /nullif\(btrim\("card_printings"\."canonical_tcgplayer_url"\), ''\) is not null/,
   );
+});
+
+test("one eBay seller and complete encrypted Trading credentials are database-enforced", () => {
+  const config = getTableConfig(ebayConnections);
+  const index = config.indexes.find(
+    (candidate) => candidate.config.name === "ebay_connections_single_deployment_unique",
+  );
+  assert.equal(index?.config.unique, true);
+  assert.deepEqual(configuredColumnNames(index?.config.columns ?? []), ["deployment_slot"]);
+  const checks = config.checks.map((candidate) => candidate.name);
+  assert.ok(checks.includes("ebay_connections_deployment_slot_one"));
+  assert.ok(checks.includes("ebay_connections_trading_token_complete"));
 });

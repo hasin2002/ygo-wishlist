@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { after, NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   parseEbayManualCallbackUrl,
   safeEbayReturnTo,
@@ -8,7 +8,6 @@ import {
   clearEbayOAuthStateCookie,
   ebayOAuthStateCookieName,
 } from "@/lib/ebay-oauth-route-state";
-import { ensureEbayNotificationSubscriptions } from "@/server/ebay-notification-service";
 import {
   EbayAuthorizationError,
   EbayConfigurationError,
@@ -91,9 +90,6 @@ export async function POST(request: NextRequest) {
       refreshToken: token.refresh_token,
       refreshTokenExpiresIn: token.refresh_token_expires_in,
       scopes: token.scope,
-    });
-    after(async () => {
-      await ensureEbayNotificationSubscriptions(session.user.id).catch(() => undefined);
     });
     return finish(request, completionDestination);
   } catch (error) {

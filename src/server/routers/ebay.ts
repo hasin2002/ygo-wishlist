@@ -31,10 +31,7 @@ import {
   getLatestEbayListingForCopy,
   reconcileEbayListing,
 } from "@/server/ebay-listing-reconciliation";
-import {
-  ensureEbayNotificationSubscriptions,
-  getEbayNotificationSubscriptionStatus,
-} from "@/server/ebay-notification-service";
+import { getEbayTradingNotificationHealth } from "@/server/ebay-trading-notification-service";
 import {
   getEbayCapabilityForSession,
   requireEbayExternalCapability,
@@ -109,7 +106,7 @@ export const ebayRouter = router({
     if (ctx.session.user.role !== "admin") return { capability };
     const [connection, notifications] = await Promise.all([
       getEbayConnectionStatus(ctx.session.user.id),
-      getEbayNotificationSubscriptionStatus(ctx.session.user.id),
+      getEbayTradingNotificationHealth(ctx.session.user.id),
     ]);
     return {
       capability,
@@ -202,14 +199,6 @@ export const ebayRouter = router({
         listingId: listing.id,
         ownerId: ctx.collectionOwnerId,
       })).listing;
-    } catch (error) {
-      throw ebayFailure(error);
-    }
-  }),
-  repairNotifications: authenticatedProcedure.mutation(async ({ ctx }) => {
-    await requireEbayExternalCapability(ctx.session);
-    try {
-      return await ensureEbayNotificationSubscriptions(ctx.session.user.id);
     } catch (error) {
       throw ebayFailure(error);
     }

@@ -6,7 +6,7 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { ebayConnections } from "@/db/schema";
 import {
@@ -45,11 +45,18 @@ type EbayTokenResponse = {
   scope?: string;
 };
 
-type StoredSecret = {
+export type StoredEbaySecret = {
   ciphertext: string;
   iv: string;
   tag: string;
 };
+
+export type EbayTradingAuthTokenStatus =
+  | "missing"
+  | "active"
+  | "revoked"
+  | "expired"
+  | "invalid";
 
 export class EbayConfigurationError extends Error {}
 export class EbayAuthorizationError extends Error {}
@@ -127,7 +134,7 @@ export function ebayConsentUrl(state: string) {
   return url;
 }
 
-function encryptSecret(value: string): StoredSecret {
+export function encryptEbaySecret(value: string): StoredEbaySecret {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
@@ -138,7 +145,7 @@ function encryptSecret(value: string): StoredSecret {
   };
 }
 
-function decryptSecret(value: StoredSecret) {
+export function decryptEbaySecret(value: StoredEbaySecret) {
   const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(value.iv, "base64"));
   decipher.setAuthTag(Buffer.from(value.tag, "base64"));
   return Buffer.concat([
@@ -216,6 +223,24 @@ export async function getEbayApplicationAccessToken(
   return token.access_token;
 }
 
+function isSingleSellerConstraintViolation(error: unknown) {
+  let current = error;
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (!current || typeof current !== "object") return false;
+    const candidate = current as {
+      cause?: unknown;
+      code?: unknown;
+      constraint?: unknown;
+    };
+    if (
+      candidate.code === "23505"
+      && candidate.constraint === "ebay_connections_single_deployment_unique"
+    ) return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
 export async function saveEbayConnection({
   ownerId,
   refreshToken,
@@ -228,32 +253,52 @@ export async function saveEbayConnection({
   scopes?: string;
 }) {
   const now = new Date();
-  const token = encryptSecret(refreshToken);
+  const [otherConnection] = await db
+    .select({ ownerId: ebayConnections.ownerId })
+    .from(ebayConnections)
+    .where(ne(ebayConnections.ownerId, ownerId))
+    .limit(1);
+  if (otherConnection) {
+    throw new EbayConfigurationError(
+      "This deployment already has an eBay seller connected. Disconnect that seller before connecting a different account.",
+    );
+  }
+
+  const token = encryptEbaySecret(refreshToken);
   const refreshTokenExpiresAt = new Date(now.getTime() + refreshTokenExpiresIn * 1_000);
 
-  await db
-    .insert(ebayConnections)
-    .values({
-      createdAt: now,
-      ownerId,
-      refreshTokenCiphertext: token.ciphertext,
-      refreshTokenExpiresAt,
-      refreshTokenIv: token.iv,
-      refreshTokenTag: token.tag,
-      scopes: scopes?.trim() || ebaySellerScopes,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      set: {
+  try {
+    await db
+      .insert(ebayConnections)
+      .values({
+        createdAt: now,
+        ownerId,
         refreshTokenCiphertext: token.ciphertext,
         refreshTokenExpiresAt,
         refreshTokenIv: token.iv,
         refreshTokenTag: token.tag,
         scopes: scopes?.trim() || ebaySellerScopes,
         updatedAt: now,
-      },
-      target: ebayConnections.ownerId,
-    });
+      })
+      .onConflictDoUpdate({
+        set: {
+          refreshTokenCiphertext: token.ciphertext,
+          refreshTokenExpiresAt,
+          refreshTokenIv: token.iv,
+          refreshTokenTag: token.tag,
+          scopes: scopes?.trim() || ebaySellerScopes,
+          updatedAt: now,
+        },
+        target: ebayConnections.ownerId,
+      });
+  } catch (error) {
+    if (isSingleSellerConstraintViolation(error)) {
+      throw new EbayConfigurationError(
+        "This deployment already has an eBay seller connected. Disconnect that seller before connecting a different account.",
+      );
+    }
+    throw error;
+  }
   sellerAccessTokenCache.invalidate(ownerId);
   setEbayConnectionHealth(ownerId, "recently_verified");
   console.info("[ebay] seller connection stored", {
@@ -276,13 +321,123 @@ export async function getEbayConnectionStatus(ownerId: string) {
   const grantedScopes = new Set(connection.scopes.split(/\s+/).filter(Boolean));
   const missingScopes = ebaySellerScopeList.filter((scope) => !grantedScopes.has(scope));
   return {
-    ...connection,
+    connectedAt: connection.connectedAt,
     health: connection.refreshTokenExpiresAt <= new Date()
       ? "reconnect_required"
       : getEbayConnectionHealth(ownerId),
     missingScopes,
-    notificationReady: missingScopes.length === 0,
+    refreshTokenExpiresAt: connection.refreshTokenExpiresAt,
   };
+}
+
+export async function getSingleEbayConnectionOwner() {
+  const rows = await db
+    .select({ ownerId: ebayConnections.ownerId })
+    .from(ebayConnections)
+    .limit(2);
+  return rows.length === 1 ? rows[0]!.ownerId : null;
+}
+
+export async function getEbayTradingAuthTokenMetadata(ownerId: string) {
+  const [connection] = await db
+    .select({
+      checkedAt: ebayConnections.tradingAuthTokenCheckedAt,
+      ebayUserId: ebayConnections.ebayUserId,
+      expiresAt: ebayConnections.tradingAuthTokenExpiresAt,
+      hasCiphertext: ebayConnections.tradingAuthTokenCiphertext,
+      status: ebayConnections.tradingAuthTokenStatus,
+    })
+    .from(ebayConnections)
+    .where(eq(ebayConnections.ownerId, ownerId))
+    .limit(1);
+  if (!connection) return null;
+  return {
+    checkedAt: connection.checkedAt,
+    ebayUserId: connection.ebayUserId,
+    expiresAt: connection.expiresAt,
+    hasToken: Boolean(connection.hasCiphertext),
+    status: connection.status,
+  };
+}
+
+export async function getStoredEbayTradingAuthToken(ownerId: string) {
+  const [connection] = await db
+    .select({
+      ciphertext: ebayConnections.tradingAuthTokenCiphertext,
+      iv: ebayConnections.tradingAuthTokenIv,
+      tag: ebayConnections.tradingAuthTokenTag,
+    })
+    .from(ebayConnections)
+    .where(eq(ebayConnections.ownerId, ownerId))
+    .limit(1);
+  if (!connection?.ciphertext || !connection.iv || !connection.tag) return null;
+  try {
+    return decryptEbaySecret({
+      ciphertext: connection.ciphertext,
+      iv: connection.iv,
+      tag: connection.tag,
+    });
+  } catch {
+    throw new EbayAuthorizationError(
+      "The saved Trading authorization could not be used. Renew Trading authorization and try again.",
+    );
+  }
+}
+
+export async function saveEbayTradingAuthToken({
+  ebayUserId,
+  expiresAt,
+  ownerId,
+  token,
+}: {
+  ebayUserId: string;
+  expiresAt: Date;
+  ownerId: string;
+  token: string;
+}) {
+  const encrypted = encryptEbaySecret(token);
+  const now = new Date();
+  const [updated] = await db
+    .update(ebayConnections)
+    .set({
+      ebayUserId,
+      tradingAuthTokenCheckedAt: now,
+      tradingAuthTokenCiphertext: encrypted.ciphertext,
+      tradingAuthTokenExpiresAt: expiresAt,
+      tradingAuthTokenIv: encrypted.iv,
+      tradingAuthTokenStatus: "active",
+      tradingAuthTokenTag: encrypted.tag,
+      updatedAt: now,
+    })
+    .where(eq(ebayConnections.ownerId, ownerId))
+    .returning({ ownerId: ebayConnections.ownerId });
+  if (!updated) {
+    throw new EbayAuthorizationError(
+      "Connect the eBay seller account before saving Trading authorization.",
+    );
+  }
+}
+
+export async function recordEbayTradingAuthTokenStatus({
+  checkedAt = new Date(),
+  expiresAt,
+  ownerId,
+  status,
+}: {
+  checkedAt?: Date;
+  expiresAt?: Date | null;
+  ownerId: string;
+  status: EbayTradingAuthTokenStatus;
+}) {
+  await db
+    .update(ebayConnections)
+    .set({
+      tradingAuthTokenCheckedAt: checkedAt,
+      ...(expiresAt !== undefined ? { tradingAuthTokenExpiresAt: expiresAt } : {}),
+      tradingAuthTokenStatus: status,
+      updatedAt: checkedAt,
+    })
+    .where(eq(ebayConnections.ownerId, ownerId));
 }
 
 export async function deleteEbayConnection(ownerId: string) {
@@ -319,7 +474,7 @@ export async function getEbaySellerAccessToken(ownerId: string) {
     return await sellerAccessTokenCache.get(ownerId, async () => {
       let refreshToken: string;
       try {
-        refreshToken = decryptSecret({
+        refreshToken = decryptEbaySecret({
           ciphertext: connection.refreshTokenCiphertext,
           iv: connection.refreshTokenIv,
           tag: connection.refreshTokenTag,
@@ -331,7 +486,10 @@ export async function getEbaySellerAccessToken(ownerId: string) {
       const body = new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: refreshToken,
-        scope: connection.scopes,
+        // Existing grants may retain scopes used by the retired Commerce
+        // receiver. Always down-scope refreshed access tokens to the current
+        // seller workflow instead of replaying the historical stored string.
+        scope: ebaySellerScopes,
       });
       const token = await ebayTokenRequest(body, "seller_refresh");
       if (!token.access_token || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
