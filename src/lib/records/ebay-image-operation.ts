@@ -6,7 +6,8 @@ export type EbayImagePostOperation =
       inventoryCopyId: string;
       inventoryKey: string;
       kind: "import-inventory" | "stage-inventory";
-    };
+    }
+  | { kind: "stage-listing-photo"; listingPhotoKey: string };
 
 export class EbayImageOperationError extends Error {}
 
@@ -14,6 +15,7 @@ export type EbayImageOperationServices<Result> = {
   importCatalogue: (ownerId: string, copyId: string, sourceUrl: string) => Promise<Result>;
   importInventory: (ownerId: string, copyId: string, inventoryKey: string, inventoryCopyId: string) => Promise<Result>;
   stageInventory: (ownerId: string, copyId: string, inventoryKey: string, inventoryCopyId: string) => Promise<Result>;
+  stageListingPhoto: (ownerId: string, copyId: string, listingPhotoKey: string) => Promise<Result>;
   uploadArchived: (ownerId: string, copyId: string, archiveKey: string) => Promise<Result>;
   uploadFile: (ownerId: string, copyId: string, file: File) => Promise<Result>;
 };
@@ -37,19 +39,21 @@ export function parseEbayImagePostOperation(form: FormData): {
   const sourceUrl = text(form, "sourceUrl");
   const inventoryKey = text(form, "inventoryKey");
   const inventoryCopyId = text(form, "inventoryCopyId");
+  const listingPhotoKey = text(form, "listingPhotoKey");
   const stageOnlyValue = text(form, "stageOnly");
   if (stageOnlyValue && stageOnlyValue !== "true" && stageOnlyValue !== "false") {
     throw new EbayImageOperationError("Choose one valid listing-photo operation.");
   }
   const stageOnly = stageOnlyValue === "true";
-  const operationCount = [Boolean(file), Boolean(archiveKey), Boolean(sourceUrl), Boolean(inventoryKey)]
+  const operationCount = [Boolean(file), Boolean(archiveKey), Boolean(sourceUrl), Boolean(inventoryKey), Boolean(listingPhotoKey)]
     .filter(Boolean).length;
   if (operationCount !== 1) {
     throw new EbayImageOperationError("Choose exactly one listing-photo operation.");
   }
   if ((stageOnly || inventoryCopyId) && !inventoryKey) {
-    throw new EbayImageOperationError("Saved-photo options require one saved inventory photo.");
+    if (!listingPhotoKey || inventoryCopyId) throw new EbayImageOperationError("Saved-photo options require one saved photo.");
   }
+  if (listingPhotoKey && !stageOnly) throw new EbayImageOperationError("Reusable listing photos must be prepared before eBay Review.");
   if (archiveKey) return { copyId, operation: { archiveKey, kind: "upload-archived" } };
   if (sourceUrl) return { copyId, operation: { kind: "import-catalogue", sourceUrl } };
   if (inventoryKey) return {
@@ -60,6 +64,7 @@ export function parseEbayImagePostOperation(form: FormData): {
       kind: stageOnly ? "stage-inventory" : "import-inventory",
     },
   };
+  if (listingPhotoKey) return { copyId, operation: { kind: "stage-listing-photo", listingPhotoKey } };
   if (!file) throw new EbayImageOperationError("Choose an image file to upload.");
   return { copyId, operation: { file, kind: "upload-file" } };
 }
@@ -77,6 +82,8 @@ export async function executeEbayImagePostOperation<Result>(
       return services.importCatalogue(ownerId, copyId, operation.sourceUrl);
     case "stage-inventory":
       return services.stageInventory(ownerId, copyId, operation.inventoryKey, operation.inventoryCopyId);
+    case "stage-listing-photo":
+      return services.stageListingPhoto(ownerId, copyId, operation.listingPhotoKey);
     case "import-inventory":
       return services.importInventory(ownerId, copyId, operation.inventoryKey, operation.inventoryCopyId);
     case "upload-file":

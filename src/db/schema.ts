@@ -527,6 +527,50 @@ export const cardCopyImages = pgTable(
 );
 
 /**
+ * Reusable eBay photo sets for one exact Printing, edition, condition, and
+ * offer type. Bytes are copied into a durable S3 area so these images remain
+ * available after the physical Copy that supplied them is sold or removed.
+ */
+export const cardListingPhotoImages = pgTable(
+  "card_listing_photo_images",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    printingId: text("printing_id").notNull().references(() => cardPrintings.id, { onDelete: "restrict" }),
+    edition: text("edition").notNull(),
+    condition: text("condition", {
+      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played"],
+    }).notNull(),
+    kind: text("kind", { enum: ["individual", "x2", "x3"] }).notNull(),
+    objectKey: text("object_key").notNull(),
+    position: integer("position").notNull(),
+    sourceCopyId: text("source_copy_id"),
+    sourceInventoryKey: text("source_inventory_key"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("card_listing_photo_images_object_key_unique").on(table.objectKey),
+    uniqueIndex("card_listing_photo_images_variant_position_unique").on(
+      table.ownerId,
+      table.printingId,
+      table.edition,
+      table.condition,
+      table.kind,
+      table.position,
+    ),
+    index("card_listing_photo_images_variant_idx").on(
+      table.ownerId,
+      table.printingId,
+      table.edition,
+      table.condition,
+      table.kind,
+    ),
+    check("card_listing_photo_images_position_nonnegative", sql`${table.position} >= 0`),
+  ],
+);
+
+/**
  * A published eBay item is linked to the physical Copy it represents. A Copy
  * stays available until a Sale record is created; listing it must not imply it
  * has been sold.
@@ -593,9 +637,9 @@ export const ebayListings = pgTable(
       foreignColumns: [recordEntries.ownerId, recordEntries.id],
     }).onDelete("restrict"),
     uniqueIndex("ebay_listings_item_id_unique").on(table.itemId),
-    uniqueIndex("ebay_listings_owner_copy_open_unique")
-      .on(table.ownerId, table.copyId)
-      .where(sql`${table.status} = 'active'`),
+    // A linked family deliberately shares one exact Copy pool between its
+    // individual and set offers. Family-scoped publication rules now own
+    // active-offer uniqueness; the legacy per-anchor restriction is retired.
     uniqueIndex("ebay_listings_owner_order_line_unique")
       .on(table.ownerId, table.orderId, table.orderLineItemId)
       .where(sql`${table.orderId} is not null and ${table.orderLineItemId} is not null`),
@@ -620,6 +664,63 @@ export const ebayListings = pgTable(
       sql`${table.quantitySold} is null or ${table.quantitySold} >= 0`,
     ),
     check("ebay_listings_retry_count_nonnegative", sql`${table.retryCount} >= 0`),
+  ],
+);
+
+/** A compatible Printing/edition/condition pool shared by its linked offers. */
+export const ebayListingFamilies = pgTable(
+  "ebay_listing_families",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    targetId: text("target_id").notNull().references(() => cardTargets.id, { onDelete: "restrict" }),
+    printingId: text("printing_id").notNull().references(() => cardPrintings.id, { onDelete: "restrict" }),
+    edition: text("edition").notNull(),
+    condition: text("condition").notNull(),
+    selectedCopyIds: jsonb("selected_copy_ids").$type<string[]>().notNull(),
+    wishlistOverride: boolean("wishlist_override").notNull().default(false),
+    planFingerprint: text("plan_fingerprint").notNull(),
+    draft: jsonb("draft").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("ebay_listing_families_owner_id_unique").on(table.ownerId, table.id),
+    uniqueIndex("ebay_listing_families_owner_variant_unique").on(table.ownerId, table.printingId, table.edition, table.condition),
+    check("ebay_listing_families_selected_nonempty", sql`jsonb_array_length(${table.selectedCopyIds}) >= 1`),
+  ],
+);
+
+/** Per-offer, recoverable publication identity. A family can have individual plus x2 or x3. */
+export const ebayListingFamilyOffers = pgTable(
+  "ebay_listing_family_offers",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    familyId: text("family_id").notNull().references(() => ebayListingFamilies.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["individual", "x2", "x3"] }).notNull(),
+    action: text("action", { enum: ["no_change", "create", "update", "end"] }).notNull(),
+    desiredQuantity: integer("desired_quantity").notNull(),
+    listingId: text("listing_id").references(() => ebayListings.id, { onDelete: "restrict" }),
+    publicationUuid: text("publication_uuid").notNull(),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    state: text("state", { enum: ["prepared", "reviewed", "publishing", "published", "failed", "uncertain"] }).notNull().default("prepared"),
+    review: jsonb("review"),
+    details: jsonb("details").notNull(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "ebay_listing_family_offers_owner_family_fk",
+      columns: [table.ownerId, table.familyId],
+      foreignColumns: [ebayListingFamilies.ownerId, ebayListingFamilies.id],
+    }).onDelete("cascade"),
+    uniqueIndex("ebay_listing_family_offers_owner_family_kind_unique").on(table.ownerId, table.familyId, table.kind),
+    uniqueIndex("ebay_listing_family_offers_owner_uuid_unique").on(table.ownerId, table.publicationUuid),
+    uniqueIndex("ebay_listing_family_offers_listing_unique").on(table.listingId).where(sql`${table.listingId} is not null`),
+    check("ebay_listing_family_offers_quantity_nonnegative", sql`${table.desiredQuantity} >= 0`),
   ],
 );
 

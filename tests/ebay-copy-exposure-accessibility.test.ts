@@ -7,6 +7,7 @@ const copySelectionPickerSource = readFileSync(new URL("../src/components/record
 const exposureSource = readFileSync(new URL("../src/components/records/ebay-copy-exposure.tsx", import.meta.url), "utf8");
 const listingActionSource = readFileSync(new URL("../src/components/records/ebay-listing-action.tsx", import.meta.url), "utf8");
 const recordsAppSource = readFileSync(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8");
+const searchablePicklistSource = readFileSync(new URL("../src/components/records/searchable-picklist.tsx", import.meta.url), "utf8");
 const unavailableActionSource = readFileSync(new URL("../src/components/unavailable-action.tsx", import.meta.url), "utf8");
 const cardImagesSource = readFileSync(new URL("../src/components/records/card-inventory-images.tsx", import.meta.url), "utf8");
 const photoManagerSource = readFileSync(new URL("../src/components/records/card-photo-manager.tsx", import.meta.url), "utf8");
@@ -60,14 +61,16 @@ test("Copy actions stack at full width on mobile and keep the help control insid
 
 test("the Copy picker is one searchable, keyboard-accessible combobox", () => {
   assert.match(recordsAppSource, /function PhysicalCopyCombobox/);
-  assert.match(recordsAppSource, /role="combobox"/);
-  assert.match(recordsAppSource, /role="listbox"/);
-  assert.match(recordsAppSource, /role="option"/);
-  assert.match(recordsAppSource, /aria-activedescendant/);
+  assert.match(recordsAppSource, /<SearchablePicklist/);
+  assert.match(searchablePicklistSource, /role="combobox"/);
+  assert.match(searchablePicklistSource, /role="listbox"/);
+  assert.match(searchablePicklistSource, /role="option"/);
+  assert.match(searchablePicklistSource, /aria-activedescendant/);
   assert.match(recordsAppSource, /placeholder="Search by Copy number, set, or sticker"/);
   assert.match(recordsAppSource, /const copyNumber = copies\.findIndex\(\(item\) => item\.id === copy\.id\) \+ 1/);
   assert.match(recordsAppSource, /searchText: \[`Copy \$\{copyNumber\}`, copyShortReference\(copy\.id\), printing\.setCode, copy\.stickerNumber\]/);
-  assert.match(recordsAppSource, /min-w-0 flex-1 truncate/);
+  assert.match(searchablePicklistSource, /min-w-0 flex-1/);
+  assert.match(searchablePicklistSource, /block truncate text-sm font-bold/);
   assert.doesNotMatch(recordsAppSource, /Find a Copy/);
   assert.doesNotMatch(recordsAppSource, /<select aria-label="Physical Copy"/);
   assert.doesNotMatch(recordsAppSource, /PhysicalCopyPickerDialog/);

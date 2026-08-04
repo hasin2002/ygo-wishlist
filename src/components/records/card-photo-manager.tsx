@@ -97,6 +97,7 @@ export function CardPhotoManager({
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [actionToast, setActionToast] = useState<string | null>(null);
   const arrangeRowRefs = useRef(new Map<string, HTMLLIElement>());
   const previousArrangeRowTops = useRef(new Map<string, number>());
   const dragDepth = useRef(0);
@@ -117,6 +118,12 @@ export function CardPhotoManager({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [preview]);
+
+  useEffect(() => {
+    if (!actionToast) return;
+    const timeoutId = window.setTimeout(() => setActionToast(null), 4_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [actionToast]);
 
   useLayoutEffect(() => {
     if (!arrangeIds || previousArrangeRowTops.current.size === 0) return;
@@ -250,36 +257,65 @@ export function CardPhotoManager({
 
   const SecondaryIcon = secondaryAction?.icon ?? ImagePlus;
   const uploadDisabled = changing || atLimit;
+  const canArrange = canManage && !loading && images.length > 1 && !reordering;
+  const arrangeUnavailableMessage = !canManage
+    ? "Photo editing is not available here yet."
+    : loading
+      ? "Wait for the photos to finish loading, then try again."
+      : images.length === 0
+        ? "Add at least two photos first, then you can arrange them."
+        : images.length === 1
+          ? "Add one more photo first, then you can arrange them."
+          : "Wait for the current photo change to finish, then try again.";
 
   return (
-    <section aria-busy={changing} aria-labelledby={titleId} className="min-w-0 max-w-full rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" id={id} tabIndex={-1}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{eyebrow}</p> : null}
-          <h2 className={`${eyebrow ? "mt-1 text-lg" : ""} font-black`} id={titleId}>{title}</h2>
-          <p className="mt-1 text-sm font-medium text-zinc-600">{description}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {maxImages !== undefined ? <span aria-live="polite" className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600">{images.length}/{maxImages}</span> : null}
-          {!loading && canManage && images.length > 1 ? (
+    <section aria-busy={changing} aria-labelledby={titleId} className="flex h-full min-w-0 max-w-full flex-col rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" id={id} tabIndex={-1}>
+      <div className="min-w-0">
+        {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{eyebrow}</p> : null}
+        <h2 className={`${eyebrow ? "mt-1 text-lg" : ""} font-black`} id={titleId}>{title}</h2>
+        <p className="mt-1 text-sm font-medium text-zinc-600">{description}</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[auto_auto] sm:items-center">
+          <div className="flex min-h-11 items-center gap-2">
+            {maxImages !== undefined ? <span aria-live="polite" className="min-w-11 rounded-md bg-zinc-100 px-2 py-1 text-center text-xs font-bold tabular-nums text-zinc-600">{images.length}/{maxImages}</span> : null}
             <button
-              className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
-              disabled={reordering}
+              aria-disabled={!canArrange}
+              className={`inline-flex min-h-11 min-w-40 items-center justify-center rounded-md border px-3 text-sm font-bold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${canArrange ? "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-100" : "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400"}`}
               onClick={() => {
+                if (!canArrange) {
+                  setActionToast(arrangeUnavailableMessage);
+                  return;
+                }
                 setPendingRemovalId(null);
                 setArrangeIds(arranging ? null : images.map((image) => image.id));
                 setArrangeAnnouncement("");
               }}
+              title={!canArrange ? arrangeUnavailableMessage : undefined}
               type="button"
             >
               {arranging ? "Cancel arranging" : "Arrange photos"}
+            </button>
+          </div>
+          {secondaryAction ? (
+            <button
+              aria-controls={secondaryAction.controls}
+              aria-expanded={secondaryAction.expanded}
+              aria-haspopup={secondaryAction.hasPopup}
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 whitespace-normal rounded-md border border-zinc-300 bg-white px-3 text-left text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={secondaryAction.disabled || changing || atLimit}
+              onClick={secondaryAction.onClick}
+              type="button"
+            >
+              <SecondaryIcon aria-hidden="true" className="size-4" />
+              {secondaryAction.label}
             </button>
           ) : null}
         </div>
       </div>
 
-      {!arranging && ((canManage && configured && !atLimit) || secondaryAction) ? (
-        <div className={`mt-4 flex min-w-0 max-w-full flex-wrap gap-2 ${secondaryAction ? "" : "sm:hidden"}`}>
+      {actionToast ? <div aria-atomic="true" className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-rose-300 bg-rose-50 p-3 text-rose-950 shadow-xl" role="alert"><div className="flex items-start gap-3"><p className="min-w-0 flex-1 text-sm font-bold leading-5">{actionToast}</p><button aria-label="Dismiss photo action message" className="grid size-8 shrink-0 place-items-center rounded-md text-rose-900 transition hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-700" onClick={() => setActionToast(null)} type="button"><X aria-hidden="true" className="size-4" /></button></div></div> : null}
+
+      {!arranging && canManage && configured && !atLimit ? (
+        <div className="mt-4 flex min-w-0 max-w-full flex-wrap gap-2 sm:hidden">
           {canManage && configured && !atLimit ? (
             <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 has-[:disabled]:cursor-wait has-[:disabled]:opacity-50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#8a1f2d] has-[:focus-visible]:ring-offset-2 sm:hidden">
               <Camera aria-hidden="true" className="size-4" />
@@ -296,20 +332,6 @@ export function CardPhotoManager({
                 type="file"
               />
             </label>
-          ) : null}
-          {secondaryAction ? (
-            <button
-              aria-controls={secondaryAction.controls}
-              aria-expanded={secondaryAction.expanded}
-              aria-haspopup={secondaryAction.hasPopup}
-              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 whitespace-normal rounded-md border border-zinc-300 bg-white px-3 text-left text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={secondaryAction.disabled || changing || atLimit}
-              onClick={secondaryAction.onClick}
-              type="button"
-            >
-              <SecondaryIcon aria-hidden="true" className="size-4" />
-              {secondaryAction.label}
-            </button>
           ) : null}
         </div>
       ) : null}
@@ -441,7 +463,7 @@ export function CardPhotoManager({
             </li>
           ))}
         </ul>
-      ) : <p className="mt-4 rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm font-bold text-zinc-600">{emptyText}</p>}
+      ) : <p className="mt-4 flex min-h-40 flex-1 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm font-bold text-zinc-600">{emptyText}</p>}
 
       {preview ? (
         <div aria-labelledby={`${id}-preview-title`} aria-modal="true" className="fixed inset-0 z-[70] grid place-items-center bg-zinc-950/80 p-4 sm:p-8" role="dialog">

@@ -64,7 +64,7 @@ test("listing-photo requests reject mixed fields and invalid staging flags", () 
   invalidStage.set("copyId", "copy-a");
   invalidStage.set("archiveKey", "archive-a");
   invalidStage.set("stageOnly", "true");
-  assert.throws(() => parseEbayImagePostOperation(invalidStage), /require one saved inventory photo/i);
+  assert.throws(() => parseEbayImagePostOperation(invalidStage), /require one saved photo/i);
 });
 
 test("a disconnected seller can stage an owned inventory photo without reaching an eBay service", async () => {
@@ -85,11 +85,35 @@ test("a disconnected seller can stage an owned inventory photo without reaching 
       calls.push(`stage:${ownerId}:${copyId}:${inventoryKey}`);
       return { archiveKey: "staged" };
     },
+    stageListingPhoto: unexpected,
     uploadArchived: unexpected,
     uploadFile: unexpected,
   };
   assert.deepEqual(await executeEbayImagePostOperation(parsed, "owner-a", services), { archiveKey: "staged" });
   assert.deepEqual(calls, ["stage:owner-a:copy-a:inventory-a"]);
+});
+
+test("a reusable listing photo is staged locally before eBay Review", async () => {
+  const form = new FormData();
+  form.set("copyId", "copy-a");
+  form.set("listingPhotoKey", "images/listing-photo-sets/owner-a/photo.jpg");
+  form.set("stageOnly", "true");
+  const parsed = parseEbayImagePostOperation(form);
+  const calls: string[] = [];
+  const unexpected = async () => ({ archiveKey: "wrong" });
+  const services: EbayImageOperationServices<{ archiveKey: string }> = {
+    importCatalogue: unexpected,
+    importInventory: unexpected,
+    stageInventory: unexpected,
+    stageListingPhoto: async (ownerId, copyId, key) => {
+      calls.push(`${ownerId}:${copyId}:${key}`);
+      return { archiveKey: "staged-listing-photo" };
+    },
+    uploadArchived: unexpected,
+    uploadFile: unexpected,
+  };
+  assert.deepEqual(await executeEbayImagePostOperation(parsed, "owner-a", services), { archiveKey: "staged-listing-photo" });
+  assert.deepEqual(calls, ["owner-a:copy-a:images/listing-photo-sets/owner-a/photo.jpg"]);
 });
 
 test("wrong-owner inventory staging fails before the storage seam", async () => {
@@ -108,6 +132,7 @@ test("wrong-owner inventory staging fails before the storage seam", async () => 
       storageCalls += 1;
       return { archiveKey: "staged" };
     },
+    stageListingPhoto: unexpected,
     uploadArchived: unexpected,
     uploadFile: unexpected,
   };

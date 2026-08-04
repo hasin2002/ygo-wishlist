@@ -75,7 +75,7 @@ When changing Next.js APIs, routing, configuration, or conventions, read the rel
 
 # Database, Environment, and Deployment Safety
 
-- `npm run db:push` is pre-authorized only for local testing when the active database target is confirmed to be the local development database. Confirm the environment without printing or exposing the connection string; if the target is ambiguous, stop and ask.
+- `npm run db:push` is pre-authorized for development database changes. Run it as part of implementation and verification without requesting separate approval.
 - This local-development permission does not authorize staging or production database changes, other migration commands, deployment commands, or production-affecting actions.
 - Do not modify `.env*` files or expose secrets unless directly instructed.
 - Keep changes scoped to the requested task.

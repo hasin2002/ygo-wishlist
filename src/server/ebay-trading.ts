@@ -20,13 +20,16 @@ export type EbayTradingErrorDetail = {
 
 export class EbayTradingError extends Error {
   readonly details: EbayTradingErrorDetail[];
+  readonly xml: string | null;
 
   constructor(
     message: string,
     details: EbayTradingErrorDetail[] = [],
+    xml: string | null = null,
   ) {
     super(message);
     this.details = details;
+    this.xml = xml;
   }
 }
 
@@ -90,10 +93,31 @@ async function tradingResponse(response: Response, callName: string) {
     throw new EbayTradingError(
       firstError?.message ?? `eBay ${callName} failed (${response.status}).`,
       errors,
+      xml,
     );
   }
 
   return { ack, errors, xml } satisfies EbayTradingResponse;
+}
+
+/**
+ * Error 488 proves an AddItem UUID was already used. Recovery is safe only
+ * when eBay also says it came from this application and returns the original
+ * numeric ItemID.
+ */
+export function duplicateEbayItemId(error: unknown) {
+  if (!(error instanceof EbayTradingError) || !error.details.some((detail) => detail.code === "488")) return null;
+  for (const container of ebayXmlContainers(error.xml ?? "", "Errors")) {
+    if (ebayXmlText(container, "ErrorCode") !== "488") continue;
+    const parameters = [...container.matchAll(/<ErrorParameters\b([^>]*)>([\s\S]*?)<\/ErrorParameters>/gi)].map((match) => ({
+      id: match[1]?.match(/\bParamID\s*=\s*["']([^"']+)["']/i)?.[1] ?? null,
+      value: ebayXmlText(match[2] ?? "", "Value"),
+    }));
+    const sameApplication = parameters.find((parameter) => parameter.id === "0")?.value?.toLowerCase();
+    const itemId = parameters.find((parameter) => parameter.id === "1")?.value;
+    if (sameApplication && ["1", "true"].includes(sameApplication) && itemId && /^[0-9]+$/.test(itemId)) return itemId;
+  }
+  return null;
 }
 
 /** Auth'n'Auth bootstrap calls authenticate with the server-only keyset. */
@@ -215,6 +239,8 @@ export type EbayRemoteListing = {
   itemId: string;
   listingOnHold: boolean;
   listingStatus: string | null;
+  quantity: number;
+  quantityAvailable: number;
   quantitySold: number;
   transactions: EbayRemoteTransaction[];
 };
@@ -264,6 +290,7 @@ export async function getEbayRemoteListing(ownerId: string, itemId: string) {
   });
   const itemXml = ebayXmlContainers(itemResult.xml, "Item")[0] ?? itemResult.xml;
   const quantitySold = xmlNumber(itemXml, "QuantitySold") ?? 0;
+  const quantity = xmlNumber(itemXml, "Quantity") ?? quantitySold;
   let transactions: EbayRemoteTransaction[] = [];
 
   if (quantitySold > 0) {
@@ -283,6 +310,8 @@ export async function getEbayRemoteListing(ownerId: string, itemId: string) {
     itemId,
     listingOnHold: xmlBoolean(itemXml, "ListingOnHold"),
     listingStatus: ebayXmlText(itemXml, "ListingStatus"),
+    quantity,
+    quantityAvailable: Math.max(0, quantity - quantitySold),
     quantitySold,
     transactions,
   } satisfies EbayRemoteListing;

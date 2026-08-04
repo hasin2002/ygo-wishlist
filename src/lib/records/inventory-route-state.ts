@@ -70,3 +70,12 @@ export function inventoryCopySellHref(
   const searchParams = serializeInventoryListState({ ...state, kind: "cards" });
   return `/records/inventory/cards/${encodeURIComponent(targetId)}/copies/${encodeURIComponent(copyId)}/sell?${searchParams.toString()}`;
 }
+
+/** Group-level listing launch. A Copy id is intentionally never part of this URL. */
+export function linkedListingHref(targetId?: string, printingId?: string, condition?: string) {
+  if (!targetId) return "/records/listings/new";
+  const query = new URLSearchParams({ target: targetId });
+  if (printingId) query.set("printing", printingId);
+  if (condition) query.set("condition", condition);
+  return `/records/listings/new?${query.toString()}`;
+}

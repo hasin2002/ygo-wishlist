@@ -15,14 +15,13 @@ import { useInitialAuth } from "@/app/providers";
 import { useAppShell } from "@/components/app-shell";
 import { useSession } from "@/lib/auth-client";
 import { addTaskHref, currentNavigationHref } from "@/lib/navigation-intent";
-import { trpc } from "@/trpc/client";
 
 const addItems = [
   { description: "Create a card target you want to collect", href: "/wishlist/new", icon: Star, label: "Add to wishlist" },
   { description: "Cards, sealed, bulk, and supplies", href: "/records/new/purchase", icon: Plus, label: "Purchase" },
   { description: "Open sealed product and record pulls", href: "/records/new/opening", icon: PackageOpen, label: "Pack opening" },
   { description: "Sell exact physical card copies", href: "/records/new/sale", icon: ReceiptText, label: "Sale" },
-  { description: "Create one eBay offer containing several exact Copies", href: "/records/listings/new-lot", icon: Layers3, label: "Mixed card lot" },
+  { description: "Sell a matching card variant individually or with linked x2/x3 offers", href: "/records/listings/new", icon: Layers3, label: "Create listing" },
 ] as const;
 
 function GlobalAddMenu() {
@@ -32,30 +31,10 @@ function GlobalAddMenu() {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState(0);
-  const [retryingEbayCheck, setRetryingEbayCheck] = useState(false);
-  const retryingEbayCheckRef = useRef(false);
-  const { data: session } = useSession();
   const [origin, setOrigin] = useState<ReturnType<typeof currentNavigationHref>>(null);
-  const ebayStatus = trpc.ebay.status.useQuery(undefined, {
-    enabled: Boolean(session),
-    staleTime: 30_000,
-  });
-  const ebayCapability = ebayStatus.data?.capability;
   const recordsPreview = process.env.NEXT_PUBLIC_RECORDS_UI_PREVIEW === "1";
   function menuItems() {
     return menuItemRefs.current.filter((item): item is HTMLElement => item !== null && !item.matches(":disabled"));
-  }
-
-  async function retryEbayCheck() {
-    if (retryingEbayCheckRef.current) return;
-    retryingEbayCheckRef.current = true;
-    setRetryingEbayCheck(true);
-    try {
-      await ebayStatus.refetch();
-    } finally {
-      retryingEbayCheckRef.current = false;
-      setRetryingEbayCheck(false);
-    }
   }
 
   function focusMenuItem(index: number) {
@@ -142,21 +121,14 @@ function GlobalAddMenu() {
           let menuItemIndex = 0;
           return addItems.map((item) => {
           const Icon = item.icon;
-          const isMixedLot = item.href === "/records/listings/new-lot";
-          const unavailable = isMixedLot && (recordsPreview || ebayStatus.isError || !ebayCapability?.ebay.allowed);
-          const reason = recordsPreview
-            ? "Mixed eBay lots are unavailable in preview mode."
-            : ebayStatus.isError
-              ? "eBay readiness could not be checked."
-              : ebayStatus.isPending
-                ? "Checking eBay readiness…"
-                : ebayCapability
-                  ? `${ebayCapability.ebay.message} ${ebayCapability.ebay.remedy}`
-                  : "Seller permission is required to create an eBay mixed lot.";
+          const isListing = item.href === "/records/listings/new";
+          // Planning and inventory-photo staging stay local. eBay permission
+          // is checked only when the seller explicitly runs Review or Publish.
+          const unavailable = isListing && recordsPreview;
+          const reason = "eBay listings are unavailable in preview mode.";
           const itemIndex = menuItemIndex++;
-          const retryIndex = unavailable && ebayStatus.isError ? menuItemIndex++ : null;
           const href = addTaskHref(item.href, origin);
-          return unavailable ? <div className="grid gap-1" key={item.href}><button aria-disabled="true" className="flex min-h-14 cursor-not-allowed items-center gap-3 rounded-md px-2 py-2 text-left opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" onClick={(event) => event.preventDefault()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-500"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-700">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500" role={ebayStatus.isError ? "alert" : "status"}>{reason}</span></span></button>{retryIndex !== null ? <button aria-busy={retryingEbayCheck} aria-disabled={retryingEbayCheck} className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-xs font-bold text-rose-900 transition hover:border-rose-900 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 aria-disabled:cursor-wait aria-disabled:opacity-60" onClick={() => void retryEbayCheck()} ref={(element) => { menuItemRefs.current[retryIndex] = element; }} role="menuitem" tabIndex={retryIndex === activeItemIndex ? 0 : -1} type="button">{retryingEbayCheck ? "Checking eBay…" : "Retry eBay check"}</button> : null}</div> : <Link className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 active:scale-[0.99]" href={href} key={item.href} onClick={() => closeMenu()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1}><span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-950">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span></span></Link>;
+          return unavailable ? <button aria-disabled="true" className="flex min-h-14 cursor-not-allowed items-center gap-3 rounded-md px-2 py-2 text-left opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" key={item.href} onClick={(event) => event.preventDefault()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-zinc-100 text-zinc-500"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-700">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500" role="status">{reason}</span></span></button> : <Link className="flex min-h-14 items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 active:scale-[0.99]" href={href} key={item.href} onClick={() => closeMenu()} ref={(element) => { menuItemRefs.current[itemIndex] = element; }} role="menuitem" tabIndex={itemIndex === activeItemIndex ? 0 : -1}><span className="grid size-9 shrink-0 place-items-center rounded-md bg-rose-50 text-[#8a1f2d]"><Icon className="size-4" /></span><span className="min-w-0"><span className="block text-sm font-bold text-zinc-950">{item.label}</span><span className="mt-0.5 block text-xs font-medium text-zinc-500">{item.description}</span></span></Link>;
           });
         })()}
       </div> : null}

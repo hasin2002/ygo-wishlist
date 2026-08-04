@@ -8,7 +8,6 @@ import {
   Boxes,
   CalendarDays,
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
@@ -30,26 +29,27 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   CardContentsEditor,
   type CardContentsDraft,
 } from "@/components/records/card-contents-editor";
 import { CardInventoryImages } from "@/components/records/card-inventory-images";
+import { InventoryListingPhotoSets } from "@/components/records/listing-photo-set-manager";
 import { CopySelectionPicker } from "@/components/records/copy-selection-picker";
 import { EbayCopyExposure } from "@/components/records/ebay-copy-exposure";
 import {
   copyRemovalDecision,
   physicalCopyStateLabel,
 } from "@/components/records/ebay-copy-exposure-presentation";
-import { EbayListingAction } from "@/components/records/ebay-listing-action";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
 import { parsePoundsToPence } from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
 import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { SearchablePicklist, type SearchablePicklistOption } from "@/components/records/searchable-picklist";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import { deriveSnapshotRecordsActions, type RecordsAction } from "@/lib/records/actions";
 import { ownedCardTotalLabel, paidCostSummary } from "@/lib/records/paid-cost-summary";
@@ -82,6 +82,7 @@ import { copyDisplayLabel, copyShortReference, orderCopies } from "@/lib/records
 import {
   defaultInventoryListState,
   inventoryCardDetailHref,
+  linkedListingHref,
   inventoryListHref,
   parseInventoryListState,
   type InventoryListState,
@@ -1281,92 +1282,18 @@ function InventoryCardSummary({
   );
 }
 
-type PhysicalCopyPickerOption = {
-  detail: string;
-  displayText: string;
-  id: string;
-  label: string;
-  searchText: string;
-};
-
 function PhysicalCopyCombobox({
   onSelect,
   options,
   selectedCopyId,
 }: {
   onSelect: (copyId: string) => void;
-  options: PhysicalCopyPickerOption[];
+  options: SearchablePicklistOption[];
   selectedCopyId: string;
 }) {
-  const selectedOption = options.find((option) => option.id === selectedCopyId) ?? options[0];
-  const selectedOptionIndex = Math.max(options.findIndex((option) => option.id === selectedCopyId), 0);
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState(selectedOption?.displayText ?? "");
-  const [activeIndex, setActiveIndex] = useState(selectedOptionIndex);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const normalizedQuery = query.trim().toLocaleLowerCase("en-GB");
-  const selectedText = selectedOption?.displayText.toLocaleLowerCase("en-GB") ?? "";
-  const visibleOptions = !normalizedQuery || normalizedQuery === selectedText
-    ? options
-    : options.filter((option) => option.searchText.includes(normalizedQuery));
-  const activeOption = visibleOptions[Math.min(activeIndex, Math.max(visibleOptions.length - 1, 0))];
-
-  function selectOption(option: PhysicalCopyPickerOption) {
-    setQuery(option.displayText);
-    setIsOpen(false);
-    onSelect(option.id);
-  }
-
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setIsOpen(true);
-      setActiveIndex((current) => Math.min(current + 1, Math.max(visibleOptions.length - 1, 0)));
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setIsOpen(true);
-      setActiveIndex((current) => Math.max(current - 1, 0));
-      return;
-    }
-    if (event.key === "Enter" && isOpen && activeOption) {
-      event.preventDefault();
-      selectOption(activeOption);
-      return;
-    }
-    if (event.key === "Escape") {
-      setQuery(selectedOption?.displayText ?? "");
-      setIsOpen(false);
-    }
-  }
-
   return (
-    <div className="relative max-w-xl" onBlur={(event) => {
-      if (containerRef.current?.contains(event.relatedTarget)) return;
-      setQuery(selectedOption?.displayText ?? "");
-      setIsOpen(false);
-    }} ref={containerRef}>
-      <label className="text-sm font-bold text-zinc-800" htmlFor="physical-copy-combobox">Physical Copy</label>
-      <div className="relative mt-1.5">
-        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-        <input aria-activedescendant={isOpen && activeOption ? `physical-copy-option-${activeOption.id}` : undefined} aria-autocomplete="list" aria-controls="physical-copy-options" aria-expanded={isOpen} className="min-h-11 w-full rounded-md border border-zinc-300 bg-white py-2 pl-9 pr-10 text-base font-semibold text-zinc-900 transition placeholder:text-zinc-400 hover:border-zinc-400 focus-visible:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d]/20" id="physical-copy-combobox" onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); setIsOpen(true); }} onClick={(event) => { event.currentTarget.select(); setActiveIndex(selectedOptionIndex); setIsOpen(true); }} onFocus={(event) => { event.currentTarget.select(); setActiveIndex(selectedOptionIndex); setIsOpen(true); }} onKeyDown={handleKeyDown} placeholder="Search by Copy number, set, or sticker" role="combobox" value={query} />
-        <ChevronDown aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`} />
-      </div>
-      {isOpen ? (
-        <div aria-label="Physical Copies" className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg" id="physical-copy-options" role="listbox">
-          {visibleOptions.length ? visibleOptions.map((option, index) => {
-            const isSelected = option.id === selectedCopyId;
-            const isActive = option.id === activeOption?.id;
-            return (
-              <button aria-selected={isSelected} className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-bold transition-colors ${isActive ? "bg-zinc-100" : "hover:bg-zinc-50"} ${isSelected ? "text-[#8a1f2d]" : "text-zinc-900"}`} id={`physical-copy-option-${option.id}`} key={option.id} onClick={() => selectOption(option)} onFocus={() => setActiveIndex(index)} role="option" type="button">
-                <span className="min-w-0 flex-1 truncate">{option.label} · {option.detail}</span>
-                {isSelected ? <Check aria-hidden="true" className="size-4 shrink-0" /> : null}
-              </button>
-            );
-          }) : <p className="px-3 py-4 text-sm font-medium text-zinc-500">No Copies match that search.</p>}
-        </div>
-      ) : null}
+    <div className="max-w-xl">
+      <SearchablePicklist emptyMessage="No Copies match that search." label="Physical Copy" onSelect={onSelect} options={options} placeholder="Search by Copy number, set, or sticker" resultsLabel="Physical Copies" selectedId={selectedCopyId} />
     </div>
   );
 }
@@ -1397,6 +1324,15 @@ function InventoryCardDetailContent({
     ? requestedCopyId
     : copies[0]?.id ?? null;
   const selectedDetail = copyDetails.find((item) => item.copy.id === effectiveCopyId) ?? null;
+  const selectedVariantCopyIds = selectedDetail
+    ? copyDetails.flatMap((item) => (
+      item.printing.id === selectedDetail.printing.id
+        && item.copy.condition === selectedDetail.copy.condition
+        && item.copy.status !== "void"
+        ? [item.copy.id]
+        : []
+    ))
+    : [];
   const copyExposureByCopyId = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
   const copyPickerOptions = copyDetails.map(({ copy, printing }) => {
     const copyNumber = copies.findIndex((item) => item.id === copy.id) + 1;
@@ -1529,12 +1465,12 @@ function InventoryCardDetailContent({
             </section>
           ) : null}
           <section aria-labelledby="physical-copies-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
-            <header className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
+            <header className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
               <div>
                 <h3 className="text-lg font-black" id="physical-copies-title">Physical copies</h3>
-                <p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Manage condition, photos, source, and selling details for one Copy at a time.</p>
+                <p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Manage each Copy, or create one listing plan for the selected matching variant.</p>
               </div>
-              <span className="shrink-0 text-sm font-bold text-zinc-500">{copies.length} {copies.length === 1 ? "Copy" : "Copies"}</span>
+              <div className="flex flex-wrap items-center gap-2"><span className="shrink-0 text-sm font-bold text-zinc-500">{copies.length} {copies.length === 1 ? "Copy" : "Copies"}</span>{selectedDetail ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={linkedListingHref(target.id, selectedDetail.printing.id, selectedDetail.copy.condition)}>Create listing</Link> : null}</div>
             </header>
 
             {selectedDetail ? (
@@ -1551,7 +1487,6 @@ function InventoryCardDetailContent({
                       {selectedDetail.copy.stickerNumber || selectedDetail.copy.location ? <p className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-zinc-700">{selectedDetail.copy.stickerNumber ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">Sticker {selectedDetail.copy.stickerNumber}</span> : null}{selectedDetail.copy.location ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">{selectedDetail.copy.location}</span> : null}</p> : null}
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-                      {selectedExposure ? <EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} exposure={selectedExposure} printing={selectedDetail.printing} target={target} /> : null}
                       {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? selectedCopyRemoval.available ? (
                         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 sm:w-auto" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
                       ) : <UnavailableAction icon={Trash2} label="Remove Copy" reason={selectedCopyRemoval.reason ?? "This Copy cannot be removed."} /> : null}
@@ -1572,6 +1507,7 @@ function InventoryCardDetailContent({
                   </form>
 
                   <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} />
+                  {isCardCondition(selectedDetail.copy.condition) ? <InventoryListingPhotoSets canManage={source.mode === "live"} cardName={target.name} condition={selectedDetail.copy.condition} edition={target.edition} printingId={selectedDetail.printing.id} sourceCopyIds={selectedVariantCopyIds} /> : null}
                   <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p><p className="mt-2 text-sm font-bold text-zinc-800">This Copy’s cost: <span className="tabular-nums">{selectedDetail.copy.allocationPence === null ? "unknown" : formatCurrency(selectedDetail.copy.allocationPence)}</span></p><p className="mt-1 text-xs font-medium leading-5 text-zinc-500">This is this physical Copy’s allocated share from its source Record, not the total for sibling Copies.</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
                 </article>
               </div>

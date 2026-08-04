@@ -4,7 +4,10 @@ import test from "node:test";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import {
   cardPrintings,
+  cardListingPhotoImages,
   ebayConnections,
+  ebayListingFamilies,
+  ebayListingFamilyOffers,
   ebayListingMembers,
   ebayListings,
   ebayOrderLineAllocations,
@@ -16,6 +19,8 @@ import {
 
 const ebayCompositionTables = [
   ebayListings,
+  ebayListingFamilies,
+  ebayListingFamilyOffers,
   ebayListingMembers,
   ebayOrderLines,
   ebayOrderLineAllocations,
@@ -45,7 +50,7 @@ test("every composite eBay foreign key has a staged unique-index target", () => 
     )
   ));
 
-  assert.equal(compositeForeignKeys.length, 9);
+  assert.equal(compositeForeignKeys.length, 10);
 
   for (const foreignKey of compositeForeignKeys) {
     const reference = foreignKey.reference();
@@ -75,7 +80,7 @@ test("every composite eBay foreign key has a staged unique-index target", () => 
 });
 
 test("composite foreign-key backing indexes have safe PostgreSQL names", () => {
-  assert.equal(ebayCompositionCompositeTargets.length, 6);
+  assert.equal(ebayCompositionCompositeTargets.length, 7);
   assert.equal(
     new Set(
       ebayCompositionCompositeTargets.map((target) => target.backingName),
@@ -113,4 +118,21 @@ test("one eBay seller and complete encrypted Trading credentials are database-en
   const checks = config.checks.map((candidate) => candidate.name);
   assert.ok(checks.includes("ebay_connections_deployment_slot_one"));
   assert.ok(checks.includes("ebay_connections_trading_token_complete"));
+});
+
+test("reusable listing photos are separated by exact variant and offer type", () => {
+  const config = getTableConfig(cardListingPhotoImages);
+  const index = config.indexes.find(
+    (candidate) => candidate.config.name === "card_listing_photo_images_variant_position_unique",
+  );
+  assert.equal(index?.config.unique, true);
+  assert.deepEqual(configuredColumnNames(index?.config.columns ?? []), [
+    "owner_id",
+    "printing_id",
+    "edition",
+    "condition",
+    "kind",
+    "position",
+  ]);
+  assert.ok(config.checks.some((candidate) => candidate.name === "card_listing_photo_images_position_nonnegative"));
 });
