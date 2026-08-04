@@ -224,7 +224,6 @@ export function ListingPhotoSetManager({
     configured={configured}
     description={`${kindCopy[kind].description} These stay available when listings end.`}
     emptyText={`No ${kindCopy[kind].label.toLowerCase()} listing photos saved yet.`}
-    eyebrow="Reusable listing photos"
     id={`listing-photo-set-${printingId}-${condition}-${kind}`}
     images={images.map((image) => ({ id: image.key, previewUrl: image.previewUrl }))}
     loading={loading}
@@ -245,6 +244,7 @@ export function ListingPhotoSetManager({
       onClick: () => { void importSavedCopyPhotos(); },
     } : undefined}
     storageWarning="Private listing-photo storage is not configured on this server."
+    surface="plain"
     title={`${kindCopy[kind].label} photos`}
     uploading={uploading}
   />;
@@ -275,11 +275,11 @@ export function InventoryListingPhotoSets(props: Omit<Parameters<typeof ListingP
 
   return (
     <section aria-labelledby="listing-photo-sets-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
-      <header className="border-b border-zinc-200 bg-zinc-50 px-4 py-4 sm:px-5">
+      <header className="px-4 pt-4 sm:px-5 sm:pt-5">
         <h5 className="font-black" id="listing-photo-sets-title">Listing photos</h5>
         <p className="mt-1 text-sm font-medium leading-5 text-zinc-600">Keep separate reusable photo sets for each way you sell this exact Printing and condition.</p>
       </header>
-      <div className="border-b border-zinc-200 px-3 pt-3 sm:px-4">
+      <div className="px-3 pb-3 pt-3 sm:px-5 sm:pb-4">
         <div aria-label="Listing photo set" className="grid grid-cols-3 gap-1 rounded-lg bg-zinc-100 p-1" role="tablist">
           {listingPhotoKinds.map((candidate) => (
             <button
@@ -300,7 +300,7 @@ export function InventoryListingPhotoSets(props: Omit<Parameters<typeof ListingP
           ))}
         </div>
       </div>
-      <div className="grid min-w-0 p-3 sm:p-4">
+      <div className="grid min-w-0 border-t border-zinc-200 p-4 sm:p-5">
         {listingPhotoKinds.map((candidate) => {
           const active = kind === candidate;
           return (

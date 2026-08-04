@@ -61,6 +61,7 @@ export function CardPhotoManager({
   reordering,
   secondaryAction,
   storageWarning,
+  surface = "card",
   title,
   uploading,
 }: {
@@ -89,6 +90,7 @@ export function CardPhotoManager({
   reordering: boolean;
   secondaryAction?: SecondaryAction;
   storageWarning: string;
+  surface?: "card" | "plain";
   title: string;
   uploading: boolean;
 }) {
@@ -269,12 +271,12 @@ export function CardPhotoManager({
           : "Wait for the current photo change to finish, then try again.";
 
   return (
-    <section aria-busy={changing} aria-labelledby={titleId} className="flex h-full min-w-0 max-w-full flex-col rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" id={id} tabIndex={-1}>
+    <section aria-busy={changing} aria-labelledby={titleId} className={`flex h-full min-w-0 max-w-full flex-col ${surface === "card" ? "rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" : "bg-transparent"}`} id={id} tabIndex={-1}>
       <div className="min-w-0">
         {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{eyebrow}</p> : null}
         <h2 className={`${eyebrow ? "mt-1 text-lg" : ""} font-black`} id={titleId}>{title}</h2>
         <p className="mt-1 text-sm font-medium text-zinc-600">{description}</p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-[auto_auto] sm:items-center">
+        <div className="mt-3 grid gap-2 sm:grid-cols-[max-content_max-content] sm:items-center sm:justify-start">
           <div className="flex min-h-11 items-center gap-2">
             {maxImages !== undefined ? <span aria-live="polite" className="min-w-11 rounded-md bg-zinc-100 px-2 py-1 text-center text-xs font-bold tabular-nums text-zinc-600">{images.length}/{maxImages}</span> : null}
             <button
