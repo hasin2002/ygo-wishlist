@@ -8,6 +8,7 @@ import {
   archiveAndImportEbayImage,
   archiveAndImportInventoryImage,
   archiveInventoryImageDraft,
+  archiveListingPhotoSetImageDraft,
   archiveAndUploadEbayImage,
   EbayListingError,
   getEbayListingImageDraft,
@@ -84,7 +85,7 @@ export async function POST(request: Request) {
   }
   const session = await getSessionFromHeaders(request.headers);
   const capability = await getEbayCapabilityForSession(session);
-  const localInventoryStage = parsed.operation.kind === "stage-inventory";
+  const localInventoryStage = parsed.operation.kind === "stage-inventory" || parsed.operation.kind === "stage-listing-photo";
   if (localInventoryStage) {
     if (!capability.canManageListingPhotoDrafts) {
       return NextResponse.json({ message: capability.mode === "preview"
@@ -116,6 +117,7 @@ export async function POST(request: Request) {
       importCatalogue: archiveAndImportEbayImage,
       importInventory: archiveAndImportInventoryImage,
       stageInventory: archiveInventoryImageDraft,
+      stageListingPhoto: archiveListingPhotoSetImageDraft,
       uploadArchived: uploadArchivedEbayImage,
       uploadFile: archiveAndUploadEbayImage,
     });

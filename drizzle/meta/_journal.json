@@ -50,6 +50,20 @@
       "when": 1785857351122,
       "tag": "0006_records_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785870128186,
+      "tag": "0007_ebay_linked_listing_families",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785879817238,
+      "tag": "0008_nervous_talkback",
+      "breakpoints": true
     }
   ]
 }

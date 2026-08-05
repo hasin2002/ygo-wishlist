@@ -1,11 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
   Camera,
   ImagePlus,
+  Info,
   Star,
   Trash2,
   UploadCloud,
@@ -13,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -41,9 +44,11 @@ export function CardPhotoManager({
   changing,
   configured,
   description,
+  descriptionDisplay = "inline",
   emptyText,
   error,
   eyebrow,
+  headingDisplay = "visible",
   id,
   images,
   loading,
@@ -61,6 +66,7 @@ export function CardPhotoManager({
   reordering,
   secondaryAction,
   storageWarning,
+  surface = "card",
   title,
   uploading,
 }: {
@@ -71,7 +77,9 @@ export function CardPhotoManager({
   description: string;
   emptyText: string;
   error?: string;
+  descriptionDisplay?: "inline" | "tooltip";
   eyebrow?: string;
+  headingDisplay?: "visible" | "sr-only";
   id: string;
   images: CardPhotoManagerImage[];
   loading: boolean;
@@ -89,6 +97,7 @@ export function CardPhotoManager({
   reordering: boolean;
   secondaryAction?: SecondaryAction;
   storageWarning: string;
+  surface?: "card" | "plain";
   title: string;
   uploading: boolean;
 }) {
@@ -97,10 +106,20 @@ export function CardPhotoManager({
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [actionToast, setActionToast] = useState<string | null>(null);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [descriptionPosition, setDescriptionPosition] = useState({ left: 16, top: 16, width: 288 });
   const arrangeRowRefs = useRef(new Map<string, HTMLLIElement>());
+  const descriptionCloseTimerRef = useRef<number | null>(null);
+  const descriptionPopoverRef = useRef<HTMLSpanElement>(null);
+  const descriptionTriggerRef = useRef<HTMLButtonElement>(null);
   const previousArrangeRowTops = useRef(new Map<string, number>());
   const dragDepth = useRef(0);
+  const removalDialogRef = useRef<HTMLDivElement>(null);
+  const removalTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const removalInProgressRef = useRef(Boolean(removingId));
   const titleId = `${id}-title`;
+  const descriptionId = `${id}-description`;
   const arranging = arrangeIds !== null;
   const atLimit = maxImages !== undefined && images.length >= maxImages;
   const imageById = new Map(images.map((image) => [image.id, image]));
@@ -108,6 +127,27 @@ export function CardPhotoManager({
     .map((imageId) => imageById.get(imageId))
     .filter((image): image is CardPhotoManagerImage => image !== undefined);
   const preview = previewId ? imageById.get(previewId) : undefined;
+
+  const positionDescriptionPopover = useCallback(() => {
+    const trigger = descriptionTriggerRef.current;
+    if (!trigger) return;
+    const gutter = 16;
+    const gap = 8;
+    const triggerBounds = trigger.getBoundingClientRect();
+    const containerBounds = trigger.closest("section")?.getBoundingClientRect();
+    const boundaryLeft = Math.max(gutter, containerBounds?.left ?? gutter);
+    const boundaryRight = Math.max(boundaryLeft, Math.min(window.innerWidth - gutter, containerBounds?.right ?? window.innerWidth - gutter));
+    const width = Math.min(288, Math.max(0, boundaryRight - boundaryLeft));
+    const popover = descriptionPopoverRef.current;
+    if (popover) popover.style.width = `${width}px`;
+    const popoverHeight = popover?.offsetHeight ?? 0;
+    const left = Math.min(Math.max(boundaryLeft, triggerBounds.left), boundaryRight - width);
+    const belowTop = triggerBounds.bottom + gap;
+    const top = popoverHeight && belowTop + popoverHeight > window.innerHeight - gutter
+      ? Math.max(gutter, triggerBounds.top - popoverHeight - gap)
+      : belowTop;
+    setDescriptionPosition({ left, top, width });
+  }, []);
 
   useEffect(() => {
     if (!preview) return;
@@ -117,6 +157,65 @@ export function CardPhotoManager({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [preview]);
+
+  useLayoutEffect(() => {
+    if (!descriptionOpen) return;
+    positionDescriptionPopover();
+    window.addEventListener("resize", positionDescriptionPopover);
+    window.addEventListener("scroll", positionDescriptionPopover, true);
+    return () => {
+      window.removeEventListener("resize", positionDescriptionPopover);
+      window.removeEventListener("scroll", positionDescriptionPopover, true);
+    };
+  }, [descriptionOpen, positionDescriptionPopover]);
+
+  useEffect(() => {
+    if (!descriptionOpen) return;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (descriptionTriggerRef.current?.contains(target) || descriptionPopoverRef.current?.contains(target)) return;
+      setDescriptionOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setDescriptionOpen(false);
+      descriptionTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [descriptionOpen]);
+
+  useEffect(() => () => {
+    if (descriptionCloseTimerRef.current !== null) window.clearTimeout(descriptionCloseTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!actionToast) return;
+    const timeoutId = window.setTimeout(() => setActionToast(null), 4_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [actionToast]);
+
+  useEffect(() => {
+    removalInProgressRef.current = Boolean(removingId);
+  }, [removingId]);
+
+  useEffect(() => {
+    if (!pendingRemovalId) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !removalInProgressRef.current) closeRemovalDialog();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [pendingRemovalId]);
 
   useLayoutEffect(() => {
     if (!arrangeIds || previousArrangeRowTops.current.size === 0) return;
@@ -155,6 +254,25 @@ export function CardPhotoManager({
 
   function acceptedFiles(event: DragEvent<HTMLElement>) {
     return Array.from(event.dataTransfer.types).includes("Files");
+  }
+
+  function keepDescriptionOpen() {
+    if (descriptionCloseTimerRef.current !== null) window.clearTimeout(descriptionCloseTimerRef.current);
+    descriptionCloseTimerRef.current = null;
+    setDescriptionOpen(true);
+  }
+
+  function keepDescriptionOpenOnHover() {
+    if (window.matchMedia("(hover: hover)").matches) keepDescriptionOpen();
+  }
+
+  function scheduleDescriptionClose() {
+    if (descriptionCloseTimerRef.current !== null) window.clearTimeout(descriptionCloseTimerRef.current);
+    descriptionCloseTimerRef.current = window.setTimeout(() => setDescriptionOpen(false), 100);
+  }
+
+  function scheduleDescriptionCloseOnHover() {
+    if (window.matchMedia("(hover: hover)").matches) scheduleDescriptionClose();
   }
 
   function uploadFiles(files: File[]) {
@@ -248,38 +366,89 @@ export function CardPhotoManager({
     }
   }
 
+  function closeRemovalDialog() {
+    setPendingRemovalId(null);
+    window.setTimeout(() => removalTriggerRef.current?.focus(), 0);
+  }
+
+  function keepRemovalDialogFocus(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(removalDialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? []);
+    if (!focusable.length) return;
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = event.shiftKey
+      ? currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1
+      : currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
+    event.preventDefault();
+    focusable[nextIndex]?.focus();
+  }
+
   const SecondaryIcon = secondaryAction?.icon ?? ImagePlus;
   const uploadDisabled = changing || atLimit;
+  const canArrange = canManage && !loading && images.length > 1 && !reordering;
+  const arrangeUnavailableMessage = !canManage
+    ? "Photo editing is not available here yet."
+    : loading
+      ? "Wait for the photos to finish loading, then try again."
+      : images.length === 0
+        ? "Add at least two photos first, then you can arrange them."
+        : images.length === 1
+          ? "Add one more photo first, then you can arrange them."
+          : "Wait for the current photo change to finish, then try again.";
 
   return (
-    <section aria-busy={changing} aria-labelledby={titleId} className="min-w-0 max-w-full rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" id={id} tabIndex={-1}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+    <section aria-busy={changing} aria-labelledby={titleId} className={`flex h-full min-w-0 max-w-full flex-col ${surface === "card" ? "rounded-xl border border-zinc-300 bg-white p-4 shadow-sm" : "bg-transparent"}`} id={id} tabIndex={-1}>
+      <div className="min-w-0">
+        <div className={headingDisplay === "sr-only" ? "sr-only" : ""}>
           {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{eyebrow}</p> : null}
-          <h2 className={`${eyebrow ? "mt-1 text-lg" : ""} font-black`} id={titleId}>{title}</h2>
-          <p className="mt-1 text-sm font-medium text-zinc-600">{description}</p>
+          <div className={`${eyebrow ? "mt-1" : ""} flex min-h-8 items-center gap-1`}>
+            <h2 className={`${eyebrow ? "text-lg" : ""} font-black`} id={titleId}>{title}</h2>
+            {descriptionDisplay === "tooltip" ? <button aria-describedby={descriptionOpen ? descriptionId : undefined} aria-expanded={descriptionOpen} aria-label={`About ${title}`} className="relative grid size-8 cursor-help place-items-center rounded-md text-zinc-500 transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:bg-zinc-100 hover:text-zinc-800 focus-visible:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" onBlur={scheduleDescriptionClose} onClick={keepDescriptionOpen} onFocus={keepDescriptionOpen} onMouseEnter={keepDescriptionOpenOnHover} onMouseLeave={scheduleDescriptionCloseOnHover} ref={descriptionTriggerRef} type="button"><Info aria-hidden="true" className="size-3.5" /></button> : null}
+          </div>
+          {descriptionDisplay === "inline" ? <p className="mt-1 text-sm font-medium text-zinc-600" id={descriptionId}>{description}</p> : null}
         </div>
-        <div className="flex items-center gap-2">
-          {maxImages !== undefined ? <span aria-live="polite" className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600">{images.length}/{maxImages}</span> : null}
-          {!loading && canManage && images.length > 1 ? (
+        <div className={`${headingDisplay === "visible" ? "mt-3 " : ""}grid gap-2 sm:grid-cols-[max-content_max-content] sm:items-center sm:justify-start`}>
+          <div className="flex min-h-11 items-center gap-2">
+            {maxImages !== undefined ? <span aria-live="polite" className="min-w-11 rounded-md bg-zinc-100 px-2 py-1 text-center text-xs font-bold tabular-nums text-zinc-600">{images.length}/{maxImages}</span> : null}
             <button
-              className="min-h-11 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 shadow-sm transition-colors hover:border-zinc-400 hover:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
-              disabled={reordering}
+              aria-disabled={!canArrange}
+              className={`inline-flex min-h-11 min-w-40 items-center justify-center rounded-md border px-3 text-sm font-bold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 ${canArrange ? "border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-100" : "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-400"}`}
               onClick={() => {
+                if (!canArrange) {
+                  setActionToast(arrangeUnavailableMessage);
+                  return;
+                }
                 setPendingRemovalId(null);
                 setArrangeIds(arranging ? null : images.map((image) => image.id));
                 setArrangeAnnouncement("");
               }}
+              title={!canArrange ? arrangeUnavailableMessage : undefined}
               type="button"
             >
               {arranging ? "Cancel arranging" : "Arrange photos"}
+            </button>
+          </div>
+          {secondaryAction ? (
+            <button
+              aria-controls={secondaryAction.controls}
+              aria-expanded={secondaryAction.expanded}
+              aria-haspopup={secondaryAction.hasPopup}
+              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 whitespace-normal rounded-md border border-zinc-300 bg-white px-3 text-left text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={secondaryAction.disabled || changing || atLimit}
+              onClick={secondaryAction.onClick}
+              type="button"
+            >
+              <SecondaryIcon aria-hidden="true" className="size-4" />
+              {secondaryAction.label}
             </button>
           ) : null}
         </div>
       </div>
 
-      {!arranging && ((canManage && configured && !atLimit) || secondaryAction) ? (
-        <div className={`mt-4 flex min-w-0 max-w-full flex-wrap gap-2 ${secondaryAction ? "" : "sm:hidden"}`}>
+      {actionToast ? <div aria-atomic="true" className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-rose-300 bg-rose-50 p-3 text-rose-950 shadow-xl" role="alert"><div className="flex items-start gap-3"><p className="min-w-0 flex-1 text-sm font-bold leading-5">{actionToast}</p><button aria-label="Dismiss photo action message" className="grid size-8 shrink-0 place-items-center rounded-md text-rose-900 transition hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-rose-700" onClick={() => setActionToast(null)} type="button"><X aria-hidden="true" className="size-4" /></button></div></div> : null}
+
+      {!arranging && canManage && configured && !atLimit ? (
+        <div className="mt-4 flex min-w-0 max-w-full flex-wrap gap-2 sm:hidden">
           {canManage && configured && !atLimit ? (
             <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 has-[:disabled]:cursor-wait has-[:disabled]:opacity-50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#8a1f2d] has-[:focus-visible]:ring-offset-2 sm:hidden">
               <Camera aria-hidden="true" className="size-4" />
@@ -296,20 +465,6 @@ export function CardPhotoManager({
                 type="file"
               />
             </label>
-          ) : null}
-          {secondaryAction ? (
-            <button
-              aria-controls={secondaryAction.controls}
-              aria-expanded={secondaryAction.expanded}
-              aria-haspopup={secondaryAction.hasPopup}
-              className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-2 whitespace-normal rounded-md border border-zinc-300 bg-white px-3 text-left text-sm font-bold text-zinc-700 transition-colors hover:border-zinc-400 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={secondaryAction.disabled || changing || atLimit}
-              onClick={secondaryAction.onClick}
-              type="button"
-            >
-              <SecondaryIcon aria-hidden="true" className="size-4" />
-              {secondaryAction.label}
-            </button>
           ) : null}
         </div>
       ) : null}
@@ -358,17 +513,6 @@ export function CardPhotoManager({
       {!configured && canManage ? <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">{storageWarning}</p> : null}
       {message ? <p className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-900" role="alert">{message}</p> : null}
       {error ? <p className="mt-3 text-xs font-bold text-rose-700">{error}</p> : null}
-
-      {pendingRemovalId ? (
-        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3" role="alert">
-          <p className="text-sm font-bold text-rose-950">{removalTitle}</p>
-          <p className="mt-1 text-xs font-medium text-rose-900">{removalDescription}</p>
-          <div className="mt-3 flex flex-wrap justify-end gap-2">
-            <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-sm font-bold text-rose-950" disabled={Boolean(removingId)} onClick={() => setPendingRemovalId(null)} type="button">Cancel</button>
-            <button className="min-h-11 rounded-md bg-rose-700 px-3 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60" disabled={Boolean(removingId)} onClick={() => void confirmRemoval()} type="button">{removingId ? "Removing…" : "Remove photo"}</button>
-          </div>
-        </div>
-      ) : null}
 
       {loading ? <p className="mt-4 text-sm font-medium text-zinc-500" role="status">{loadingText}</p> : arranging ? (
         <div className="mt-4">
@@ -435,13 +579,34 @@ export function CardPhotoManager({
               {canManage ? (
                 <>
                   <button aria-label={index === 0 ? `${cardName} photo ${index + 1} is the primary photo` : `Set ${cardName} photo ${index + 1} as primary`} aria-pressed={index === 0} className={`absolute left-0.5 top-0.5 z-10 grid size-11 place-items-center rounded-full transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-1 disabled:cursor-default ${index === 0 ? "text-[#8a1f2d]" : "text-zinc-500"}`} disabled={changing || index === 0} onClick={() => void onReorder([image.id, ...images.filter((item) => item.id !== image.id).map((item) => item.id)])} type="button"><span className="grid size-7 place-items-center rounded-full border border-zinc-200/80 bg-white/90 shadow-sm backdrop-blur-sm transition hover:border-[#8a1f2d]/40 hover:bg-white"><Star aria-hidden="true" className={`size-3.5 ${index === 0 ? "fill-current" : ""}`} /></span></button>
-                  <button aria-label={`Remove ${cardName} photo ${index + 1}`} className="absolute right-0.5 top-0.5 z-10 grid size-11 place-items-center rounded-full text-zinc-500 transition hover:text-rose-700 focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-wait disabled:opacity-60" disabled={changing} onClick={() => setPendingRemovalId(image.id)} type="button"><span className="grid size-7 place-items-center rounded-full border border-zinc-200/80 bg-white/90 shadow-sm backdrop-blur-sm transition hover:border-rose-200 hover:bg-rose-50"><Trash2 aria-hidden="true" className="size-3.5" /></span></button>
+                  <button aria-label={`Remove ${cardName} photo ${index + 1}`} className="absolute right-0.5 top-0.5 z-10 grid size-11 place-items-center rounded-full text-zinc-500 transition hover:text-rose-700 focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-1 disabled:cursor-wait disabled:opacity-60" disabled={changing} onClick={(event) => { removalTriggerRef.current = event.currentTarget; setPendingRemovalId(image.id); }} type="button"><span className="grid size-7 place-items-center rounded-full border border-zinc-200/80 bg-white/90 shadow-sm backdrop-blur-sm transition hover:border-rose-200 hover:bg-rose-50"><Trash2 aria-hidden="true" className="size-3.5" /></span></button>
                 </>
               ) : null}
             </li>
           ))}
         </ul>
-      ) : <p className="mt-4 rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm font-bold text-zinc-600">{emptyText}</p>}
+      ) : <p className="mt-4 flex min-h-40 flex-1 items-center justify-center rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm font-bold text-zinc-600">{emptyText}</p>}
+
+      {pendingRemovalId ? createPortal(
+        <div aria-describedby={`${id}-remove-description`} aria-labelledby={`${id}-remove-title`} aria-modal="true" className="fixed inset-0 z-[80] grid place-items-end bg-zinc-950/50 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !removingId) closeRemovalDialog(); }} role="dialog">
+          <div className="w-full max-w-md rounded-xl border border-rose-200 bg-white p-4 shadow-2xl sm:p-5" onKeyDown={keepRemovalDialogFocus} ref={removalDialogRef}>
+            <div className="flex items-start justify-between gap-4">
+              <div><h3 className="text-lg font-black text-rose-950" id={`${id}-remove-title`}>{removalTitle}</h3><p className="mt-1 text-sm font-medium leading-5 text-rose-900" id={`${id}-remove-description`}>{removalDescription}</p></div>
+              <button aria-label="Close remove photo confirmation" autoFocus className="grid size-11 shrink-0 place-items-center rounded-md text-rose-900 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700" disabled={Boolean(removingId)} onClick={closeRemovalDialog} type="button"><X aria-hidden="true" className="size-5" /></button>
+            </div>
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">
+              <button className="min-h-11 rounded-md border border-rose-300 bg-white px-3 text-sm font-bold text-rose-950 hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700" disabled={Boolean(removingId)} onClick={closeRemovalDialog} type="button">Cancel</button>
+              <button className="min-h-11 rounded-md bg-rose-700 px-3 text-sm font-bold text-white hover:bg-rose-800 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={Boolean(removingId)} onClick={() => void confirmRemoval()} type="button">{removingId ? "Removing…" : "Remove photo"}</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+
+      {descriptionDisplay === "tooltip" && descriptionOpen ? createPortal(
+        <span className="fixed z-[90] max-w-[calc(100vw-2rem)] whitespace-normal break-words rounded-lg border border-zinc-200 bg-zinc-950 px-3 py-2 text-left text-xs font-semibold leading-5 text-white shadow-xl" id={descriptionId} onMouseEnter={keepDescriptionOpenOnHover} onMouseLeave={scheduleDescriptionCloseOnHover} ref={descriptionPopoverRef} role="tooltip" style={descriptionPosition}>{description}</span>,
+        document.body,
+      ) : null}
 
       {preview ? (
         <div aria-labelledby={`${id}-preview-title`} aria-modal="true" className="fixed inset-0 z-[70] grid place-items-center bg-zinc-950/80 p-4 sm:p-8" role="dialog">

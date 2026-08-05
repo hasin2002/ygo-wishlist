@@ -8,6 +8,7 @@ import {
   ebayLotCategory,
   ebayListingLanguages,
 } from "@/lib/ebay-listing-options";
+import { cardConditions } from "@/lib/records/types";
 import {
   EbayAuthorizationError,
   EbayTemporaryError,
@@ -38,6 +39,7 @@ import {
 } from "@/server/ebay-capabilities";
 import { getEbayRemoteListing } from "@/server/ebay-trading";
 import { inspectPaidEbaySaleReviewIntent } from "@/server/records/paid-ebay-sale-review";
+import { discardLinkedOfferDraft, inspectLinkedOfferVariant, LinkedOfferError, publishLinkedOfferPlan, reviewLinkedOfferPlan, saveLinkedOfferPool } from "@/server/records/ebay-linked-offers";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 const itemSpecificValue = z.string().trim().min(1).max(65);
@@ -87,6 +89,11 @@ const quantityListingSchema = listingSchema.omit({ copyId: true }).extend({
   imageDraftCopyId: z.string().min(1),
 });
 
+const linkedOfferDetailsSchema = listingSchema.omit({ copyId: true }).extend({
+  copyIds: z.array(z.string().min(1)).min(1).max(100),
+  imageDraftCopyId: z.string().min(1),
+});
+
 function ebayFailure(error: unknown) {
   return new TRPCError({
     code: "BAD_REQUEST",
@@ -101,6 +108,37 @@ function ebayFailure(error: unknown) {
 }
 
 export const ebayRouter = router({
+  linkedOfferVariant: authenticatedProcedure.input(z.object({ printingId: z.string().min(1), condition: z.enum(cardConditions) })).query(async ({ ctx, input }) => {
+    try { return await inspectLinkedOfferVariant(ctx.collectionOwnerId, input.printingId, input.condition); }
+    catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof LinkedOfferError ? error.message : "The listing variant could not be loaded." }); }
+  }),
+  discardLinkedOfferDraft: authenticatedProcedure.input(z.object({ familyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    try { return await discardLinkedOfferDraft(ctx.collectionOwnerId, input.familyId); }
+    catch (error) { throw new TRPCError({ code: "CONFLICT", message: error instanceof LinkedOfferError ? error.message : "The unfinished listing draft could not be deleted." }); }
+  }),
+  saveLinkedOfferPool: authenticatedProcedure.input(z.object({
+    printingId: z.string().min(1), condition: z.enum(cardConditions), copyIds: z.array(z.string().min(1)).min(1).max(100), listKeptCopies: z.boolean(), mode: z.enum(["individual", "linked"]), draft: z.unknown(),
+    offers: z.array(z.object({
+      action: z.enum(["no_change", "create", "update", "end"]),
+      desiredQuantity: z.number().int().min(0).max(100),
+      kind: z.enum(["individual", "x2", "x3"]),
+      listingId: z.string().min(1).nullable(),
+      details: linkedOfferDetailsSchema,
+    })).min(1).max(3),
+  })).mutation(async ({ ctx, input }) => {
+    try { return await saveLinkedOfferPool({ ownerId: ctx.collectionOwnerId, ...input }); }
+    catch (error) { throw new TRPCError({ code: "CONFLICT", message: error instanceof LinkedOfferError ? error.message : "The exact Copy pool changed. Refresh and review it again." }); }
+  }),
+  reviewLinkedOfferPlan: authenticatedProcedure.input(z.object({ familyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
+    try { return await reviewLinkedOfferPlan(ctx.collectionOwnerId, input.familyId); }
+    catch (error) { throw ebayFailure(error instanceof LinkedOfferError ? new EbayListingError(error.message) : error); }
+  }),
+  publishLinkedOfferPlan: authenticatedProcedure.input(z.object({ familyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    await requireEbayExternalCapability(ctx.session);
+    try { return await publishLinkedOfferPlan(ctx.collectionOwnerId, input.familyId); }
+    catch (error) { throw ebayFailure(error instanceof LinkedOfferError ? new EbayListingError(error.message) : error); }
+  }),
   status: authenticatedProcedure.query(async ({ ctx }) => {
     const capability = await getEbayCapabilityForSession(ctx.session);
     if (ctx.session.user.role !== "admin") return { capability };

@@ -148,7 +148,7 @@ test("value presentation keeps physical Copy costs separate from grouped card to
   assert.match(recordsApp, /This Copy’s cost:/);
   assert.match(recordsApp, /allocated share from its source Record/);
   assert.match(recordsApp, /ownedCardTotalLabel\(libraryStatus\.ownedQuantity\)/);
-  assert.match(recordsApp, /libraryStatus\.ownedQuantity \? <div><dt[\s\S]*?No owned Copies/);
+  assert.match(recordsApp, /libraryStatus\.ownedQuantity \? <div[\s\S]*?No owned Copies/);
   assert.doesNotMatch(recordsApp, /Purchase value/);
   assert.match(libraryApp, /Owned market estimate/);
   assert.match(libraryApp, /Known purchase subtotal/);

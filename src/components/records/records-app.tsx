@@ -7,13 +7,14 @@ import {
   ArrowUpRight,
   Boxes,
   CalendarDays,
+  Camera,
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   Clock3,
   History,
+  Images,
   PackageCheck,
   PackageOpen,
   Pencil,
@@ -30,26 +31,27 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   CardContentsEditor,
   type CardContentsDraft,
 } from "@/components/records/card-contents-editor";
 import { CardInventoryImages } from "@/components/records/card-inventory-images";
+import { InventoryListingPhotoSets } from "@/components/records/listing-photo-set-manager";
 import { CopySelectionPicker } from "@/components/records/copy-selection-picker";
 import { EbayCopyExposure } from "@/components/records/ebay-copy-exposure";
 import {
   copyRemovalDecision,
   physicalCopyStateLabel,
 } from "@/components/records/ebay-copy-exposure-presentation";
-import { EbayListingAction } from "@/components/records/ebay-listing-action";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
 import { parsePoundsToPence } from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
 import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { SearchablePicklist, type SearchablePicklistOption } from "@/components/records/searchable-picklist";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import { deriveSnapshotRecordsActions, type RecordsAction } from "@/lib/records/actions";
 import { ownedCardTotalLabel, paidCostSummary } from "@/lib/records/paid-cost-summary";
@@ -82,6 +84,7 @@ import { copyDisplayLabel, copyShortReference, orderCopies } from "@/lib/records
 import {
   defaultInventoryListState,
   inventoryCardDetailHref,
+  linkedListingHref,
   inventoryListHref,
   parseInventoryListState,
   type InventoryListState,
@@ -105,6 +108,14 @@ const inventoryTabs = [
 ] as const;
 
 type InventoryTab = (typeof inventoryTabs)[number]["value"];
+
+const inventoryCardSections = [
+  { icon: SlidersHorizontal, label: "Copy details", value: "details" },
+  { icon: Camera, label: "Card Copy photos", value: "copy-photos" },
+  { icon: Images, label: "Listing photos", value: "listing-photos" },
+] as const;
+
+type InventoryCardSection = (typeof inventoryCardSections)[number]["value"];
 
 function formatCurrency(pence: number) {
   return new Intl.NumberFormat("en-GB", {
@@ -1227,6 +1238,7 @@ function InventoryCardSummary({
   knownPurchaseValueCount,
   purchaseValuePence,
   soldQuantity,
+  selectedCopy,
   target,
   unknownPurchaseValueCount,
 }: {
@@ -1234,6 +1246,11 @@ function InventoryCardSummary({
   knownPurchaseValueCount: number;
   purchaseValuePence: number;
   soldQuantity: number;
+  selectedCopy: {
+    costPence: number | null;
+    onViewSource?: () => void;
+    record: Pick<RecordEntry, "date" | "source" | "title"> | null;
+  } | null;
   target: WishlistTarget;
   unknownPurchaseValueCount: number;
 }) {
@@ -1266,28 +1283,20 @@ function InventoryCardSummary({
           <div className="rounded-lg bg-zinc-50 px-2 py-2"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Sold</dt><dd className="mt-0.5 text-lg font-black tabular-nums">{soldQuantity}</dd></div>
         </dl>
       </div>
-      <details className="border-t border-zinc-200 bg-zinc-50">
+      <details className="group border-t border-zinc-200 bg-zinc-50">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-bold text-zinc-700 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-inset [&::-webkit-details-marker]:hidden sm:px-5">
           <span>Card details</span>
-          <span className="text-xs font-semibold text-zinc-500">Show details</span>
+          <span className="text-xs font-semibold text-zinc-500"><span className="group-open:hidden">Show details</span><span className="hidden group-open:inline">Hide details</span></span>
         </summary>
-        <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-3 sm:px-5">
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity</dt><dd className="mt-1 font-bold text-zinc-800">{target.rarity}</dd></div>
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition</dt><dd className="mt-1 font-bold text-zinc-800">{target.edition}</dd></div>
-          {libraryStatus.ownedQuantity ? <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{ownedCardTotalLabel(libraryStatus.ownedQuantity)}</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div> : <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Owned cost</dt><dd className="mt-1 font-bold text-zinc-800">No owned Copies</dd></div>}
+        <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-[minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,1.4fr)] sm:gap-0 sm:divide-x sm:divide-zinc-200 sm:px-5">
+          {libraryStatus.ownedQuantity ? <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4 sm:first:pl-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{ownedCardTotalLabel(libraryStatus.ownedQuantity)}</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div> : <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4 sm:first:pl-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Owned cost</dt><dd className="mt-1 font-bold text-zinc-800">No owned Copies</dd></div>}
+          <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">This Copy’s cost:</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{selectedCopy ? selectedCopy.costPence === null ? "Cost unknown" : formatCurrency(selectedCopy.costPence) : "No Copy selected"}</dd><dd className="mt-0.5 text-xs font-medium text-zinc-500">The allocated share from its source Record.</dd></div>
+          <div className="sm:min-w-0 sm:px-4 sm:last:pr-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Acquired from</dt><dd className="mt-1 font-bold text-zinc-800 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-3"><span className="min-w-0">{selectedCopy?.record?.title ?? "Source unavailable"}{selectedCopy?.record ? <span className="mt-0.5 block text-xs font-medium text-zinc-500">{selectedCopy.record.source} · {formatDate(selectedCopy.record.date)}</span> : null}</span>{selectedCopy?.onViewSource ? <button className="mt-1 block min-h-11 shrink-0 text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] sm:mt-0" onClick={selectedCopy.onViewSource} type="button">View source Record</button> : null}</dd></div>
         </dl>
       </details>
     </section>
   );
 }
-
-type PhysicalCopyPickerOption = {
-  detail: string;
-  displayText: string;
-  id: string;
-  label: string;
-  searchText: string;
-};
 
 function PhysicalCopyCombobox({
   onSelect,
@@ -1295,78 +1304,12 @@ function PhysicalCopyCombobox({
   selectedCopyId,
 }: {
   onSelect: (copyId: string) => void;
-  options: PhysicalCopyPickerOption[];
+  options: SearchablePicklistOption[];
   selectedCopyId: string;
 }) {
-  const selectedOption = options.find((option) => option.id === selectedCopyId) ?? options[0];
-  const selectedOptionIndex = Math.max(options.findIndex((option) => option.id === selectedCopyId), 0);
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState(selectedOption?.displayText ?? "");
-  const [activeIndex, setActiveIndex] = useState(selectedOptionIndex);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const normalizedQuery = query.trim().toLocaleLowerCase("en-GB");
-  const selectedText = selectedOption?.displayText.toLocaleLowerCase("en-GB") ?? "";
-  const visibleOptions = !normalizedQuery || normalizedQuery === selectedText
-    ? options
-    : options.filter((option) => option.searchText.includes(normalizedQuery));
-  const activeOption = visibleOptions[Math.min(activeIndex, Math.max(visibleOptions.length - 1, 0))];
-
-  function selectOption(option: PhysicalCopyPickerOption) {
-    setQuery(option.displayText);
-    setIsOpen(false);
-    onSelect(option.id);
-  }
-
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setIsOpen(true);
-      setActiveIndex((current) => Math.min(current + 1, Math.max(visibleOptions.length - 1, 0)));
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setIsOpen(true);
-      setActiveIndex((current) => Math.max(current - 1, 0));
-      return;
-    }
-    if (event.key === "Enter" && isOpen && activeOption) {
-      event.preventDefault();
-      selectOption(activeOption);
-      return;
-    }
-    if (event.key === "Escape") {
-      setQuery(selectedOption?.displayText ?? "");
-      setIsOpen(false);
-    }
-  }
-
   return (
-    <div className="relative max-w-xl" onBlur={(event) => {
-      if (containerRef.current?.contains(event.relatedTarget)) return;
-      setQuery(selectedOption?.displayText ?? "");
-      setIsOpen(false);
-    }} ref={containerRef}>
-      <label className="text-sm font-bold text-zinc-800" htmlFor="physical-copy-combobox">Physical Copy</label>
-      <div className="relative mt-1.5">
-        <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-        <input aria-activedescendant={isOpen && activeOption ? `physical-copy-option-${activeOption.id}` : undefined} aria-autocomplete="list" aria-controls="physical-copy-options" aria-expanded={isOpen} className="min-h-11 w-full rounded-md border border-zinc-300 bg-white py-2 pl-9 pr-10 text-base font-semibold text-zinc-900 transition placeholder:text-zinc-400 hover:border-zinc-400 focus-visible:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d]/20" id="physical-copy-combobox" onChange={(event) => { setQuery(event.currentTarget.value); setActiveIndex(0); setIsOpen(true); }} onClick={(event) => { event.currentTarget.select(); setActiveIndex(selectedOptionIndex); setIsOpen(true); }} onFocus={(event) => { event.currentTarget.select(); setActiveIndex(selectedOptionIndex); setIsOpen(true); }} onKeyDown={handleKeyDown} placeholder="Search by Copy number, set, or sticker" role="combobox" value={query} />
-        <ChevronDown aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`} />
-      </div>
-      {isOpen ? (
-        <div aria-label="Physical Copies" className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg" id="physical-copy-options" role="listbox">
-          {visibleOptions.length ? visibleOptions.map((option, index) => {
-            const isSelected = option.id === selectedCopyId;
-            const isActive = option.id === activeOption?.id;
-            return (
-              <button aria-selected={isSelected} className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm font-bold transition-colors ${isActive ? "bg-zinc-100" : "hover:bg-zinc-50"} ${isSelected ? "text-[#8a1f2d]" : "text-zinc-900"}`} id={`physical-copy-option-${option.id}`} key={option.id} onClick={() => selectOption(option)} onFocus={() => setActiveIndex(index)} role="option" type="button">
-                <span className="min-w-0 flex-1 truncate">{option.label} · {option.detail}</span>
-                {isSelected ? <Check aria-hidden="true" className="size-4 shrink-0" /> : null}
-              </button>
-            );
-          }) : <p className="px-3 py-4 text-sm font-medium text-zinc-500">No Copies match that search.</p>}
-        </div>
-      ) : null}
+    <div className="max-w-xl">
+      <SearchablePicklist emptyMessage="No Copies match that search." label="Physical Copy" onSelect={onSelect} options={options} placeholder="Search by Copy number, set, or sticker" resultsLabel="Physical Copies" selectedId={selectedCopyId} />
     </div>
   );
 }
@@ -1388,6 +1331,7 @@ function InventoryCardDetailContent({
   const [confirmTargetRemoval, setConfirmTargetRemoval] = useState(false);
   const [deletingTarget, setDeletingTarget] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<InventoryCardSection>("details");
   const target = source.snapshot.targets.find((item) => item.id === targetId) ?? null;
   const sourceGroups = target ? inventoryCopySourceGroups(source.snapshot, target) : [];
   const copies = orderCopies(sourceGroups.flatMap((group) => group.copies.map(({ copy }) => copy)));
@@ -1397,6 +1341,15 @@ function InventoryCardDetailContent({
     ? requestedCopyId
     : copies[0]?.id ?? null;
   const selectedDetail = copyDetails.find((item) => item.copy.id === effectiveCopyId) ?? null;
+  const selectedVariantCopyIds = selectedDetail
+    ? copyDetails.flatMap((item) => (
+      item.printing.id === selectedDetail.printing.id
+        && item.copy.condition === selectedDetail.copy.condition
+        && item.copy.status !== "void"
+        ? [item.copy.id]
+        : []
+    ))
+    : [];
   const copyExposureByCopyId = new Map(source.snapshot.copyEbayExposures.map((exposure) => [exposure.copyId, exposure]));
   const copyPickerOptions = copyDetails.map(({ copy, printing }) => {
     const copyNumber = copies.findIndex((item) => item.id === copy.id) + 1;
@@ -1498,13 +1451,55 @@ function InventoryCardDetailContent({
     setMessage(dataSourceMessage(result, "Copy details saved."));
   }
 
+  function navigateInventorySections(event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % inventoryCardSections.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + inventoryCardSections.length) % inventoryCardSections.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = inventoryCardSections.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextSection = inventoryCardSections[nextIndex];
+    setActiveSection(nextSection.value);
+    window.requestAnimationFrame(() => document.getElementById(`inventory-card-section-tab-${nextSection.value}`)?.focus());
+  }
+
   return (
     <div className="grid gap-5 sm:gap-6">
       <nav aria-label="Inventory breadcrumb">
         <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft aria-hidden="true" className="size-4" /> Back to inventory</Link>
       </nav>
 
-      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} purchaseValuePence={purchaseValuePence} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
+      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} purchaseValuePence={purchaseValuePence} selectedCopy={selectedDetail ? { costPence: selectedDetail.copy.allocationPence, onViewSource: selectedDetail.group.record ? () => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id }) : undefined, record: selectedDetail.group.record } : null} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
+
+      {selectedDetail ? (
+        <nav aria-label="Card inventory sections" className="rounded-xl border border-zinc-300 bg-zinc-100 p-0.5 shadow-sm">
+          <div aria-orientation="horizontal" className="grid grid-cols-3 gap-1" role="tablist">
+            {inventoryCardSections.map((section, index) => {
+              const Icon = section.icon;
+              const active = activeSection === section.value;
+              return (
+                <button
+                  aria-controls={`inventory-card-section-panel-${section.value}`}
+                  aria-selected={active}
+                  className={`flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-1 rounded-lg px-1 py-1 text-center text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-100 sm:gap-2 sm:px-3 sm:text-sm ${active ? "bg-white text-[#8a1f2d] shadow-sm" : "text-zinc-600 hover:bg-white/70 hover:text-zinc-950"}`}
+                  id={`inventory-card-section-tab-${section.value}`}
+                  key={section.value}
+                  onClick={() => setActiveSection(section.value)}
+                  onKeyDown={(event) => navigateInventorySections(event, index)}
+                  role="tab"
+                  tabIndex={active ? 0 : -1}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" className="size-4 shrink-0" />
+                  <span className="min-w-0 leading-tight">{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      ) : null}
 
       <div aria-describedby="inventory-card-description" className="grid min-w-0 gap-4 sm:gap-5">
           {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
@@ -1529,12 +1524,12 @@ function InventoryCardDetailContent({
             </section>
           ) : null}
           <section aria-labelledby="physical-copies-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
-            <header className="flex flex-col gap-2 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
+            <header className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
               <div>
                 <h3 className="text-lg font-black" id="physical-copies-title">Physical copies</h3>
-                <p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Manage condition, photos, source, and selling details for one Copy at a time.</p>
+                <p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Manage each Copy, or create one listing plan for the selected matching variant.</p>
               </div>
-              <span className="shrink-0 text-sm font-bold text-zinc-500">{copies.length} {copies.length === 1 ? "Copy" : "Copies"}</span>
+              <div className="flex flex-wrap items-center gap-2"><span className="shrink-0 text-sm font-bold text-zinc-500">{copies.length} {copies.length === 1 ? "Copy" : "Copies"}</span>{selectedDetail ? <Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={linkedListingHref(target.id, selectedDetail.printing.id, selectedDetail.copy.condition)}>Create listing</Link> : null}</div>
             </header>
 
             {selectedDetail ? (
@@ -1551,7 +1546,6 @@ function InventoryCardDetailContent({
                       {selectedDetail.copy.stickerNumber || selectedDetail.copy.location ? <p className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-zinc-700">{selectedDetail.copy.stickerNumber ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">Sticker {selectedDetail.copy.stickerNumber}</span> : null}{selectedDetail.copy.location ? <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1">{selectedDetail.copy.location}</span> : null}</p> : null}
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-                      {selectedExposure ? <EbayListingAction copy={selectedDetail.copy} enabled={source.mode === "live"} exposure={selectedExposure} printing={selectedDetail.printing} target={target} /> : null}
                       {selectedDetail.copy.status === "available" && selectedDetail.group.record?.status === "active" ? selectedCopyRemoval.available ? (
                         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-rose-300 px-3 text-sm font-bold text-rose-800 transition hover:bg-rose-50 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 sm:w-auto" disabled={Boolean(removingCopyId)} onClick={() => setPendingRemoval({ copyId: selectedDetail.copy.id })} type="button"><Trash2 aria-hidden="true" className="size-4" />Remove Copy</button>
                       ) : <UnavailableAction icon={Trash2} label="Remove Copy" reason={selectedCopyRemoval.reason ?? "This Copy cannot be removed."} /> : null}
@@ -1560,7 +1554,7 @@ function InventoryCardDetailContent({
 
                   {selectedExposure ? <EbayCopyExposure exposure={selectedExposure} /> : null}
 
-                  <form aria-labelledby={`copy-details-title-${selectedDetail.copy.id}`} className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }}>
+                  <form aria-labelledby="inventory-card-section-tab-details" className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" hidden={activeSection !== "details"} id="inventory-card-section-panel-details" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }} role="tabpanel">
                     <div><h5 className="font-black" id={`copy-details-title-${selectedDetail.copy.id}`}>Copy details</h5><p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Record how this Copy looks and where to find it in your physical collection.</p></div>
                     <div className="grid min-w-0 gap-4">
                       <label className="grid min-w-0 content-start gap-1.5 text-sm font-bold">Condition<select className="min-h-11 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={isCardCondition(selectedDetail.copy.condition) ? selectedDetail.copy.condition : ""} name="condition" required>{!isCardCondition(selectedDetail.copy.condition) ? <option disabled value="">Choose a condition (currently {selectedDetail.copy.condition})</option> : null}{cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><span className="text-xs font-medium leading-5 text-zinc-500">Uses the same grading choices as the eBay listing form.</span></label>
@@ -1571,8 +1565,8 @@ function InventoryCardDetailContent({
                     <button className="min-h-11 w-full rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#741a26] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto sm:justify-self-start" disabled={savingCopy} type="submit">{savingCopy ? "Saving…" : "Save copy details"}</button>
                   </form>
 
-                  <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} />
-                  <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p><p className="mt-2 text-sm font-bold text-zinc-800">This Copy’s cost: <span className="tabular-nums">{selectedDetail.copy.allocationPence === null ? "unknown" : formatCurrency(selectedDetail.copy.allocationPence)}</span></p><p className="mt-1 text-xs font-medium leading-5 text-zinc-500">This is this physical Copy’s allocated share from its source Record, not the total for sibling Copies.</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
+                  <div aria-labelledby="inventory-card-section-tab-listing-photos" hidden={activeSection !== "listing-photos"} id="inventory-card-section-panel-listing-photos" role="tabpanel">{isCardCondition(selectedDetail.copy.condition) ? <InventoryListingPhotoSets canManage={source.mode === "live"} cardName={target.name} condition={selectedDetail.copy.condition} edition={target.edition} printingId={selectedDetail.printing.id} sourceCopyIds={selectedVariantCopyIds} /> : <p className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-950">Choose a valid condition in Copy details before managing listing photos.</p>}</div>
+                  <div aria-labelledby="inventory-card-section-tab-copy-photos" hidden={activeSection !== "copy-photos"} id="inventory-card-section-panel-copy-photos" role="tabpanel"><CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} /></div>
                 </article>
               </div>
             ) : (

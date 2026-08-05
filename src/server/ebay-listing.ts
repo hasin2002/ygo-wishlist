@@ -4,6 +4,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   cardCopies,
+  cardListingPhotoImages,
   cardPrintings,
   cardTargets,
   ebayListingMembers,
@@ -34,6 +35,7 @@ import {
 } from "@/server/ebay-listing-images";
 import { parseApprovedRemoteImageUrl } from "@/server/remote-images";
 import { readCardInventoryImage } from "@/server/card-inventory-images";
+import { readCardListingPhoto } from "@/server/card-listing-photo-images";
 import { getEbaySellerAccessToken } from "@/server/ebay-seller";
 import { CopySelectionError, lockReconciledCopies } from "@/server/records/copy-selection";
 import {
@@ -191,6 +193,9 @@ async function tradingCall(ownerId: string, callName: "AddItem" | "VerifyAddItem
 export function listingItemXml(
   details: EbayListingDetails | EbayLotListingDetails | EbayQuantityListingDetails,
   composition: "bundle" | "individual" | "quantity" = "individual",
+  publicationUuid = crypto.randomUUID().replaceAll("-", "").toUpperCase(),
+  quantityOverride?: number,
+  lotSizeOverride?: number,
 ) {
   const isLot = composition === "bundle";
   const isQuantity = composition === "quantity";
@@ -217,11 +222,15 @@ export function listingItemXml(
   const memberCount = "copyIds" in details ? details.copyIds.length : 1;
   const lotContract = isLot ? ebayLotXmlContract(memberCount) : null;
   const quantityContract = isQuantity ? ebayQuantityXmlContract(memberCount) : null;
-  const lotSize = lotContract?.lotSizeXml ?? "";
+  const quantityXml = quantityOverride === undefined
+    ? lotContract?.quantityXml ?? quantityContract?.quantityXml ?? "<Quantity>1</Quantity>"
+    : `<Quantity>${Math.max(1, Math.trunc(quantityOverride))}</Quantity>`;
+  const lotSize = lotContract?.lotSizeXml
+    ?? (lotSizeOverride && lotSizeOverride > 1 ? `<LotSize>${Math.trunc(lotSizeOverride)}</LotSize>` : "");
   const condition = isLot
     ? lotContract!.conditionXml
     : `<ConditionDescriptors><ConditionDescriptor><Name>40001</Name><Value>${details.cardConditionDescriptorValueId}</Value></ConditionDescriptor></ConditionDescriptors><ConditionID>4000</ConditionID>`;
-  return `<Item><Title>${ebayXmlEscape(details.title)}</Title><Description>${descriptionHtml(details.description)}</Description><PrimaryCategory><CategoryID>${ebayXmlEscape(details.categoryId)}</CategoryID></PrimaryCategory>${condition}<ItemSpecifics>${specifics}</ItemSpecifics><StartPrice currencyID="GBP">${formatPrice(details.pricePence)}</StartPrice><CategoryMappingAllowed>${lotContract ? String(lotContract.categoryMappingAllowed) : "true"}</CategoryMappingAllowed><Country>GB</Country><Currency>GBP</Currency><DispatchTimeMax>${details.dispatchTimeMax}</DispatchTimeMax><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType>${location}<PostalCode>${ebayXmlEscape(details.postalCode)}</PostalCode><PictureDetails>${pictures}</PictureDetails>${lotContract?.quantityXml ?? quantityContract?.quantityXml ?? "<Quantity>1</Quantity>"}${lotSize}<ReturnPolicy><ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption></ReturnPolicy><ShippingDetails><ShippingType>Flat</ShippingType><ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority><ShippingService>${ebayXmlEscape(details.shippingService)}</ShippingService><ShippingServiceCost currencyID="GBP">${formatPrice(details.shippingCostPence)}</ShippingServiceCost><FreeShipping>${details.shippingCostPence === 0 ? "true" : "false"}</FreeShipping></ShippingServiceOptions></ShippingDetails><Site>UK</Site><UUID>${crypto.randomUUID().replaceAll("-", "").toUpperCase()}</UUID></Item>`;
+  return `<Item><Title>${ebayXmlEscape(details.title)}</Title><Description>${descriptionHtml(details.description)}</Description><PrimaryCategory><CategoryID>${ebayXmlEscape(details.categoryId)}</CategoryID></PrimaryCategory>${condition}<ItemSpecifics>${specifics}</ItemSpecifics><StartPrice currencyID="GBP">${formatPrice(details.pricePence)}</StartPrice><CategoryMappingAllowed>${lotContract ? String(lotContract.categoryMappingAllowed) : "true"}</CategoryMappingAllowed><Country>GB</Country><Currency>GBP</Currency><DispatchTimeMax>${details.dispatchTimeMax}</DispatchTimeMax><ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType>${location}<PostalCode>${ebayXmlEscape(details.postalCode)}</PostalCode><PictureDetails>${pictures}</PictureDetails>${quantityXml}${lotSize}<ReturnPolicy><ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption></ReturnPolicy><ShippingDetails><ShippingType>Flat</ShippingType><ShippingServiceOptions><ShippingServicePriority>1</ShippingServicePriority><ShippingService>${ebayXmlEscape(details.shippingService)}</ShippingService><ShippingServiceCost currencyID="GBP">${formatPrice(details.shippingCostPence)}</ShippingServiceCost><FreeShipping>${details.shippingCostPence === 0 ? "true" : "false"}</FreeShipping></ShippingServiceOptions></ShippingDetails><Site>UK</Site><UUID>${ebayXmlEscape(publicationUuid)}</UUID></Item>`;
 }
 
 async function loadOwnedCopy(ownerId: string, copyId: string) {
@@ -984,6 +993,38 @@ export async function archiveInventoryImageDraft(
       error instanceof Error
         ? `S3 could not prepare this saved photo: ${error.message}`
         : "S3 could not prepare this saved photo.",
+    );
+  }
+}
+
+export async function archiveListingPhotoSetImageDraft(
+  ownerId: string,
+  copyId: string,
+  listingPhotoKey: string,
+) {
+  await loadOwnedCopy(ownerId, copyId);
+  const [indexed] = await db.select({ objectKey: cardListingPhotoImages.objectKey })
+    .from(cardListingPhotoImages)
+    .where(and(
+      eq(cardListingPhotoImages.ownerId, ownerId),
+      eq(cardListingPhotoImages.objectKey, listingPhotoKey),
+    )).limit(1);
+  if (!indexed) throw new EbayListingError("That reusable listing photo could not be found.");
+
+  try {
+    const image = await readCardListingPhoto(ownerId, listingPhotoKey);
+    const archiveKey = await storeListingImageDraft({
+      bytes: image.bytes,
+      contentType: image.contentType,
+      copyId,
+      ownerId,
+    });
+    return { archiveKey };
+  } catch (error) {
+    throw new EbayListingError(
+      error instanceof Error
+        ? `S3 could not prepare this reusable photo: ${error.message}`
+        : "S3 could not prepare this reusable photo.",
     );
   }
 }

@@ -1,10 +1,12 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   ebayConnections,
+  ebayListingFamilies,
+  ebayListingFamilyOffers,
   ebayListings,
   ebayOrderLines,
   recordsActions,
@@ -50,9 +52,19 @@ async function authorizationProblem(ownerId: string, trackedListingCount: number
 }
 
 async function deriveCurrentActions(ownerId: string, snapshot: RecordsSnapshot) {
-  const [listings, orderLines] = await Promise.all([
+  const [listings, orderLines, linkedFailures] = await Promise.all([
     db.select().from(ebayListings).where(eq(ebayListings.ownerId, ownerId)),
     db.select().from(ebayOrderLines).where(eq(ebayOrderLines.ownerId, ownerId)),
+    db.select({ family: ebayListingFamilies, offer: ebayListingFamilyOffers })
+      .from(ebayListingFamilyOffers)
+      .innerJoin(ebayListingFamilies, and(
+        eq(ebayListingFamilyOffers.familyId, ebayListingFamilies.id),
+        eq(ebayListingFamilyOffers.ownerId, ebayListingFamilies.ownerId),
+      ))
+      .where(and(
+        eq(ebayListingFamilyOffers.ownerId, ownerId),
+        inArray(ebayListingFamilyOffers.state, ["failed", "uncertain", "publishing"]),
+      )),
   ]);
   const ebayActions = deriveEbayRecordsActions({
     authorizationProblem: await authorizationProblem(ownerId, listings.length),
@@ -60,8 +72,43 @@ async function deriveCurrentActions(ownerId: string, snapshot: RecordsSnapshot) 
     orderLines,
     snapshot,
   });
+  const failuresByFamily = new Map<string, typeof linkedFailures>();
+  for (const failure of linkedFailures) {
+    failuresByFamily.set(failure.family.id, [...(failuresByFamily.get(failure.family.id) ?? []), failure]);
+  }
+  const linkedActions: RecordsAction[] = Array.from(failuresByFamily.values(), (failures) => {
+    const [{ family }] = failures;
+    const offers = failures.map(({ offer }) => offer).sort((left, right) => left.kind.localeCompare(right.kind));
+    const listingIds = offers.flatMap((offer) => offer.listingId ? [offer.listingId] : []);
+    return {
+      id: `required:linked-publication:${family.id}`,
+      dedupeKey: `required:linked-publication:${family.id}`,
+      kind: "listing_sync",
+      category: "required",
+      area: "listings",
+      severity: "urgent",
+      status: "open",
+      title: "Linked offer publication needs attention",
+      detail: offers.length === 1
+        ? offers[0]!.lastError ?? "One linked eBay operation is unresolved. Retry only this saved plan; do not create a replacement listing."
+        : `${offers.length} linked eBay operations are unresolved. Retry only this saved plan; do not create replacement listings.`,
+      references: {
+        targetId: family.targetId,
+        printingId: family.printingId,
+        copyIds: family.selectedCopyIds,
+        listingId: listingIds[0],
+        listingIds,
+        familyKey: family.id,
+      },
+      recovery: ["refresh_status"],
+      sourceFingerprint: JSON.stringify({
+        familyId: family.id,
+        offers: offers.map((offer) => ({ id: offer.id, state: offer.state, error: offer.lastError })),
+      }),
+    };
+  });
   return [...new Map(
-    [...deriveSnapshotRecordsActions(snapshot), ...ebayActions]
+    [...deriveSnapshotRecordsActions(snapshot), ...ebayActions, ...linkedActions]
       .map((action) => [action.dedupeKey, action]),
   ).values()];
 }

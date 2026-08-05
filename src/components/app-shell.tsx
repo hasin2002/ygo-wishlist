@@ -22,6 +22,7 @@ import {
   createContext,
   useContext,
   useCallback,
+  useEffect,
   useId,
   useState,
   type CSSProperties,
@@ -89,6 +90,13 @@ function isActive(pathname: string, href: string) {
 
 function isPlainNavigation(event: MouseEvent<HTMLAnchorElement>) {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+function blurFocusedNumberInputOnWheel(event: WheelEvent) {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && target.type === "number" && document.activeElement === target) {
+    target.blur();
+  }
 }
 
 function NavPendingIndicator({ active }: { active: boolean }) {
@@ -301,6 +309,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     isOpen: mobileMenuOpen,
     onClose: closeMobileMenu,
   });
+
+  useEffect(() => {
+    document.addEventListener("wheel", blurFocusedNumberInputOnWheel, { capture: true, passive: true });
+    return () => document.removeEventListener("wheel", blurFocusedNumberInputOnWheel, true);
+  }, []);
 
   async function signOut() {
     await authClient.signOut();

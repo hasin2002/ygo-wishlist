@@ -18,6 +18,12 @@ export const ebayCompositionCompositeTargets = [
     columns: ["owner_id", "id"],
   },
   {
+    table: "ebay_listing_families",
+    name: "ebay_listing_families_owner_id_unique",
+    backingName: "ebay_listing_families_owner_id_fk_key",
+    columns: ["owner_id", "id"],
+  },
+  {
     table: "ebay_listing_members",
     name: "ebay_listing_members_owner_listing_id_copy_unique",
     backingName: "ebay_listing_members_owner_listing_id_copy_fk_key",

@@ -148,7 +148,7 @@ export function StepPanel({ children, step }: { children: ReactNode; step: numbe
     panelRef.current?.focus({ preventScroll: true });
   }, [step]);
 
-  return <div className="records-step-enter outline-none" key={step} ref={panelRef} tabIndex={-1}>{children}</div>;
+  return <div className="records-step-enter relative outline-none has-[input[role=combobox][aria-expanded=true]]:z-30" key={step} ref={panelRef} tabIndex={-1}>{children}</div>;
 }
 
 export function WizardActions({
@@ -158,6 +158,7 @@ export function WizardActions({
   onBack,
   onConfirm,
   onNext,
+  nextLabel = "Continue",
   pending = false,
   pendingLabel = "Saving…",
   sticky = true,
@@ -170,6 +171,7 @@ export function WizardActions({
   onBack: () => void;
   onConfirm?: () => void;
   onNext: () => void;
+  nextLabel?: string;
   pending?: boolean;
   pendingLabel?: string;
   sticky?: boolean;
@@ -177,10 +179,10 @@ export function WizardActions({
   totalSteps: number;
 }) {
   return (
-    <div className={`z-20 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 rounded-lg border border-zinc-300 bg-white p-3 sm:flex sm:items-center sm:justify-between ${sticky ? "shadow-lg sm:sticky sm:bottom-3" : ""}`}>
+    <div className={`z-20 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 rounded-lg border border-zinc-300 bg-white p-3 sm:flex sm:items-center sm:justify-between ${sticky ? "sticky bottom-[max(.75rem,env(safe-area-inset-bottom))] shadow-lg sm:static sm:shadow-sm" : ""}`}>
       <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 hover:border-zinc-950 disabled:opacity-40 sm:w-auto sm:px-4" disabled={step === 1 || pending} onClick={onBack} type="button"><ArrowLeft className="size-4" /> Back</button>
       {step < totalSteps ? (
-        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5" disabled={nextDisabled || pending} onClick={onNext} type="button">Continue <ArrowRight className="size-4" /></button>
+        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5" disabled={nextDisabled || pending} onClick={onNext} type="button">{pending ? pendingLabel : nextLabel} {pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <ArrowRight className="size-4" />}</button>
       ) : (
         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={confirmDisabled || pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? pendingLabel : finalLabel}</button>
       )}

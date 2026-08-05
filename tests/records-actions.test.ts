@@ -237,6 +237,7 @@ test("durable reconciliation preserves unchanged dismissals, resolves stale rows
 
 test("Actions workspace keeps safe recovery controls and a human-facing paginated work queue", () => {
   const component = fs.readFileSync("src/components/records/records-actions-workspace.tsx", "utf8");
+  const cardImageDialog = fs.readFileSync("src/components/records/card-image-preview-dialog.tsx", "utf8");
   assert.match(component, /Find an action/);
   assert.match(component, /aria-label="Filter actions by type"/);
   assert.match(component, /<option value="all">All actions \(\{actions\.length\}\)<\/option>/);
@@ -263,9 +264,9 @@ test("Actions workspace keeps safe recovery controls and a human-facing paginate
   assert.match(component, /md:grid-cols-\[auto_minmax\(0,1fr\)\] md:items-stretch/);
   assert.match(component, /hidden aspect-\[59\/86\][\s\S]*md:row-span-2 md:block md:h-full/);
   assert.match(component, /View card image for \$\{context\.subject\}/);
-  assert.match(component, /function ActionCardImageDialog/);
-  assert.match(component, /useViewportOverlay<HTMLElement>/);
-  assert.match(component, /createPortal\([\s\S]*document\.body/);
+  assert.match(component, /CardImagePreviewDialog/);
+  assert.match(cardImageDialog, /useViewportOverlay<HTMLElement>/);
+  assert.match(cardImageDialog, /createPortal\([\s\S]*document\.body/);
   assert.match(component, /grid grid-cols-1 gap-3[\s\S]*sm:grid-cols-2/);
   assert.match(component, /src=\{`\/api\/image-proxy\?url=\$\{encodeURIComponent\(context\.cardImageUrl\)\}`\}/);
   assert.match(component, /required \? "Resolve action" : "Review"/);

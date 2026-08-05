@@ -7,6 +7,7 @@ const copySelectionPickerSource = readFileSync(new URL("../src/components/record
 const exposureSource = readFileSync(new URL("../src/components/records/ebay-copy-exposure.tsx", import.meta.url), "utf8");
 const listingActionSource = readFileSync(new URL("../src/components/records/ebay-listing-action.tsx", import.meta.url), "utf8");
 const recordsAppSource = readFileSync(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8");
+const searchablePicklistSource = readFileSync(new URL("../src/components/records/searchable-picklist.tsx", import.meta.url), "utf8");
 const unavailableActionSource = readFileSync(new URL("../src/components/unavailable-action.tsx", import.meta.url), "utf8");
 const cardImagesSource = readFileSync(new URL("../src/components/records/card-inventory-images.tsx", import.meta.url), "utf8");
 const photoManagerSource = readFileSync(new URL("../src/components/records/card-photo-manager.tsx", import.meta.url), "utf8");
@@ -60,22 +61,47 @@ test("Copy actions stack at full width on mobile and keep the help control insid
 
 test("the Copy picker is one searchable, keyboard-accessible combobox", () => {
   assert.match(recordsAppSource, /function PhysicalCopyCombobox/);
-  assert.match(recordsAppSource, /role="combobox"/);
-  assert.match(recordsAppSource, /role="listbox"/);
-  assert.match(recordsAppSource, /role="option"/);
-  assert.match(recordsAppSource, /aria-activedescendant/);
+  assert.match(recordsAppSource, /<SearchablePicklist/);
+  assert.match(searchablePicklistSource, /role="combobox"/);
+  assert.match(searchablePicklistSource, /role="listbox"/);
+  assert.match(searchablePicklistSource, /role="option"/);
+  assert.match(searchablePicklistSource, /aria-activedescendant/);
   assert.match(recordsAppSource, /placeholder="Search by Copy number, set, or sticker"/);
   assert.match(recordsAppSource, /const copyNumber = copies\.findIndex\(\(item\) => item\.id === copy\.id\) \+ 1/);
   assert.match(recordsAppSource, /searchText: \[`Copy \$\{copyNumber\}`, copyShortReference\(copy\.id\), printing\.setCode, copy\.stickerNumber\]/);
-  assert.match(recordsAppSource, /min-w-0 flex-1 truncate/);
+  assert.match(searchablePicklistSource, /min-w-0 flex-1/);
+  assert.match(searchablePicklistSource, /block truncate text-sm font-bold/);
   assert.doesNotMatch(recordsAppSource, /Find a Copy/);
   assert.doesNotMatch(recordsAppSource, /<select aria-label="Physical Copy"/);
   assert.doesNotMatch(recordsAppSource, /PhysicalCopyPickerDialog/);
 });
 
+test("card inventory uses an accessible section bar without discarding hidden form state", () => {
+  assert.match(recordsAppSource, /const inventoryCardSections = \[/);
+  assert.match(recordsAppSource, /Copy details[\s\S]*Card Copy photos[\s\S]*Listing photos/);
+  assert.doesNotMatch(recordsAppSource, /label: "Acquisition source"/);
+  assert.match(recordsAppSource, /aria-orientation="horizontal"[\s\S]*role="tablist"/);
+  assert.match(recordsAppSource, /aria-controls=\{`inventory-card-section-panel-\$\{section\.value\}`\}/);
+  assert.match(recordsAppSource, /aria-selected=\{active\}/);
+  assert.match(recordsAppSource, /event\.key === "ArrowRight"[\s\S]*event\.key === "ArrowLeft"[\s\S]*event\.key === "Home"[\s\S]*event\.key === "End"/);
+  assert.match(recordsAppSource, /hidden=\{activeSection !== "details"\}/);
+  assert.match(recordsAppSource, /hidden=\{activeSection !== "listing-photos"\}/);
+  assert.match(recordsAppSource, /hidden=\{activeSection !== "copy-photos"\}/);
+  assert.match(recordsAppSource, /This Copy’s cost:[\s\S]*Acquired from/);
+  assert.doesNotMatch(recordsAppSource, /<dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity<\/dt>/);
+  assert.doesNotMatch(recordsAppSource, /<dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition<\/dt>/);
+});
+
 test("preview Copy photos explain the limitation and retain phone-camera capture in live records", () => {
   assert.match(cardImagesSource, /if \(isPreview\)/);
   assert.match(cardImagesSource, /This preview does not store photos/);
+  assert.match(cardImagesSource, /<details className="group overflow-hidden rounded-xl/);
+  assert.match(cardImagesSource, /const \[sectionOpen, setSectionOpen\] = useState\(true\)/);
+  assert.match(cardImagesSource, /onToggle=\{\(event\) => setSectionOpen\(event\.currentTarget\.open\)\} open=\{sectionOpen\}/);
+  assert.match(cardImagesSource, /Card Copy photos/);
+  assert.match(cardImagesSource, /group-open:rotate-180/);
+  assert.match(cardImagesSource, /headingDisplay="sr-only"/);
+  assert.match(cardImagesSource, /surface="plain"/);
   assert.match(photoManagerSource, /capture="environment"/);
   assert.match(photoManagerSource, /Take photo on phone/);
 });

@@ -195,7 +195,7 @@ npm run db:repair:ebay-composition:dry-run
 npm run db:push
 ```
 
-`db:push` prepares the six composite keys used by the eBay foreign keys before
+`db:push` prepares the seven composite keys used by the eBay foreign keys before
 Drizzle applies the remaining schema. It safely handles an empty database, the
 partial state left by PostgreSQL error `42830`, and an already-complete schema.
 The preparation runs in a transaction and stops without deleting data if an
