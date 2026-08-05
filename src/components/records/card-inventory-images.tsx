@@ -32,6 +32,7 @@ export function CardInventoryImages({
   const [reordering, setReordering] = useState(false);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [sectionOpen, setSectionOpen] = useState(true);
 
   const loadImages = useCallback(async () => {
     if (isPreview) return;
@@ -159,7 +160,7 @@ export function CardInventoryImages({
   }
 
   return (
-    <details className="group overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
+    <details className="group overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm" onToggle={(event) => setSectionOpen(event.currentTarget.open)} open={sectionOpen}>
       <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8a1f2d] [&::-webkit-details-marker]:hidden sm:px-5">
         <span className="flex min-w-0 items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-zinc-100 text-zinc-600"><Images aria-hidden="true" className="size-5" /></span>

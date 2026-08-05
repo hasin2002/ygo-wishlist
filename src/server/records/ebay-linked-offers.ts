@@ -411,8 +411,9 @@ function reviewResult(xml: string) {
     amount: Number(ebayXmlText(container, "Fee") ?? 0),
     currency: container.match(/<Fee currencyID="([^"]+)"/)?.[1] ?? "GBP",
     name: ebayXmlText(container, "Name"),
-  }));
-  return { errors, fees, readyToPublish: !errors.some((error) => error.severity === "Error") };
+  })).filter((fee) => Number.isFinite(fee.amount) && fee.amount !== 0);
+  const hasUpfrontFee = fees.some((fee) => fee.amount > 0);
+  return { errors, fees, readyToPublish: !hasUpfrontFee && !errors.some((error) => error.severity === "Error") };
 }
 
 function assertSafeRemoteChange(remote: Awaited<ReturnType<typeof getEbayRemoteListing>>) {

@@ -7,12 +7,14 @@ import {
   ArrowUpRight,
   Boxes,
   CalendarDays,
+  Camera,
   Check,
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   Clock3,
   History,
+  Images,
   PackageCheck,
   PackageOpen,
   Pencil,
@@ -29,7 +31,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   CardContentsEditor,
@@ -106,6 +108,14 @@ const inventoryTabs = [
 ] as const;
 
 type InventoryTab = (typeof inventoryTabs)[number]["value"];
+
+const inventoryCardSections = [
+  { icon: SlidersHorizontal, label: "Copy details", value: "details" },
+  { icon: Camera, label: "Card Copy photos", value: "copy-photos" },
+  { icon: Images, label: "Listing photos", value: "listing-photos" },
+] as const;
+
+type InventoryCardSection = (typeof inventoryCardSections)[number]["value"];
 
 function formatCurrency(pence: number) {
   return new Intl.NumberFormat("en-GB", {
@@ -1228,6 +1238,7 @@ function InventoryCardSummary({
   knownPurchaseValueCount,
   purchaseValuePence,
   soldQuantity,
+  selectedCopy,
   target,
   unknownPurchaseValueCount,
 }: {
@@ -1235,6 +1246,11 @@ function InventoryCardSummary({
   knownPurchaseValueCount: number;
   purchaseValuePence: number;
   soldQuantity: number;
+  selectedCopy: {
+    costPence: number | null;
+    onViewSource?: () => void;
+    record: Pick<RecordEntry, "date" | "source" | "title"> | null;
+  } | null;
   target: WishlistTarget;
   unknownPurchaseValueCount: number;
 }) {
@@ -1267,15 +1283,15 @@ function InventoryCardSummary({
           <div className="rounded-lg bg-zinc-50 px-2 py-2"><dt className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">Sold</dt><dd className="mt-0.5 text-lg font-black tabular-nums">{soldQuantity}</dd></div>
         </dl>
       </div>
-      <details className="border-t border-zinc-200 bg-zinc-50">
+      <details className="group border-t border-zinc-200 bg-zinc-50">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 text-sm font-bold text-zinc-700 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-inset [&::-webkit-details-marker]:hidden sm:px-5">
           <span>Card details</span>
-          <span className="text-xs font-semibold text-zinc-500">Show details</span>
+          <span className="text-xs font-semibold text-zinc-500"><span className="group-open:hidden">Show details</span><span className="hidden group-open:inline">Hide details</span></span>
         </summary>
-        <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-3 sm:px-5">
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity</dt><dd className="mt-1 font-bold text-zinc-800">{target.rarity}</dd></div>
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition</dt><dd className="mt-1 font-bold text-zinc-800">{target.edition}</dd></div>
-          {libraryStatus.ownedQuantity ? <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{ownedCardTotalLabel(libraryStatus.ownedQuantity)}</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div> : <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Owned cost</dt><dd className="mt-1 font-bold text-zinc-800">No owned Copies</dd></div>}
+        <dl className="grid gap-3 border-t border-zinc-200 px-4 py-3 text-sm sm:grid-cols-[minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,1.4fr)] sm:gap-0 sm:divide-x sm:divide-zinc-200 sm:px-5">
+          {libraryStatus.ownedQuantity ? <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4 sm:first:pl-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">{ownedCardTotalLabel(libraryStatus.ownedQuantity)}</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{purchaseValue}</dd></div> : <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4 sm:first:pl-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Owned cost</dt><dd className="mt-1 font-bold text-zinc-800">No owned Copies</dd></div>}
+          <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Selected Copy</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{selectedCopy ? selectedCopy.costPence === null ? "Cost unknown" : formatCurrency(selectedCopy.costPence) : "No Copy selected"}</dd></div>
+          <div className="sm:min-w-0 sm:px-4 sm:last:pr-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Acquired from</dt><dd className="mt-1 font-bold text-zinc-800 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-3"><span className="min-w-0">{selectedCopy?.record?.title ?? "Source unavailable"}{selectedCopy?.record ? <span className="mt-0.5 block text-xs font-medium text-zinc-500">{selectedCopy.record.source} · {formatDate(selectedCopy.record.date)}</span> : null}</span>{selectedCopy?.onViewSource ? <button className="mt-1 block min-h-11 shrink-0 text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] sm:mt-0" onClick={selectedCopy.onViewSource} type="button">View source Record</button> : null}</dd></div>
         </dl>
       </details>
     </section>
@@ -1315,6 +1331,7 @@ function InventoryCardDetailContent({
   const [confirmTargetRemoval, setConfirmTargetRemoval] = useState(false);
   const [deletingTarget, setDeletingTarget] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<InventoryCardSection>("details");
   const target = source.snapshot.targets.find((item) => item.id === targetId) ?? null;
   const sourceGroups = target ? inventoryCopySourceGroups(source.snapshot, target) : [];
   const copies = orderCopies(sourceGroups.flatMap((group) => group.copies.map(({ copy }) => copy)));
@@ -1434,13 +1451,55 @@ function InventoryCardDetailContent({
     setMessage(dataSourceMessage(result, "Copy details saved."));
   }
 
+  function navigateInventorySections(event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % inventoryCardSections.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + inventoryCardSections.length) % inventoryCardSections.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = inventoryCardSections.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextSection = inventoryCardSections[nextIndex];
+    setActiveSection(nextSection.value);
+    window.requestAnimationFrame(() => document.getElementById(`inventory-card-section-tab-${nextSection.value}`)?.focus());
+  }
+
   return (
     <div className="grid gap-5 sm:gap-6">
       <nav aria-label="Inventory breadcrumb">
         <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft aria-hidden="true" className="size-4" /> Back to inventory</Link>
       </nav>
 
-      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} purchaseValuePence={purchaseValuePence} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
+      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} purchaseValuePence={purchaseValuePence} selectedCopy={selectedDetail ? { costPence: selectedDetail.copy.allocationPence, onViewSource: selectedDetail.group.record ? () => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id }) : undefined, record: selectedDetail.group.record } : null} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
+
+      {selectedDetail ? (
+        <nav aria-label="Card inventory sections" className="rounded-xl border border-zinc-300 bg-zinc-100 p-0.5 shadow-sm">
+          <div aria-orientation="horizontal" className="grid grid-cols-3 gap-1" role="tablist">
+            {inventoryCardSections.map((section, index) => {
+              const Icon = section.icon;
+              const active = activeSection === section.value;
+              return (
+                <button
+                  aria-controls={`inventory-card-section-panel-${section.value}`}
+                  aria-selected={active}
+                  className={`flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-1 rounded-lg px-1 py-1 text-center text-[11px] font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-100 sm:gap-2 sm:px-3 sm:text-sm ${active ? "bg-white text-[#8a1f2d] shadow-sm" : "text-zinc-600 hover:bg-white/70 hover:text-zinc-950"}`}
+                  id={`inventory-card-section-tab-${section.value}`}
+                  key={section.value}
+                  onClick={() => setActiveSection(section.value)}
+                  onKeyDown={(event) => navigateInventorySections(event, index)}
+                  role="tab"
+                  tabIndex={active ? 0 : -1}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" className="size-4 shrink-0" />
+                  <span className="min-w-0 leading-tight">{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      ) : null}
 
       <div aria-describedby="inventory-card-description" className="grid min-w-0 gap-4 sm:gap-5">
           {message ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800" role="status">{message}</p> : null}
@@ -1495,7 +1554,7 @@ function InventoryCardDetailContent({
 
                   {selectedExposure ? <EbayCopyExposure exposure={selectedExposure} /> : null}
 
-                  <form aria-labelledby={`copy-details-title-${selectedDetail.copy.id}`} className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }}>
+                  <form aria-labelledby="inventory-card-section-tab-details" className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4" hidden={activeSection !== "details"} id="inventory-card-section-panel-details" key={`copy-form-${selectedDetail.copy.id}`} onSubmit={(event) => { event.preventDefault(); void saveCopyDetails(selectedDetail.copy.id, new FormData(event.currentTarget)); }} role="tabpanel">
                     <div><h5 className="font-black" id={`copy-details-title-${selectedDetail.copy.id}`}>Copy details</h5><p className="mt-1 text-sm font-medium leading-5 text-zinc-500">Record how this Copy looks and where to find it in your physical collection.</p></div>
                     <div className="grid min-w-0 gap-4">
                       <label className="grid min-w-0 content-start gap-1.5 text-sm font-bold">Condition<select className="min-h-11 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-base font-medium focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" defaultValue={isCardCondition(selectedDetail.copy.condition) ? selectedDetail.copy.condition : ""} name="condition" required>{!isCardCondition(selectedDetail.copy.condition) ? <option disabled value="">Choose a condition (currently {selectedDetail.copy.condition})</option> : null}{cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><span className="text-xs font-medium leading-5 text-zinc-500">Uses the same grading choices as the eBay listing form.</span></label>
@@ -1506,9 +1565,8 @@ function InventoryCardDetailContent({
                     <button className="min-h-11 w-full rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#741a26] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-60 sm:w-auto sm:justify-self-start" disabled={savingCopy} type="submit">{savingCopy ? "Saving…" : "Save copy details"}</button>
                   </form>
 
-                  {isCardCondition(selectedDetail.copy.condition) ? <InventoryListingPhotoSets canManage={source.mode === "live"} cardName={target.name} condition={selectedDetail.copy.condition} edition={target.edition} printingId={selectedDetail.printing.id} sourceCopyIds={selectedVariantCopyIds} /> : null}
-                  <CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} />
-                  <section className="rounded-lg border border-zinc-200 bg-white p-4"><h5 className="font-black">Acquired from</h5><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{selectedDetail.group.record ? `${selectedDetail.group.record.title} · ${selectedDetail.group.record.source} · ${formatDate(selectedDetail.group.record.date)}` : "Source unavailable"}</p><p className="mt-2 text-sm font-bold text-zinc-800">This Copy’s cost: <span className="tabular-nums">{selectedDetail.copy.allocationPence === null ? "unknown" : formatCurrency(selectedDetail.copy.allocationPence)}</span></p><p className="mt-1 text-xs font-medium leading-5 text-zinc-500">This is this physical Copy’s allocated share from its source Record, not the total for sibling Copies.</p>{selectedDetail.group.record ? <button className="mt-2 min-h-11 rounded-md text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id })} type="button">View source Record</button> : null}</section>
+                  <div aria-labelledby="inventory-card-section-tab-listing-photos" hidden={activeSection !== "listing-photos"} id="inventory-card-section-panel-listing-photos" role="tabpanel">{isCardCondition(selectedDetail.copy.condition) ? <InventoryListingPhotoSets canManage={source.mode === "live"} cardName={target.name} condition={selectedDetail.copy.condition} edition={target.edition} printingId={selectedDetail.printing.id} sourceCopyIds={selectedVariantCopyIds} /> : <p className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-950">Choose a valid condition in Copy details before managing listing photos.</p>}</div>
+                  <div aria-labelledby="inventory-card-section-tab-copy-photos" hidden={activeSection !== "copy-photos"} id="inventory-card-section-panel-copy-photos" role="tabpanel"><CardInventoryImages canUpload={source.mode === "live" && selectedDetail.copy.status !== "void"} cardName={target.name} copyId={selectedDetail.copy.id} isPreview={source.mode !== "live"} key={`copy-images-${selectedDetail.copy.id}`} /></div>
                 </article>
               </div>
             ) : (

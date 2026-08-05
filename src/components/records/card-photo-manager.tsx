@@ -133,13 +133,15 @@ export function CardPhotoManager({
     if (!trigger) return;
     const gutter = 16;
     const gap = 8;
-    const width = Math.min(288, window.innerWidth - gutter * 2);
     const triggerBounds = trigger.getBoundingClientRect();
-    const popoverHeight = descriptionPopoverRef.current?.offsetHeight ?? 0;
-    const left = Math.min(
-      Math.max(gutter, triggerBounds.right - width),
-      window.innerWidth - width - gutter,
-    );
+    const containerBounds = trigger.closest("section")?.getBoundingClientRect();
+    const boundaryLeft = Math.max(gutter, containerBounds?.left ?? gutter);
+    const boundaryRight = Math.max(boundaryLeft, Math.min(window.innerWidth - gutter, containerBounds?.right ?? window.innerWidth - gutter));
+    const width = Math.min(288, Math.max(0, boundaryRight - boundaryLeft));
+    const popover = descriptionPopoverRef.current;
+    if (popover) popover.style.width = `${width}px`;
+    const popoverHeight = popover?.offsetHeight ?? 0;
+    const left = Math.min(Math.max(boundaryLeft, triggerBounds.left), boundaryRight - width);
     const belowTop = triggerBounds.bottom + gap;
     const top = popoverHeight && belowTop + popoverHeight > window.innerHeight - gutter
       ? Math.max(gutter, triggerBounds.top - popoverHeight - gap)
@@ -260,9 +262,17 @@ export function CardPhotoManager({
     setDescriptionOpen(true);
   }
 
+  function keepDescriptionOpenOnHover() {
+    if (window.matchMedia("(hover: hover)").matches) keepDescriptionOpen();
+  }
+
   function scheduleDescriptionClose() {
     if (descriptionCloseTimerRef.current !== null) window.clearTimeout(descriptionCloseTimerRef.current);
     descriptionCloseTimerRef.current = window.setTimeout(() => setDescriptionOpen(false), 100);
+  }
+
+  function scheduleDescriptionCloseOnHover() {
+    if (window.matchMedia("(hover: hover)").matches) scheduleDescriptionClose();
   }
 
   function uploadFiles(files: File[]) {
@@ -393,7 +403,7 @@ export function CardPhotoManager({
           {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{eyebrow}</p> : null}
           <div className={`${eyebrow ? "mt-1" : ""} flex min-h-8 items-center gap-1`}>
             <h2 className={`${eyebrow ? "text-lg" : ""} font-black`} id={titleId}>{title}</h2>
-            {descriptionDisplay === "tooltip" ? <button aria-describedby={descriptionOpen ? descriptionId : undefined} aria-expanded={descriptionOpen} aria-label={`About ${title}`} className="relative grid size-8 cursor-help place-items-center rounded-md text-zinc-500 transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:bg-zinc-100 hover:text-zinc-800 focus-visible:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" onBlur={scheduleDescriptionClose} onClick={keepDescriptionOpen} onFocus={keepDescriptionOpen} onMouseEnter={keepDescriptionOpen} onMouseLeave={scheduleDescriptionClose} ref={descriptionTriggerRef} type="button"><Info aria-hidden="true" className="size-3.5" /></button> : null}
+            {descriptionDisplay === "tooltip" ? <button aria-describedby={descriptionOpen ? descriptionId : undefined} aria-expanded={descriptionOpen} aria-label={`About ${title}`} className="relative grid size-8 cursor-help place-items-center rounded-md text-zinc-500 transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:bg-zinc-100 hover:text-zinc-800 focus-visible:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" onBlur={scheduleDescriptionClose} onClick={keepDescriptionOpen} onFocus={keepDescriptionOpen} onMouseEnter={keepDescriptionOpenOnHover} onMouseLeave={scheduleDescriptionCloseOnHover} ref={descriptionTriggerRef} type="button"><Info aria-hidden="true" className="size-3.5" /></button> : null}
           </div>
           {descriptionDisplay === "inline" ? <p className="mt-1 text-sm font-medium text-zinc-600" id={descriptionId}>{description}</p> : null}
         </div>
@@ -594,7 +604,7 @@ export function CardPhotoManager({
       ) : null}
 
       {descriptionDisplay === "tooltip" && descriptionOpen ? createPortal(
-        <span className="fixed z-[90] rounded-lg border border-zinc-200 bg-zinc-950 px-3 py-2 text-left text-xs font-semibold leading-5 text-white shadow-xl" id={descriptionId} onMouseEnter={keepDescriptionOpen} onMouseLeave={scheduleDescriptionClose} ref={descriptionPopoverRef} role="tooltip" style={descriptionPosition}>{description}</span>,
+        <span className="fixed z-[90] max-w-[calc(100vw-2rem)] whitespace-normal break-words rounded-lg border border-zinc-200 bg-zinc-950 px-3 py-2 text-left text-xs font-semibold leading-5 text-white shadow-xl" id={descriptionId} onMouseEnter={keepDescriptionOpenOnHover} onMouseLeave={scheduleDescriptionCloseOnHover} ref={descriptionPopoverRef} role="tooltip" style={descriptionPosition}>{description}</span>,
         document.body,
       ) : null}
 

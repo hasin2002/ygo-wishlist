@@ -76,10 +76,28 @@ test("the Copy picker is one searchable, keyboard-accessible combobox", () => {
   assert.doesNotMatch(recordsAppSource, /PhysicalCopyPickerDialog/);
 });
 
+test("card inventory uses an accessible section bar without discarding hidden form state", () => {
+  assert.match(recordsAppSource, /const inventoryCardSections = \[/);
+  assert.match(recordsAppSource, /Copy details[\s\S]*Card Copy photos[\s\S]*Listing photos/);
+  assert.doesNotMatch(recordsAppSource, /label: "Acquisition source"/);
+  assert.match(recordsAppSource, /aria-orientation="horizontal"[\s\S]*role="tablist"/);
+  assert.match(recordsAppSource, /aria-controls=\{`inventory-card-section-panel-\$\{section\.value\}`\}/);
+  assert.match(recordsAppSource, /aria-selected=\{active\}/);
+  assert.match(recordsAppSource, /event\.key === "ArrowRight"[\s\S]*event\.key === "ArrowLeft"[\s\S]*event\.key === "Home"[\s\S]*event\.key === "End"/);
+  assert.match(recordsAppSource, /hidden=\{activeSection !== "details"\}/);
+  assert.match(recordsAppSource, /hidden=\{activeSection !== "listing-photos"\}/);
+  assert.match(recordsAppSource, /hidden=\{activeSection !== "copy-photos"\}/);
+  assert.match(recordsAppSource, /Selected Copy[\s\S]*Acquired from/);
+  assert.doesNotMatch(recordsAppSource, /<dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity<\/dt>/);
+  assert.doesNotMatch(recordsAppSource, /<dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition<\/dt>/);
+});
+
 test("preview Copy photos explain the limitation and retain phone-camera capture in live records", () => {
   assert.match(cardImagesSource, /if \(isPreview\)/);
   assert.match(cardImagesSource, /This preview does not store photos/);
   assert.match(cardImagesSource, /<details className="group overflow-hidden rounded-xl/);
+  assert.match(cardImagesSource, /const \[sectionOpen, setSectionOpen\] = useState\(true\)/);
+  assert.match(cardImagesSource, /onToggle=\{\(event\) => setSectionOpen\(event\.currentTarget\.open\)\} open=\{sectionOpen\}/);
   assert.match(cardImagesSource, /Card Copy photos/);
   assert.match(cardImagesSource, /group-open:rotate-180/);
   assert.match(cardImagesSource, /headingDisplay="sr-only"/);

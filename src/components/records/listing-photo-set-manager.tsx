@@ -56,6 +56,7 @@ export function ListingPhotoSetManager({
   onImagesChange,
   printingId,
   sourceCopyIds,
+  surface = "plain",
 }: {
   canManage: boolean;
   cardName: string;
@@ -65,6 +66,7 @@ export function ListingPhotoSetManager({
   onImagesChange?: (images: ListingPhotoSetImage[]) => void;
   printingId: string;
   sourceCopyIds: string[];
+  surface?: "card" | "plain";
 }) {
   const [configured, setConfigured] = useState(true);
   const [images, setImages] = useState<ListingPhotoSetImage[]>([]);
@@ -245,7 +247,7 @@ export function ListingPhotoSetManager({
       onClick: () => { void importSavedCopyPhotos(); },
     } : undefined}
     storageWarning="Private listing-photo storage is not configured on this server."
-    surface="plain"
+    surface={surface}
     title={`${kindCopy[kind].label} photos`}
     uploading={uploading}
   />;

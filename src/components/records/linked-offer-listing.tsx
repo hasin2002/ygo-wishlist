@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Boxes,
@@ -13,6 +14,7 @@ import {
   RotateCcw,
   Tag,
   Truck,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CardImagePreviewDialog } from "@/components/records/card-image-preview-dialog";
@@ -82,7 +84,7 @@ type OperationResult = {
   error?: string;
   kind: string;
   review?: {
-    errors?: Array<{ code?: string | null; message?: string | null }>;
+    errors?: Array<{ code?: string | null; message?: string | null; severity?: string | null }>;
     fees?: Array<{ amount?: number; currency?: string; name?: string | null }>;
     readyToPublish?: boolean;
   } | null;
@@ -137,6 +139,70 @@ function specifics(target: { edition: string; rarity: string }, printing: { setC
 
 function offerLabel(kind: OfferKind) {
   return kind === "individual" ? "Individual listing" : `${kind} set listing`;
+}
+
+function formatReviewMoney(amount: number, currency = "GBP") {
+  try {
+    return new Intl.NumberFormat("en-GB", { currency, style: "currency" }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(2)}`;
+  }
+}
+
+function simplifyEbayNote(message: string | null | undefined) {
+  if (!message) return "eBay returned an additional note.";
+  if (message.includes("Funds from your sales may be unavailable")) return "eBay may temporarily hold the money from a sale.";
+  if (message.includes("additional postage cost")) return "Additional postage uses the same price as standard delivery.";
+  if (message.includes("Final Value Fee waived")) return "eBay says the final value fee is waived.";
+  return message;
+}
+
+function ReviewResultCard({
+  offer,
+  quantity,
+  result,
+}: {
+  offer: OfferDraft | null;
+  quantity: number;
+  result: OperationResult;
+}) {
+  const kind = result.kind as OfferKind;
+  const setSize = kind === "individual" ? 1 : kind === "x2" ? 2 : 3;
+  const ebayQuantity = Math.floor(quantity / setSize);
+  const errors = result.review?.errors ?? [];
+  const blockingMessages = errors.filter((error) => error.severity?.toLocaleLowerCase("en-GB") === "error");
+  const notes = errors.filter((error) => error.severity?.toLocaleLowerCase("en-GB") !== "error");
+  const positiveFees = (result.review?.fees ?? []).filter((fee) => Number(fee.amount ?? 0) > 0);
+  const feeTotals = Array.from(positiveFees.reduce((totals, fee) => {
+    const currency = fee.currency || "GBP";
+    totals.set(currency, (totals.get(currency) ?? 0) + Number(fee.amount ?? 0));
+    return totals;
+  }, new Map<string, number>()));
+  const ready = result.state === "published" || (result.state === "reviewed" && result.review?.readyToPublish === true && !positiveFees.length && !result.error);
+  const statusLabel = result.state === "published" ? "Published" : ready ? "Ready to publish" : "Needs changes";
+
+  return <li className={`rounded-lg border p-4 ${ready ? "border-emerald-200 bg-emerald-50/40" : "border-rose-300 bg-rose-50/50"}`}>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h3 className="font-black text-zinc-950">{offerLabel(kind)}</h3>
+        {offer?.title ? <p className="mt-0.5 line-clamp-2 text-sm font-medium leading-5 text-zinc-600">{offer.title}</p> : null}
+      </div>
+      <span className={`inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-bold ${ready ? "bg-emerald-100 text-emerald-900" : "bg-rose-100 text-rose-900"}`}>
+        {ready ? <CheckCircle2 aria-hidden="true" className="size-3.5" /> : <AlertTriangle aria-hidden="true" className="size-3.5" />}
+        {statusLabel}
+      </span>
+    </div>
+    <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-zinc-200 bg-zinc-200 text-sm sm:grid-cols-4">
+      <div className="bg-white p-3"><dt className="font-medium text-zinc-500">Buyer receives</dt><dd className="mt-0.5 font-black text-zinc-950">{setSize} {setSize === 1 ? "card" : "matching cards"}</dd></div>
+      <div className="bg-white p-3"><dt className="font-medium text-zinc-500">eBay quantity</dt><dd className="mt-0.5 font-black tabular-nums text-zinc-950">{ebayQuantity}</dd></div>
+      <div className="bg-white p-3"><dt className="font-medium text-zinc-500">Price</dt><dd className="mt-0.5 font-black tabular-nums text-zinc-950">{offer ? `£${offer.price}` : "—"}</dd></div>
+      <div className="bg-white p-3"><dt className="font-medium text-zinc-500">Upfront eBay fee</dt><dd className={`mt-0.5 font-black tabular-nums ${positiveFees.length ? "text-rose-800" : "text-emerald-800"}`}>{feeTotals.length ? feeTotals.map(([currency, amount]) => formatReviewMoney(amount, currency)).join(" + ") : "£0.00"}</dd></div>
+    </dl>
+    {positiveFees.length ? <div className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm text-rose-950"><p className="font-black">Publication is blocked because eBay reported an upfront fee.</p><ul className="mt-1 grid gap-1 font-medium">{positiveFees.map((fee, index) => <li key={`${fee.name ?? "fee"}-${index}`}>{fee.name ?? "Listing fee"}: {formatReviewMoney(Number(fee.amount ?? 0), fee.currency || "GBP")}</li>)}</ul></div> : null}
+    {blockingMessages.map((error, index) => <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-950" key={`${error.code ?? "error"}-${index}`}>{error.message ?? `eBay error ${error.code ?? "unknown"}`}</p>)}
+    {result.error ? <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-950">{result.error}</p> : null}
+    {notes.length ? <details className="mt-3 text-sm"><summary className="min-h-11 cursor-pointer content-center font-bold text-zinc-700">{notes.length} {notes.length === 1 ? "note" : "notes"} from eBay</summary><ul className="grid gap-1 rounded-md bg-white p-3 text-zinc-700">{notes.map((note, index) => <li key={`${note.code ?? "note"}-${index}`}>{simplifyEbayNote(note.message)}</li>)}</ul></details> : null}
+  </li>;
 }
 
 function defaultOffer(
@@ -215,19 +281,22 @@ function OfferPage({
         <label className="text-sm font-bold">Description<textarea className={`${textAreaClass} min-h-72 leading-6`} maxLength={4000} onChange={(event) => onUpdate({ description: event.target.value })} value={offer.description} /></label>
       </div>
     </section>
-    <div className="min-w-0"><ListingPhotoSetManager canManage={canManage} cardName={cardName} condition={condition} edition={edition} kind={offer.kind} onImagesChange={onPhotosChange} printingId={printingId} sourceCopyIds={sourceCopyIds} /></div>
+    <div className="min-w-0"><ListingPhotoSetManager canManage={canManage} cardName={cardName} condition={condition} edition={edition} kind={offer.kind} onImagesChange={onPhotosChange} printingId={printingId} sourceCopyIds={sourceCopyIds} surface="card" /></div>
   </div>;
 }
 
 export function LinkedOfferListing({
   initialCondition,
   initialPrintingId,
+  initialResumeFamilyId,
   initialTargetId,
 }: {
   initialCondition?: string;
   initialPrintingId?: string;
+  initialResumeFamilyId?: string;
   initialTargetId?: string;
 }) {
+  const router = useRouter();
   const source = useRecordsDataSource();
   const [mode, setMode] = useState<"individual" | "linked" | null>(null);
   const [targetId, setTargetId] = useState(initialTargetId ?? "");
@@ -238,6 +307,9 @@ export function LinkedOfferListing({
   const [shared, setShared] = useState(initialShared);
   const [offers, setOffers] = useState<OfferDraft[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [resumeFamilyId, setResumeFamilyId] = useState(initialResumeFamilyId ?? null);
+  const [dismissedRecoveryFamilyId, setDismissedRecoveryFamilyId] = useState<string | null>(null);
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [operationResults, setOperationResults] = useState<OperationResult[] | null>(null);
   const [pending, setPending] = useState(false);
@@ -247,6 +319,12 @@ export function LinkedOfferListing({
   const savePlan = trpc.ebay.saveLinkedOfferPool.useMutation();
   const reviewPlan = trpc.ebay.reviewLinkedOfferPlan.useMutation();
   const publishPlan = trpc.ebay.publishLinkedOfferPlan.useMutation();
+
+  useEffect(() => {
+    if (!successToast) return;
+    const timeout = window.setTimeout(() => setSuccessToast(null), 4500);
+    return () => window.clearTimeout(timeout);
+  }, [successToast]);
 
   const targetOptions = useMemo(() => {
     const printingTargetIds = new Map(source.snapshot.printings.map((printing) => [printing.id, printing.targetId]));
@@ -336,6 +414,16 @@ export function LinkedOfferListing({
   const activeOffers = (live?.activeOffers ?? []) as Array<LinkedOffer & { blockedReason?: string | null; listingId: string }>;
   const changes = mode ? planLinkedOfferChanges(activeOffers, selectedQuantity, mode) : [];
   const operations = mode ? linkedOfferOperations(activeOffers, selectedQuantity, mode) : [];
+  const previousOffers = live?.offers ?? [];
+  const previousPublishedCount = previousOffers.filter((offer) => offer.state === "published").length;
+  const previousUnfinishedCount = previousOffers.filter((offer) => offer.state !== "published").length;
+  const previousFailedCount = previousOffers.filter((offer) => offer.state === "failed" || offer.state === "uncertain").length;
+  const showPreviousAttempt = Boolean(
+    live?.family
+    && previousUnfinishedCount
+    && dismissedRecoveryFamilyId !== live.family.id
+    && resumeFamilyId !== live.family.id,
+  );
   const blockedOperation = operations.find((operation) => (
     (operation.action === "update" || operation.action === "end")
       && activeOffers.find((offer) => offer.listingId === operation.listingId)?.blockedReason
@@ -365,9 +453,21 @@ export function LinkedOfferListing({
       ?? (group ? defaultOffer(kind, group.target, group.printing, group.condition, priorSetOffers) : null);
   }
 
+  function resumeHref(nextFamilyId?: string) {
+    const params = new URLSearchParams();
+    if (targetId) params.set("target", targetId);
+    if (group) {
+      params.set("printing", group.printing.id);
+      params.set("condition", group.condition);
+    }
+    if (nextFamilyId) params.set("resume", nextFamilyId);
+    const query = params.toString();
+    return `/records/listings/new${query ? `?${query}` : ""}`;
+  }
+
   useEffect(() => {
     const family = live?.family;
-    if (!family || restoredFamilyRef.current === family.id) return;
+    if (!family || resumeFamilyId !== family.id || restoredFamilyRef.current === family.id) return;
     restoredFamilyRef.current = family.id;
     const draft = savedDraft(family.draft);
     const restoredResults = live?.offers.map((offer) => ({
@@ -393,13 +493,33 @@ export function LinkedOfferListing({
       if (typeof draft.step === "number") setStep(Math.max(1, draft.step));
     }, 0);
     return () => window.clearTimeout(restore);
-  }, [live?.family, live?.offers]);
+  }, [live?.family, live?.offers, resumeFamilyId]);
+
+  function resumePreviousAttempt() {
+    const family = live?.family;
+    if (!family) return;
+    restoredFamilyRef.current = null;
+    setResumeFamilyId(family.id);
+    setDismissedRecoveryFamilyId(family.id);
+    router.replace(resumeHref(family.id), { scroll: false });
+  }
+
+  function continueFresh() {
+    const familyId = live?.family?.id;
+    if (familyId) setDismissedRecoveryFamilyId(familyId);
+  }
 
   function resetPlan() {
     setOffers([]);
     setFamilyId(null);
     setOperationResults(null);
     setMessage(null);
+    setSuccessToast(null);
+    if (resumeFamilyId) {
+      setResumeFamilyId(null);
+      restoredFamilyRef.current = null;
+      router.replace(resumeHref(), { scroll: false });
+    }
   }
 
   function updateOffer(kind: OfferKind, update: Partial<OfferDraft>) {
@@ -414,6 +534,7 @@ export function LinkedOfferListing({
     setFamilyId(null);
     setOperationResults(null);
     setMessage(null);
+    setSuccessToast(null);
   }
 
   async function prepareOfferPhotos(offer: OfferDraft) {
@@ -488,6 +609,7 @@ export function LinkedOfferListing({
     if (!individual) return;
     setPending(true);
     setMessage(null);
+    setSuccessToast(null);
     try {
       const individualProblem = validateOffer(individual);
       if (individualProblem) throw new Error(individualProblem);
@@ -523,13 +645,18 @@ export function LinkedOfferListing({
         printingId: group.printing.id,
       });
       setFamilyId(saved.familyId);
+      setResumeFamilyId(saved.familyId);
+      router.replace(resumeHref(saved.familyId), { scroll: false });
       const reviewed = await reviewPlan.mutateAsync({ familyId: saved.familyId });
-      setOperationResults(reviewed as OperationResult[]);
+      const reviewedResults = reviewed as OperationResult[];
+      setOperationResults(reviewedResults);
       setStep(flow.length);
-      const failed = reviewed.filter((result) => result.state === "failed");
-      setMessage(failed.length
-        ? `${failed.length} offer ${failed.length === 1 ? "needs" : "need"} changes before publication.`
-        : "Every offer passed its independent eBay Review.");
+      const notReady = reviewedResults.filter((result) => result.state === "failed" || result.review?.readyToPublish !== true);
+      if (notReady.length) {
+        setMessage(`${notReady.length} offer ${notReady.length === 1 ? "needs" : "need"} changes before publication.`);
+      } else {
+        setSuccessToast("Every offer passed its independent eBay Review.");
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The plan could not be reviewed.");
     } finally {
@@ -627,6 +754,7 @@ export function LinkedOfferListing({
             </aside>
           </div>
         </section> : null}
+        {mode && group && showPreviousAttempt ? <section aria-labelledby="previous-listing-attempt-title" className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:p-5"><div className="flex items-start gap-3"><RotateCcw aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-amber-800" /><div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[.12em] text-amber-800">Previous attempt</p><h2 className="mt-1 text-lg font-black text-amber-950" id="previous-listing-attempt-title">A previous listing attempt needs attention</h2><p className="mt-1 text-sm font-medium leading-5 text-amber-950">{previousPublishedCount ? `${previousPublishedCount} ${previousPublishedCount === 1 ? "listing is" : "listings are"} already published. ` : ""}{previousUnfinishedCount} {previousUnfinishedCount === 1 ? "listing is" : "listings are"} unfinished. You can start again with fresh details or resume the saved work.</p><div className="mt-4 flex flex-wrap gap-2"><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={resumePreviousAttempt} type="button"><RotateCcw aria-hidden="true" className="size-4" />{previousFailedCount ? "Resume failed listing" : "Resume previous plan"}</button><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-amber-400 bg-white px-4 text-sm font-bold text-amber-950 transition hover:bg-amber-100 focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2" onClick={continueFresh} type="button">Continue fresh</button></div></div></div></section> : null}
         {group && selectedQuantity ? <section aria-label="Listing change preview" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm"><div className="grid lg:grid-cols-2"><div className="p-4 sm:p-5"><p className="text-xs font-bold uppercase tracking-[.12em] text-zinc-500">Current state</p><h2 className="mt-1 text-lg font-black">Active now</h2>{activeOffers.length ? <ul className="mt-3 grid gap-2">{activeOffers.map((offer) => <li className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm" key={offer.listingId}><strong>{offerLabel(offer.kind)} · quantity {offer.quantity}</strong><span className="mt-0.5 block font-medium text-zinc-600">eBay status: {offer.state === "unknown" ? "needs confirmation" : offer.state}</span>{offer.blockedReason ? <span className="mt-1 block font-bold text-rose-800">{offer.blockedReason}</span> : null}</li>)}</ul> : <p className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-5 text-center text-sm font-medium text-zinc-600">No active offers for this exact variant.</p>}{planProblem ? <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-900">{planProblem} Resolve the related offers before publishing.</p> : null}</div><div className="border-t border-zinc-200 bg-zinc-50/70 p-4 sm:p-5 lg:border-l lg:border-t-0"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#8a1f2d]">Planned state</p><h2 className="mt-1 text-lg font-black">After this change</h2><ul className="mt-3 grid gap-2">{changes.map((change, index) => <li className="rounded-md border border-zinc-200 bg-white p-3 text-sm shadow-sm" key={`${change.action}-${index}`}><strong>{change.action}</strong><span className="mt-0.5 block font-medium text-zinc-600">{change.reason}</span></li>)}</ul></div></div></section> : null}
       </div> : null}
 
@@ -647,9 +775,10 @@ export function LinkedOfferListing({
         <p className="text-sm font-medium text-zinc-600">eBay Review checks every operation without publishing anything.</p>
       </div> : null}
 
-      {currentPage === "publish" ? <div className="grid gap-4"><section className="rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:p-5"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 size-5 text-emerald-700" /><div><h2 className="text-lg font-black">Independent listing results</h2><p className="mt-1 text-sm font-medium text-zinc-600">Successful operations are preserved. A retry only runs unresolved saved operations.</p></div></div>{operationResults?.length ? <ul className="mt-4 grid gap-2">{operationResults.map((result) => <li className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm" key={`${result.kind}-${result.state}`}><strong>{offerLabel(result.kind as OfferKind)} · {result.state.replaceAll("_", " ")}</strong>{result.review?.fees?.length ? <span className="mt-1 block text-zinc-700">eBay fees: {result.review.fees.map((fee) => `${fee.name ?? "Fee"} ${fee.currency ?? "GBP"} ${Number(fee.amount ?? 0).toFixed(2)}`).join(" · ")}</span> : null}{result.review?.errors?.map((error, index) => <span className="mt-1 block text-rose-800" key={`${error.code ?? "message"}-${index}`}>{error.message ?? `eBay message ${error.code ?? "unknown"}`}</span>)}{result.error ? <span className="mt-1 block text-rose-800">{result.error}</span> : null}</li>)}</ul> : <p className="mt-4 text-sm font-semibold text-zinc-600">Run eBay Review to prepare publication.</p>}</section>{operationResults?.some((result) => result.state === "failed") ? <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold" onClick={() => { setStep(Math.max(1, flow.findIndex((item) => item.id === "individual") + 1)); setOperationResults(null); }} type="button"><RotateCcw className="size-4" />Edit failed listings</button> : null}</div> : null}
+      {currentPage === "publish" ? <div className="grid gap-4"><section className="rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:p-5"><div className="flex items-start gap-3"><CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 text-emerald-700" /><div><h2 className="text-lg font-black">eBay Review results</h2><p className="mt-1 text-sm font-medium leading-5 text-zinc-600">Each listing was checked separately. Publish is only available when every listing is ready and eBay reports no upfront fee.</p></div></div>{operationResults?.length ? <ul className="mt-4 grid gap-3">{operationResults.map((result) => <ReviewResultCard key={`${result.kind}-${result.state}`} offer={resolvedOffer(result.kind as OfferKind)} quantity={selectedQuantity} result={result} />)}</ul> : <p className="mt-4 text-sm font-semibold text-zinc-600">Run eBay Review to prepare publication.</p>}</section>{operationResults?.some((result) => result.state === "failed" || (result.state === "reviewed" && result.review?.readyToPublish !== true)) ? <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold" onClick={() => { setStep(Math.max(1, flow.findIndex((item) => item.id === "individual") + 1)); setOperationResults(null); }} type="button"><RotateCcw className="size-4" />Edit listings</button> : null}</div> : null}
     </StepPanel>
-    <WizardActions confirmDisabled={!familyId || !operationResults?.length || operationResults.some((result) => result.state === "failed" || result.state === "prepared")} finalLabel="Publish plan" nextDisabled={currentPage === "stock" && (!mode || !group || !selectedQuantity || Boolean(planProblem))} nextLabel={nextLabel} onBack={() => setStep((current) => Math.max(1, current - 1))} onConfirm={() => void publish()} onNext={next} pending={pending} pendingLabel={currentPage === "review" ? "Reviewing each listing…" : currentPage === "publish" ? "Publishing saved plan…" : "Working…"} step={step} totalSteps={flow.length} />
+    <WizardActions confirmDisabled={!familyId || !operationResults?.length || operationResults.some((result) => result.state === "failed" || result.state === "prepared" || (result.state === "reviewed" && result.review?.readyToPublish !== true))} finalLabel="Publish plan" nextDisabled={currentPage === "stock" && (!mode || !group || !selectedQuantity || Boolean(planProblem))} nextLabel={nextLabel} onBack={() => setStep((current) => Math.max(1, current - 1))} onConfirm={() => void publish()} onNext={next} pending={pending} pendingLabel={currentPage === "review" ? "Reviewing each listing…" : currentPage === "publish" ? "Publishing saved plan…" : "Working…"} step={step} totalSteps={flow.length} />
     {pending ? <span className="sr-only" role="status"><Loader2 className="size-4" />Working on the saved listing plan.</span> : null}
+    {successToast ? <div aria-live="polite" className="fixed bottom-4 right-4 z-[100] flex min-h-12 max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg border border-emerald-500 bg-emerald-700 px-4 py-3 text-sm font-bold text-white shadow-xl sm:max-w-sm" role="status"><CheckCircle2 aria-hidden="true" className="size-5 shrink-0" /><span className="flex-1">{successToast}</span><button aria-label="Dismiss success message" className="grid size-8 shrink-0 place-items-center rounded-md text-emerald-50 transition hover:bg-emerald-800 focus-visible:ring-2 focus-visible:ring-white" onClick={() => setSuccessToast(null)} type="button"><X aria-hidden="true" className="size-4" /></button></div> : null}
   </section>;
 }
