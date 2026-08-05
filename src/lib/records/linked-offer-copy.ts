@@ -36,16 +36,14 @@ function shorterRarity(value: string) {
 }
 
 function titleBase(identity: CardCopyIdentity, available: number) {
-  const brand = "Yu-Gi-Oh!";
   const name = compact(identity.name);
   const setCode = compact(identity.setCode);
   const rarity = compact(identity.rarity);
   const edition = editionTitle(identity.edition);
   const condition = conditionTitle(identity.condition);
   const candidates = [
-    [brand, name, setCode, rarity, edition, condition],
-    [brand, name, setCode, rarity, edition],
-    [brand, name, setCode, rarity],
+    [name, setCode, rarity, edition, condition],
+    [name, setCode, rarity, edition],
     [name, setCode, rarity],
     [name, setCode, shorterRarity(rarity)],
     [name, setCode],
@@ -63,9 +61,10 @@ function titleBase(identity: CardCopyIdentity, available: number) {
 }
 
 export function linkedOfferTitle(kind: LinkedOfferCopyKind, identity: CardCopyIdentity) {
-  const suffix = kind === "individual" ? "Single Card" : `${kind === "x2" ? 2 : 3}-Card Set`;
-  const available = 80 - suffix.length - 3;
-  return `${titleBase(identity, available)} - ${suffix}`;
+  const prefix = kind === "individual" ? "Yu-Gi-Oh!" : `Yu-Gi-Oh! ${kind === "x2" ? 2 : 3}-Card Set`;
+  const separator = kind === "individual" ? " " : " - ";
+  const available = 80 - prefix.length - separator.length;
+  return `${prefix}${separator}${titleBase(identity, available)}`;
 }
 
 export function linkedOfferDescription(kind: LinkedOfferCopyKind, identity: CardCopyIdentity) {

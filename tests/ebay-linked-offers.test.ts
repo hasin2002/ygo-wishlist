@@ -28,11 +28,12 @@ test("generated titles keep the offer difference and descriptions stay buyer-fac
   const setTitle = linkedOfferTitle("x3", identity);
   assert.ok(individualTitle.length <= 80);
   assert.ok(setTitle.length <= 80);
-  assert.match(individualTitle, /Single Card$/);
+  assert.match(individualTitle, /^Yu-Gi-Oh! /);
+  assert.doesNotMatch(individualTitle, /Single Card/);
+  assert.match(setTitle, /^Yu-Gi-Oh! 3-Card Set - /);
   assert.doesNotMatch(setTitle, /\s1 - 3-Card Set$/);
-  assert.match(setTitle, /3-Card Set$/);
   const blueEyesSetTitle = linkedOfferTitle("x2", { ...identity, name: "Blue-Eyes White Dragon", setCode: "MP24" });
-  assert.equal(blueEyesSetTitle, "Yu-Gi-Oh! Blue-Eyes White Dragon MP24 Quarter Century Secret Rare - 2-Card Set");
+  assert.equal(blueEyesSetTitle, "Yu-Gi-Oh! 2-Card Set - Blue-Eyes White Dragon MP24 Quarter Century Secret Rare");
   const individual = linkedOfferDescription("individual", identity);
   const set = linkedOfferDescription("x3", identity);
   for (const description of [individual, set]) {
@@ -135,6 +136,9 @@ test("the grouped UI retires Copy-led and mixed-lot entry points", () => {
   assert.match(grouped, /<CardImagePreviewDialog/);
   assert.match(grouped, /Upfront eBay fee/);
   assert.match(grouped, /Buyer receives/);
+  assert.match(grouped, /const deliveryMarkupPence = 40/);
+  assert.match(grouped, /shippingCost: service \? suggestedDeliveryCharge\(service\) : current\.shippingCost, shippingService/);
+  assert.match(grouped, /suggested cost plus 40p/);
   assert.match(grouped, /Ready to publish/);
   assert.match(grouped, /Every offer passed its independent eBay Review\./);
   assert.match(grouped, /fixed bottom-4 right-4 z-\[100\][\s\S]*bg-emerald-700[\s\S]*role="status"/);
@@ -142,6 +146,13 @@ test("the grouped UI retires Copy-led and mixed-lot entry points", () => {
   assert.match(grouped, /A previous listing attempt needs attention/);
   assert.match(grouped, /Resume failed listing/);
   assert.match(grouped, /Continue fresh/);
+  assert.match(grouped, /listing has.*ended/);
+  assert.doesNotMatch(grouped, /already published/);
+  assert.match(grouped, /Delete unfinished.*draft/);
+  assert.match(grouped, /It won&apos;t remove ended listings, inventory history, or saved photos/);
+  assert.match(grouped, /<DiscardDraftDialog/);
+  assert.match(grouped, /createPortal\(/);
+  assert.match(grouped, /useViewportOverlay/);
   assert.match(grouped, /resumeFamilyId !== family\.id/);
   assert.match(grouped, /router\.replace\(resumeHref\(saved\.familyId\), \{ scroll: false \}\)/);
   assert.match(newListingPage, /resume\?: string/);
@@ -230,6 +241,12 @@ test("the persisted plan and server workflow keep exact stock and recoverable of
   assert.match(server, /filter\(\(fee\) => Number\.isFinite\(fee\.amount\) && fee\.amount !== 0\)/);
   assert.match(server, /const hasUpfrontFee = fees\.some\(\(fee\) => fee\.amount > 0\)/);
   assert.match(server, /readyToPublish: !hasUpfrontFee/);
+  assert.match(server, /currentListingState: offer\.listingId/);
+  assert.match(server, /export async function discardLinkedOfferDraft/);
+  assert.match(server, /offer\.state !== "published"/);
+  assert.match(server, /ne\(ebayListingFamilyOffers\.state, "published"\)/);
+  assert.match(server, /draft: \{\}/);
+  assert.match(router, /discardLinkedOfferDraft/);
   assert.match(router, /reviewLinkedOfferPlan[\s\S]*requireEbayExternalCapability/);
   assert.match(router, /publishLinkedOfferPlan[\s\S]*requireEbayExternalCapability/);
   assert.match(actions, /\["failed", "uncertain", "publishing"\]/);

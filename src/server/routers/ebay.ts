@@ -39,7 +39,7 @@ import {
 } from "@/server/ebay-capabilities";
 import { getEbayRemoteListing } from "@/server/ebay-trading";
 import { inspectPaidEbaySaleReviewIntent } from "@/server/records/paid-ebay-sale-review";
-import { inspectLinkedOfferVariant, LinkedOfferError, publishLinkedOfferPlan, reviewLinkedOfferPlan, saveLinkedOfferPool } from "@/server/records/ebay-linked-offers";
+import { discardLinkedOfferDraft, inspectLinkedOfferVariant, LinkedOfferError, publishLinkedOfferPlan, reviewLinkedOfferPlan, saveLinkedOfferPool } from "@/server/records/ebay-linked-offers";
 import { authenticatedProcedure, router } from "@/server/trpc";
 
 const itemSpecificValue = z.string().trim().min(1).max(65);
@@ -111,6 +111,10 @@ export const ebayRouter = router({
   linkedOfferVariant: authenticatedProcedure.input(z.object({ printingId: z.string().min(1), condition: z.enum(cardConditions) })).query(async ({ ctx, input }) => {
     try { return await inspectLinkedOfferVariant(ctx.collectionOwnerId, input.printingId, input.condition); }
     catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof LinkedOfferError ? error.message : "The listing variant could not be loaded." }); }
+  }),
+  discardLinkedOfferDraft: authenticatedProcedure.input(z.object({ familyId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    try { return await discardLinkedOfferDraft(ctx.collectionOwnerId, input.familyId); }
+    catch (error) { throw new TRPCError({ code: "CONFLICT", message: error instanceof LinkedOfferError ? error.message : "The unfinished listing draft could not be deleted." }); }
   }),
   saveLinkedOfferPool: authenticatedProcedure.input(z.object({
     printingId: z.string().min(1), condition: z.enum(cardConditions), copyIds: z.array(z.string().min(1)).min(1).max(100), listKeptCopies: z.boolean(), mode: z.enum(["individual", "linked"]), draft: z.unknown(),

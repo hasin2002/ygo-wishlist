@@ -44,6 +44,14 @@ test("Spend distinguishes pending and failed projections from empty or zero valu
   assert.match(shell, /Spend unavailable — Retry/);
 });
 
+test("focused number fields cannot change accidentally while the page is scrolled", () => {
+  const shell = source("src/components/app-shell.tsx");
+  assert.match(shell, /target instanceof HTMLInputElement && target\.type === "number" && document\.activeElement === target/);
+  assert.match(shell, /target\.blur\(\)/);
+  assert.match(shell, /document\.addEventListener\("wheel", blurFocusedNumberInputOnWheel, \{ capture: true, passive: true \}\)/);
+  assert.match(shell, /document\.removeEventListener\("wheel", blurFocusedNumberInputOnWheel, true\)/);
+});
+
 test("retry controls await caller refetch promises and reject duplicate in-flight retries", () => {
   const errorSource = source("src/components/data-load-error.tsx");
   assert.match(errorSource, /if \(retryingRef\.current\) return/);

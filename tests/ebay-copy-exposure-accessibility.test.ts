@@ -87,7 +87,7 @@ test("card inventory uses an accessible section bar without discarding hidden fo
   assert.match(recordsAppSource, /hidden=\{activeSection !== "details"\}/);
   assert.match(recordsAppSource, /hidden=\{activeSection !== "listing-photos"\}/);
   assert.match(recordsAppSource, /hidden=\{activeSection !== "copy-photos"\}/);
-  assert.match(recordsAppSource, /Selected Copy[\s\S]*Acquired from/);
+  assert.match(recordsAppSource, /This Copy’s cost:[\s\S]*Acquired from/);
   assert.doesNotMatch(recordsAppSource, /<dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Rarity<\/dt>/);
   assert.doesNotMatch(recordsAppSource, /<dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Edition<\/dt>/);
 });

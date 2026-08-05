@@ -203,7 +203,53 @@ export async function inspectLinkedOfferVariant(ownerId: string, printingId: str
   ];
   const planProblem = linkedOfferPlanProblem(activeOffers);
 
-  return { activeOffers, availability, copies, family, offers, planProblem, target, printing };
+  const offersWithListingState = offers.map((offer) => ({
+    ...offer,
+    currentListingState: offer.listingId ? listingById.get(offer.listingId)?.listingState ?? null : null,
+  }));
+
+  return { activeOffers, availability, copies, family, offers: offersWithListingState, planProblem, target, printing };
+}
+
+export async function discardLinkedOfferDraft(ownerId: string, familyId: string) {
+  return db.transaction(async (tx) => {
+    const [family] = await tx.select().from(ebayListingFamilies).where(and(
+      eq(ebayListingFamilies.id, familyId),
+      eq(ebayListingFamilies.ownerId, ownerId),
+    )).limit(1).for("update");
+    if (!family) throw new LinkedOfferError("That saved listing attempt no longer exists.");
+
+    const offers = await tx.select().from(ebayListingFamilyOffers).where(and(
+      eq(ebayListingFamilyOffers.ownerId, ownerId),
+      eq(ebayListingFamilyOffers.familyId, familyId),
+    )).for("update");
+    const unfinished = offers.filter((offer) => offer.state !== "published");
+    if (!unfinished.length) throw new LinkedOfferError("There is no unfinished draft to delete.");
+
+    await tx.delete(ebayListingFamilyOffers).where(and(
+      eq(ebayListingFamilyOffers.ownerId, ownerId),
+      eq(ebayListingFamilyOffers.familyId, familyId),
+      ne(ebayListingFamilyOffers.state, "published"),
+    ));
+
+    const preservesPublishedHistory = offers.some((offer) => offer.state === "published");
+    if (preservesPublishedHistory) {
+      await tx.update(ebayListingFamilies).set({ draft: {}, updatedAt: new Date() }).where(and(
+        eq(ebayListingFamilies.id, familyId),
+        eq(ebayListingFamilies.ownerId, ownerId),
+      ));
+    } else {
+      await tx.delete(ebayListingFamilies).where(and(
+        eq(ebayListingFamilies.id, familyId),
+        eq(ebayListingFamilies.ownerId, ownerId),
+      ));
+    }
+
+    return {
+      deletedKinds: unfinished.map((offer) => offer.kind),
+      familyRemoved: !preservesPublishedHistory,
+    };
+  });
 }
 
 function sameOperation(left: LinkedOfferOperation, right: LinkedOfferOperation) {

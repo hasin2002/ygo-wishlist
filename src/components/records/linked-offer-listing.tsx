@@ -13,10 +13,13 @@ import {
   PackageCheck,
   RotateCcw,
   Tag,
+  Trash2,
   Truck,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { CardImagePreviewDialog } from "@/components/records/card-image-preview-dialog";
 import {
   ListingPhotoSetManager,
@@ -101,11 +104,17 @@ type SavedDraft = {
 };
 
 const defaultService = ebayDeliveryServices[0];
+const deliveryMarkupPence = 40;
+
+function suggestedDeliveryCharge(service: (typeof ebayDeliveryServices)[number]) {
+  return ((service.suggestedCostPence + deliveryMarkupPence) / 100).toFixed(2);
+}
+
 const initialShared: SharedDefaults = {
   dispatchTimeMax: "3",
   location: "Surrey",
   postalCode: "GU21 6DE",
-  shippingCost: (defaultService.suggestedCostPence / 100).toFixed(2),
+  shippingCost: suggestedDeliveryCharge(defaultService),
   shippingService: defaultService.code,
 };
 
@@ -285,6 +294,51 @@ function OfferPage({
   </div>;
 }
 
+function DiscardDraftDialog({
+  draftCount,
+  error,
+  onClose,
+  onConfirm,
+  pending,
+  triggerRef,
+}: {
+  draftCount: number;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  pending: boolean;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const close = () => { if (!pending) onClose(); };
+  const dialogRef = useViewportOverlay<HTMLDivElement>({
+    initialFocusRef: cancelRef,
+    isOpen: true,
+    onClose: close,
+    triggerRef,
+  });
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-busy={pending} aria-describedby="discard-listing-draft-description" aria-labelledby="discard-listing-draft-title" aria-modal="true" className="fixed inset-0 z-[80] grid place-items-end bg-zinc-950/55 p-3 backdrop-blur-sm sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }} role="alertdialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-xl border border-rose-200 bg-white shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
+        <div className="p-5 sm:p-6">
+          <span className="grid size-11 place-items-center rounded-full bg-rose-50 text-rose-700"><Trash2 aria-hidden="true" className="size-5" /></span>
+          <h2 className="mt-4 text-xl font-black text-zinc-950" id="discard-listing-draft-title">Delete unfinished {draftCount === 1 ? "draft" : "drafts"}?</h2>
+          <p className="mt-2 text-sm font-medium leading-6 text-zinc-600" id="discard-listing-draft-description">This permanently removes the saved {draftCount === 1 ? "listing draft" : `${draftCount} listing drafts`}. It won&apos;t remove ended listings, inventory history, or saved photos.</p>
+          {error ? <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-900" role="alert">{error}</p> : null}
+        </div>
+        <div className="flex flex-col-reverse gap-2 border-t border-zinc-200 bg-zinc-50 p-4 sm:flex-row sm:justify-end sm:px-6">
+          <button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 disabled:cursor-wait disabled:opacity-60" disabled={pending} onClick={close} ref={cancelRef} type="button">Cancel</button>
+          <button className="min-h-11 rounded-md bg-rose-700 px-4 text-sm font-bold text-white transition hover:bg-rose-800 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={pending} onClick={onConfirm} type="button">{pending ? "Deleting…" : "Delete draft"}</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function LinkedOfferListing({
   initialCondition,
   initialPrintingId,
@@ -314,11 +368,15 @@ export function LinkedOfferListing({
   const [operationResults, setOperationResults] = useState<OperationResult[] | null>(null);
   const [pending, setPending] = useState(false);
   const [cardImageOpen, setCardImageOpen] = useState(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
   const cardImageTriggerRef = useRef<HTMLButtonElement>(null);
+  const discardTriggerRef = useRef<HTMLButtonElement>(null);
   const restoredFamilyRef = useRef<string | null>(null);
   const savePlan = trpc.ebay.saveLinkedOfferPool.useMutation();
   const reviewPlan = trpc.ebay.reviewLinkedOfferPlan.useMutation();
   const publishPlan = trpc.ebay.publishLinkedOfferPlan.useMutation();
+  const discardPlan = trpc.ebay.discardLinkedOfferDraft.useMutation();
 
   useEffect(() => {
     if (!successToast) return;
@@ -415,7 +473,8 @@ export function LinkedOfferListing({
   const changes = mode ? planLinkedOfferChanges(activeOffers, selectedQuantity, mode) : [];
   const operations = mode ? linkedOfferOperations(activeOffers, selectedQuantity, mode) : [];
   const previousOffers = live?.offers ?? [];
-  const previousPublishedCount = previousOffers.filter((offer) => offer.state === "published").length;
+  const previousActiveCount = previousOffers.filter((offer) => offer.state === "published" && offer.currentListingState !== "ended").length;
+  const previousEndedCount = previousOffers.filter((offer) => offer.state === "published" && offer.currentListingState === "ended").length;
   const previousUnfinishedCount = previousOffers.filter((offer) => offer.state !== "published").length;
   const previousFailedCount = previousOffers.filter((offer) => offer.state === "failed" || offer.state === "uncertain").length;
   const showPreviousAttempt = Boolean(
@@ -505,8 +564,24 @@ export function LinkedOfferListing({
   }
 
   function continueFresh() {
-    const familyId = live?.family?.id;
-    if (familyId) setDismissedRecoveryFamilyId(familyId);
+    setDiscardError(null);
+    setDiscardDialogOpen(true);
+  }
+
+  async function confirmContinueFresh() {
+    const previousFamilyId = live?.family?.id;
+    if (!previousFamilyId || discardPlan.isPending) return;
+    setDiscardError(null);
+    try {
+      await discardPlan.mutateAsync({ familyId: previousFamilyId });
+      setDiscardDialogOpen(false);
+      setDismissedRecoveryFamilyId(previousFamilyId);
+      resetPlan();
+      await variantQuery.refetch();
+      setSuccessToast(previousUnfinishedCount === 1 ? "Unfinished listing draft deleted." : "Unfinished listing drafts deleted.");
+    } catch (error) {
+      setDiscardError(error instanceof Error ? error.message : "The unfinished listing draft could not be deleted.");
+    }
   }
 
   function resetPlan() {
@@ -754,7 +829,7 @@ export function LinkedOfferListing({
             </aside>
           </div>
         </section> : null}
-        {mode && group && showPreviousAttempt ? <section aria-labelledby="previous-listing-attempt-title" className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:p-5"><div className="flex items-start gap-3"><RotateCcw aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-amber-800" /><div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[.12em] text-amber-800">Previous attempt</p><h2 className="mt-1 text-lg font-black text-amber-950" id="previous-listing-attempt-title">A previous listing attempt needs attention</h2><p className="mt-1 text-sm font-medium leading-5 text-amber-950">{previousPublishedCount ? `${previousPublishedCount} ${previousPublishedCount === 1 ? "listing is" : "listings are"} already published. ` : ""}{previousUnfinishedCount} {previousUnfinishedCount === 1 ? "listing is" : "listings are"} unfinished. You can start again with fresh details or resume the saved work.</p><div className="mt-4 flex flex-wrap gap-2"><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={resumePreviousAttempt} type="button"><RotateCcw aria-hidden="true" className="size-4" />{previousFailedCount ? "Resume failed listing" : "Resume previous plan"}</button><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-amber-400 bg-white px-4 text-sm font-bold text-amber-950 transition hover:bg-amber-100 focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2" onClick={continueFresh} type="button">Continue fresh</button></div></div></div></section> : null}
+        {mode && group && showPreviousAttempt ? <section aria-labelledby="previous-listing-attempt-title" className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm sm:p-5"><div className="flex items-start gap-3"><RotateCcw aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-amber-800" /><div className="min-w-0 flex-1"><p className="text-xs font-bold uppercase tracking-[.12em] text-amber-800">Previous attempt</p><h2 className="mt-1 text-lg font-black text-amber-950" id="previous-listing-attempt-title">A previous listing attempt needs attention</h2><p className="mt-1 text-sm font-medium leading-5 text-amber-950">{previousActiveCount ? `${previousActiveCount} ${previousActiveCount === 1 ? "listing is" : "listings are"} currently active. ` : ""}{previousEndedCount ? `${previousEndedCount} ${previousEndedCount === 1 ? "listing has" : "listings have"} ended. ` : ""}{previousUnfinishedCount} unfinished {previousUnfinishedCount === 1 ? "draft remains" : "drafts remain"}. You can resume it or delete it and start fresh.</p><div className="mt-4 flex flex-wrap gap-2"><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-4 text-sm font-bold text-white transition hover:bg-[#711826] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={resumePreviousAttempt} type="button"><RotateCcw aria-hidden="true" className="size-4" />{previousFailedCount ? "Resume failed listing" : "Resume previous plan"}</button><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-amber-400 bg-white px-4 text-sm font-bold text-amber-950 transition hover:bg-amber-100 focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2" onClick={continueFresh} ref={discardTriggerRef} type="button">Continue fresh</button></div></div></div></section> : null}
         {group && selectedQuantity ? <section aria-label="Listing change preview" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm"><div className="grid lg:grid-cols-2"><div className="p-4 sm:p-5"><p className="text-xs font-bold uppercase tracking-[.12em] text-zinc-500">Current state</p><h2 className="mt-1 text-lg font-black">Active now</h2>{activeOffers.length ? <ul className="mt-3 grid gap-2">{activeOffers.map((offer) => <li className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm" key={offer.listingId}><strong>{offerLabel(offer.kind)} · quantity {offer.quantity}</strong><span className="mt-0.5 block font-medium text-zinc-600">eBay status: {offer.state === "unknown" ? "needs confirmation" : offer.state}</span>{offer.blockedReason ? <span className="mt-1 block font-bold text-rose-800">{offer.blockedReason}</span> : null}</li>)}</ul> : <p className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-5 text-center text-sm font-medium text-zinc-600">No active offers for this exact variant.</p>}{planProblem ? <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-900">{planProblem} Resolve the related offers before publishing.</p> : null}</div><div className="border-t border-zinc-200 bg-zinc-50/70 p-4 sm:p-5 lg:border-l lg:border-t-0"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#8a1f2d]">Planned state</p><h2 className="mt-1 text-lg font-black">After this change</h2><ul className="mt-3 grid gap-2">{changes.map((change, index) => <li className="rounded-md border border-zinc-200 bg-white p-3 text-sm shadow-sm" key={`${change.action}-${index}`}><strong>{change.action}</strong><span className="mt-0.5 block font-medium text-zinc-600">{change.reason}</span></li>)}</ul></div></div></section> : null}
       </div> : null}
 
@@ -763,7 +838,7 @@ export function LinkedOfferListing({
 
       {currentPage === "delivery" ? <section className="rounded-xl border border-zinc-300 bg-white shadow-sm">
         <header className="flex items-start gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-4 sm:px-5"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-[#8a1f2d] shadow-sm ring-1 ring-zinc-200"><Truck aria-hidden="true" className="size-5" /></span><div><h2 className="text-lg font-black">Shared delivery defaults</h2><p className="mt-1 text-sm font-medium text-zinc-600">These delivery details are used by every listing in this plan.</p></div></header>
-        <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3"><label className="text-sm font-bold">Dispatch days<input className={fieldClass} inputMode="numeric" min="1" onChange={(event) => { setShared((current) => ({ ...current, dispatchTimeMax: event.target.value })); setFamilyId(null); }} type="number" value={shared.dispatchTimeMax} /></label><label className="text-sm font-bold">Delivery service<select className={fieldClass} onChange={(event) => { setShared((current) => ({ ...current, shippingService: event.target.value as EbayDeliveryServiceCode })); setFamilyId(null); }} value={shared.shippingService}>{ebayDeliveryServices.map((service) => <option key={service.code} value={service.code}>{service.label}</option>)}</select></label><label className="text-sm font-bold">Delivery cost (£)<input className={fieldClass} inputMode="decimal" onChange={(event) => { setShared((current) => ({ ...current, shippingCost: event.target.value })); setFamilyId(null); }} value={shared.shippingCost} /></label><label className="text-sm font-bold">Item location<input className={fieldClass} onChange={(event) => { setShared((current) => ({ ...current, location: event.target.value })); setFamilyId(null); }} value={shared.location} /></label><label className="text-sm font-bold">Postcode<input className={fieldClass} onChange={(event) => { setShared((current) => ({ ...current, postalCode: event.target.value })); setFamilyId(null); }} value={shared.postalCode} /></label></div>
+        <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3"><label className="text-sm font-bold">Dispatch days<input className={fieldClass} inputMode="numeric" min="1" onChange={(event) => { setShared((current) => ({ ...current, dispatchTimeMax: event.target.value })); setFamilyId(null); }} type="number" value={shared.dispatchTimeMax} /></label><label className="text-sm font-bold">Delivery service<select className={fieldClass} onChange={(event) => { const shippingService = event.target.value as EbayDeliveryServiceCode; const service = ebayDeliveryServices.find((candidate) => candidate.code === shippingService); setShared((current) => ({ ...current, shippingCost: service ? suggestedDeliveryCharge(service) : current.shippingCost, shippingService })); setFamilyId(null); }} value={shared.shippingService}>{ebayDeliveryServices.map((service) => <option key={service.code} value={service.code}>{service.label}</option>)}</select></label><label className="text-sm font-bold">Delivery cost (£)<input aria-describedby="delivery-cost-help" className={fieldClass} inputMode="decimal" onChange={(event) => { setShared((current) => ({ ...current, shippingCost: event.target.value })); setFamilyId(null); }} value={shared.shippingCost} /><span className="text-xs font-medium leading-5 text-zinc-600" id="delivery-cost-help">Defaults to the selected service&apos;s suggested cost plus 40p. You can still edit it.</span></label><label className="text-sm font-bold">Item location<input className={fieldClass} onChange={(event) => { setShared((current) => ({ ...current, location: event.target.value })); setFamilyId(null); }} value={shared.location} /></label><label className="text-sm font-bold">Postcode<input className={fieldClass} onChange={(event) => { setShared((current) => ({ ...current, postalCode: event.target.value })); setFamilyId(null); }} value={shared.postalCode} /></label></div>
       </section> : null}
 
       {currentPage === "review" ? <div className="grid gap-4">
@@ -780,5 +855,6 @@ export function LinkedOfferListing({
     <WizardActions confirmDisabled={!familyId || !operationResults?.length || operationResults.some((result) => result.state === "failed" || result.state === "prepared" || (result.state === "reviewed" && result.review?.readyToPublish !== true))} finalLabel="Publish plan" nextDisabled={currentPage === "stock" && (!mode || !group || !selectedQuantity || Boolean(planProblem))} nextLabel={nextLabel} onBack={() => setStep((current) => Math.max(1, current - 1))} onConfirm={() => void publish()} onNext={next} pending={pending} pendingLabel={currentPage === "review" ? "Reviewing each listing…" : currentPage === "publish" ? "Publishing saved plan…" : "Working…"} step={step} totalSteps={flow.length} />
     {pending ? <span className="sr-only" role="status"><Loader2 className="size-4" />Working on the saved listing plan.</span> : null}
     {successToast ? <div aria-live="polite" className="fixed bottom-4 right-4 z-[100] flex min-h-12 max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg border border-emerald-500 bg-emerald-700 px-4 py-3 text-sm font-bold text-white shadow-xl sm:max-w-sm" role="status"><CheckCircle2 aria-hidden="true" className="size-5 shrink-0" /><span className="flex-1">{successToast}</span><button aria-label="Dismiss success message" className="grid size-8 shrink-0 place-items-center rounded-md text-emerald-50 transition hover:bg-emerald-800 focus-visible:ring-2 focus-visible:ring-white" onClick={() => setSuccessToast(null)} type="button"><X aria-hidden="true" className="size-4" /></button></div> : null}
+    {discardDialogOpen ? <DiscardDraftDialog draftCount={previousUnfinishedCount} error={discardError} onClose={() => { setDiscardDialogOpen(false); setDiscardError(null); }} onConfirm={() => void confirmContinueFresh()} pending={discardPlan.isPending} triggerRef={discardTriggerRef} /> : null}
   </section>;
 }
