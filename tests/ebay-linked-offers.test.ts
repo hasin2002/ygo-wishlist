@@ -179,7 +179,8 @@ test("the card target picker searches a bounded list with full keyboard support"
   assert.match(picker, /event\.key === "Enter"/);
   assert.match(picker, /event\.key === "Escape"/);
   assert.match(picker, /if \(optionPointerDownRef\.current\) return/);
-  assert.match(picker, /onPointerDown=\{\(\) => \{ optionPointerDownRef\.current = true/);
+  assert.match(picker, /event\.pointerType !== "touch"[\s\S]*selectOption\(option\)/);
+  assert.match(picker, /Math\.hypot\([\s\S]*> 10/);
   assert.match(picker, /Showing \{maxResults\} of \{filteredOptions\.length\} matches/);
 });
 

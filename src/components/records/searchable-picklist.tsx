@@ -42,8 +42,10 @@ export function SearchablePicklist({
   const [query, setQuery] = useState(selectedOption?.displayText ?? "");
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionPressRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const optionPointerDownRef = useRef(false);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const suppressClickRef = useRef(false);
   const normalizedQuery = query.trim().toLocaleLowerCase("en-GB");
   const selectedText = selectedOption?.displayText.toLocaleLowerCase("en-GB") ?? "";
 
@@ -53,10 +55,9 @@ export function SearchablePicklist({
     return options.filter((option) => terms.every((term) => option.searchText.includes(term)));
   }, [normalizedQuery, options, selectedText]);
 
-  const orderedOptions = useMemo(() => {
-    if (normalizedQuery !== selectedText || !selectedOption) return filteredOptions;
-    return [selectedOption, ...filteredOptions.filter((option) => option.id !== selectedOption.id)];
-  }, [filteredOptions, normalizedQuery, selectedOption, selectedText]);
+  const orderedOptions = normalizedQuery === selectedText && selectedOption
+    ? [selectedOption, ...filteredOptions.filter((option) => option.id !== selectedOption.id)]
+    : filteredOptions;
   const visibleOptions = orderedOptions.slice(0, maxResults);
   const activeOption = visibleOptions[Math.min(activeIndex, Math.max(visibleOptions.length - 1, 0))] ?? null;
 
@@ -166,14 +167,37 @@ export function SearchablePicklist({
                   id={`${listId}-${option.id}`}
                   key={option.id}
                   onClick={() => {
+                    if (suppressClickRef.current) return;
                     optionPointerDownRef.current = false;
                     selectOption(option);
                   }}
                   onFocus={() => setActiveIndex(index)}
-                  onPointerCancel={() => { optionPointerDownRef.current = false; }}
-                  onPointerDown={() => { optionPointerDownRef.current = true; }}
-                  onPointerUp={() => {
-                    window.setTimeout(() => { optionPointerDownRef.current = false; }, 0);
+                  onPointerCancel={() => {
+                    optionPointerDownRef.current = false;
+                    optionPressRef.current = null;
+                  }}
+                  onPointerDown={(event) => {
+                    optionPointerDownRef.current = true;
+                    optionPressRef.current = event.pointerType === "touch"
+                      ? { id: option.id, x: event.clientX, y: event.clientY }
+                      : null;
+                  }}
+                  onPointerMove={(event) => {
+                    const press = optionPressRef.current;
+                    if (!press || press.id !== option.id) return;
+                    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) {
+                      optionPressRef.current = null;
+                    }
+                  }}
+                  onPointerUp={(event) => {
+                    const press = optionPressRef.current;
+                    optionPointerDownRef.current = false;
+                    optionPressRef.current = null;
+                    if (event.pointerType !== "touch" || press?.id !== option.id) return;
+                    event.preventDefault();
+                    suppressClickRef.current = true;
+                    selectOption(option);
+                    window.setTimeout(() => { suppressClickRef.current = false; }, 500);
                   }}
                   ref={(element) => { optionRefs.current[index] = element; }}
                   role="option"
