@@ -628,6 +628,25 @@ export function LinkedOfferListing({
     }
   }
 
+  function startAnotherCard() {
+    setMode(null);
+    setTargetId("");
+    setVariantKey("");
+    setQuantity(null);
+    setListKept(false);
+    setStep(1);
+    setShared(initialShared);
+    setOffers([]);
+    setFamilyId(null);
+    setOperationResults(null);
+    setMessage(null);
+    setSuccessToast(null);
+    setResumeFamilyId(null);
+    setDismissedRecoveryFamilyId(null);
+    restoredFamilyRef.current = null;
+    router.replace("/records/listings/new", { scroll: false });
+  }
+
   function updateOffer(kind: OfferKind, update: Partial<OfferDraft>) {
     setOffers((current) => {
       const base = current.find((offer) => offer.kind === kind) ?? resolvedOffer(kind);
@@ -819,6 +838,7 @@ export function LinkedOfferListing({
 
   const individual = resolvedOffer("individual");
   const setOffer = desiredSetKind ? resolvedOffer(desiredSetKind) : null;
+  const publicationSucceeded = Boolean(operationResults?.length) && operationResults.every((result) => result.state === "published" && !result.error);
   const nextLabel = currentPage === "stock"
     ? "Set up individual listing"
     : currentPage === "individual" && desiredSetKind
@@ -889,7 +909,7 @@ export function LinkedOfferListing({
 
       {currentPage === "publish" ? <div className="grid gap-4"><section className="rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:p-5"><div className="flex items-start gap-3"><CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 text-emerald-700" /><div><h2 className="text-lg font-black">eBay Review results</h2><p className="mt-1 text-sm font-medium leading-5 text-zinc-600">Each listing was checked separately. Publish is only available when every listing is ready and eBay reports no upfront fee.</p></div></div>{operationResults?.length ? <ul className="mt-4 grid gap-3">{operationResults.map((result) => <ReviewResultCard key={`${result.kind}-${result.state}`} offer={resolvedOffer(result.kind as OfferKind)} quantity={selectedQuantity} result={result} />)}</ul> : <p className="mt-4 text-sm font-semibold text-zinc-600">Run eBay Review to prepare publication.</p>}</section>{operationResults?.some((result) => result.state === "failed" || (result.state === "reviewed" && result.review?.readyToPublish !== true)) ? <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold" onClick={() => { setStep(Math.max(1, flow.findIndex((item) => item.id === "individual") + 1)); setOperationResults(null); }} type="button"><RotateCcw className="size-4" />Edit listings</button> : null}</div> : null}
     </StepPanel>
-    <WizardActions confirmDisabled={!familyId || !operationResults?.length || operationResults.some((result) => result.state === "failed" || result.state === "prepared" || (result.state === "reviewed" && result.review?.readyToPublish !== true))} finalLabel="Publish plan" nextDisabled={currentPage === "stock" && (!mode || !group || !selectedQuantity || Boolean(planProblem))} nextLabel={nextLabel} onBack={() => setStep((current) => Math.max(1, current - 1))} onConfirm={() => void publish()} onNext={next} pending={pending} pendingLabel={currentPage === "review" ? "Reviewing each listing…" : currentPage === "publish" ? "Publishing saved plan…" : "Working…"} step={step} totalSteps={flow.length} />
+    <WizardActions confirmDisabled={!publicationSucceeded && (!familyId || !operationResults?.length || operationResults.some((result) => result.state === "failed" || result.state === "prepared" || (result.state === "reviewed" && result.review?.readyToPublish !== true)))} finalLabel={publicationSucceeded ? "Start listing another card" : "Publish plan"} nextDisabled={currentPage === "stock" && (!mode || !group || !selectedQuantity || Boolean(planProblem))} nextLabel={nextLabel} onBack={() => setStep((current) => Math.max(1, current - 1))} onConfirm={publicationSucceeded ? startAnotherCard : () => void publish()} onNext={next} pending={pending} pendingLabel={currentPage === "review" ? "Reviewing each listing…" : currentPage === "publish" ? "Publishing saved plan…" : "Working…"} step={step} totalSteps={flow.length} />
     {pending ? <span className="sr-only" role="status"><Loader2 className="size-4" />Working on the saved listing plan.</span> : null}
     {successToast ? <div aria-live="polite" className="fixed bottom-4 right-4 z-[100] flex min-h-12 max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg border border-emerald-500 bg-emerald-700 px-4 py-3 text-sm font-bold text-white shadow-xl sm:max-w-sm" role="status"><CheckCircle2 aria-hidden="true" className="size-5 shrink-0" /><span className="flex-1">{successToast}</span><button aria-label="Dismiss success message" className="grid size-8 shrink-0 place-items-center rounded-md text-emerald-50 transition hover:bg-emerald-800 focus-visible:ring-2 focus-visible:ring-white" onClick={() => setSuccessToast(null)} type="button"><X aria-hidden="true" className="size-4" /></button></div> : null}
     {discardDialogOpen ? <DiscardDraftDialog draftCount={previousUnfinishedCount} error={discardError} onClose={() => { setDiscardDialogOpen(false); setDiscardError(null); }} onConfirm={() => void confirmContinueFresh()} pending={discardPlan.isPending} triggerRef={discardTriggerRef} /> : null}
