@@ -3,6 +3,7 @@ import type {
   CardCopy,
   CardCopyUpdate,
   CardPrinting,
+  CardSourceUpdate,
   DataSourceResult,
   RecordDetailsUpdate,
   OpeningInput,
@@ -13,6 +14,7 @@ import type {
   RecordLine,
   RecordLineUpdate,
   RecordsSnapshot,
+  ResolvedProductMetadata,
   SaleInput,
   WishlistTarget,
 } from "./types.ts";
@@ -749,6 +751,66 @@ export function resolveCardAttention(snapshot: RecordsSnapshot, update: {
     ))
   ));
   return { next, result: { ok: true, id: update.targetId } satisfies DataSourceResult };
+}
+
+export function updateCardSource(
+  snapshot: RecordsSnapshot,
+  update: CardSourceUpdate,
+  metadata: ResolvedProductMetadata,
+) {
+  const target = snapshot.targets.find((item) => item.id === update.targetId);
+  const printing = snapshot.printings.find((item) => (
+    item.id === update.printingId && item.targetId === update.targetId
+  ));
+  if (!target || !printing) {
+    return {
+      next: snapshot,
+      result: { ok: false, message: "This Card Printing is no longer in the current snapshot." } satisfies DataSourceResult,
+    };
+  }
+  if (!metadata.rarity.trim()) {
+    return {
+      next: snapshot,
+      result: { ok: false, message: "The new link did not return a rarity, so nothing was changed." } satisfies DataSourceResult,
+    };
+  }
+
+  const next = clone(snapshot);
+  const nextTarget = next.targets.find((item) => item.id === target.id)!;
+  const nextPrinting = next.printings.find((item) => item.id === printing.id)!;
+  const name = metadata.title.trim() || target.name;
+  const rarity = metadata.rarity.trim();
+  const edition = metadata.edition || target.edition;
+  const setName = metadata.setName.trim() || printing.setName;
+  const setCode = metadata.setCode.trim() || printing.setCode;
+  const imageUrl = metadata.imageUrl || printing.imageUrl || target.imageUrl;
+
+  nextTarget.name = name;
+  nextTarget.rarity = rarity;
+  nextTarget.edition = edition;
+  nextTarget.tcgplayerUrl = update.tcgplayerUrl.trim();
+  nextTarget.imageUrl = imageUrl;
+  nextPrinting.setName = setName;
+  nextPrinting.setCode = setCode;
+  nextPrinting.tcgplayerUrl = update.tcgplayerUrl.trim();
+  nextPrinting.imageUrl = imageUrl;
+
+  const copyIds = new Set(next.copies
+    .filter((copy) => copy.printingId === printing.id)
+    .map((copy) => copy.id));
+  for (const record of next.records) {
+    for (const line of record.lines) {
+      if (!line.entityIds.some((entityId) => copyIds.has(entityId))) continue;
+      line.name = name;
+      line.detail = `${setCode || "Unknown code"} · ${edition} · ${rarity}`;
+    }
+  }
+  next.attention = next.attention.filter((item) => (
+    !(item.printingId === printing.id || (
+      item.targetId === target.id && item.field !== "cost"
+    ))
+  ));
+  return { next, result: { ok: true, id: target.id } satisfies DataSourceResult };
 }
 
 function findOrCreatePrinting(
