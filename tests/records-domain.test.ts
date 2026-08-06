@@ -8,7 +8,7 @@ import { ownedCardTotalLabel, paidCostSummary } from "../src/lib/records/paid-co
 import { ordinaryPurchaseCopyAllocations } from "../src/lib/records/purchase-accounting.ts";
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
-import { applyOpening, applyPurchase, changeRecordStatus, createPreviewSnapshot, deleteWishlistTarget, removeCardCopy, replaceRecordCards, updateCardCopy, updateRecordDetails, updateRecordLine } from "../src/lib/records/preview-data.ts";
+import { applyOpening, applyPurchase, changeRecordStatus, createPreviewSnapshot, deleteWishlistTarget, removeCardCopy, replaceRecordCards, updateCardCopy, updateCardSource, updateRecordDetails, updateRecordLine } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
 
 test("physical Copy identifiers prefer sticker and location details over an opaque Copy code", () => {
@@ -156,6 +156,34 @@ test("value presentation keeps physical Copy costs separate from grouped card to
   assert.match(wheelApp, /Known market subtotal/);
   assert.match(wheelApp, /Market est\. \{formatCurrency\(item\.priceValue\)\}/);
   assert.doesNotMatch(wheelApp, /return "Market estimate unknown"/);
+});
+
+test("refetching a Card Printing source updates fetched metadata without changing exact Copies", () => {
+  const snapshot = twoCopyPurchase();
+  const nextUrl = "https://www.tcgplayer.com/product/99999/ash-blossom-quarter-century";
+  const updated = updateCardSource(snapshot, {
+    targetId: "target-ash",
+    printingId: "printing-ash",
+    tcgplayerUrl: nextUrl,
+  }, {
+    title: "Ash Blossom & Joyous Spring",
+    imageUrl: "https://tcgplayer-cdn.tcgplayer.com/product/99999_in_1000x1000.jpg",
+    edition: "1st Edition",
+    rarity: "Quarter Century Secret Rare",
+    setName: "25th Anniversary Rarity Collection",
+    setCode: "RA01-EN008",
+    cardType: "Effect Monster",
+    resolution: "page",
+  });
+
+  assert.equal(updated.result.ok, true);
+  assert.equal(snapshot.targets[0]?.rarity, "Super Rare", "the source snapshot remains immutable");
+  assert.equal(updated.next.targets[0]?.rarity, "Quarter Century Secret Rare");
+  assert.equal(updated.next.targets[0]?.tcgplayerUrl, nextUrl);
+  assert.equal(updated.next.printings[0]?.tcgplayerUrl, nextUrl);
+  assert.equal(updated.next.records[0]?.lines[0]?.detail, "RA01-EN008 · 1st Edition · Quarter Century Secret Rare");
+  assert.deepEqual(updated.next.copies.map((copy) => copy.id), ["copy-one", "copy-two"]);
+  assert.deepEqual(updated.next.copies, snapshot.copies, "Copy identity and state are not rewritten");
 });
 
 test("destructive actions state what remains unchanged", () => {

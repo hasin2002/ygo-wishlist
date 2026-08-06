@@ -20,6 +20,7 @@ import {
   replaceSaleCopies,
   removeCardCopy,
   resolveCardAttention,
+  updateCardSource as updatePreviewCardSource,
   updateRecordLine,
   updateRecordDetails,
   updateCardCopy,
@@ -31,6 +32,7 @@ import {
   type DataSourceResult,
   type CardAttentionUpdate,
   type CardCopyUpdate,
+  type CardSourceUpdate,
   type LibraryCardSuggestion,
   type RecordsDataSource,
   type RecordsDrafts,
@@ -237,6 +239,12 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     createSale: (input) => withSnapshot((current) => applySale(current, input)),
     updateRecordDetails: (recordId, update) => withSnapshot((current) => updateRecordDetails(current, recordId, update)),
     resolveCardAttention: (update: CardAttentionUpdate) => withSnapshot((current) => resolveCardAttention(current, update)),
+    updateCardSource: async (update: CardSourceUpdate) => {
+      const resolved = await resolveTcgplayerProduct(update.tcgplayerUrl);
+      return resolved.ok
+        ? withSnapshot((current) => updatePreviewCardSource(current, update, resolved.metadata))
+        : resolved;
+    },
     resolveEbayCopyLinkAttention: async () => ({ ok: false, message: "eBay Copy-link repairs are available in your live Records." }),
     replaceRecordCards: (recordId, cards) => withSnapshot((current) => replaceRecordCards(current, recordId, cards)),
     replaceSaleCopies: (recordId, copyIds) => withSnapshot((current) => replaceSaleCopies(current, recordId, copyIds)),
@@ -282,6 +290,7 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
   const createSale = trpc.records.createSale.useMutation();
   const updateDetails = trpc.records.updateRecordDetails.useMutation();
   const resolveAttention = trpc.records.resolveCardAttention.useMutation();
+  const updateCardSource = trpc.records.updateCardSource.useMutation();
   const resolveEbayCopyLinkAttention = trpc.records.resolveEbayCopyLinkAttention.useMutation();
   const replaceCards = trpc.records.replaceRecordCards.useMutation();
   const replaceCopies = trpc.records.replaceSaleCopies.useMutation();
@@ -360,6 +369,7 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
       (expectedRevision) => updateDetails.mutateAsync({ recordId, expectedRevision, update }),
     ),
     resolveCardAttention: (update) => finish(resolveAttention.mutateAsync(update)),
+    updateCardSource: (update) => finish(updateCardSource.mutateAsync(update)),
     resolveEbayCopyLinkAttention: (listingId) => finish(
       resolveEbayCopyLinkAttention.mutateAsync({ listingId }),
     ),
@@ -426,6 +436,7 @@ const loadingValue: RecordsDataSource = {
   createSale: async () => ({ ok: false, message: "Records are still loading." }),
   updateRecordDetails: async () => ({ ok: false, message: "Records are still loading." }),
   resolveCardAttention: async () => ({ ok: false, message: "Records are still loading." }),
+  updateCardSource: async () => ({ ok: false, message: "Records are still loading." }),
   resolveEbayCopyLinkAttention: async () => ({ ok: false, message: "Records are still loading." }),
   replaceRecordCards: async () => ({ ok: false, message: "Records are still loading." }),
   replaceSaleCopies: async () => ({ ok: false, message: "Records are still loading." }),

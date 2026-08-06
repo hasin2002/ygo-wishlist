@@ -340,6 +340,11 @@ export type CardAttentionUpdate = {
   setCode: string;
   imageUrl: string | null;
 };
+export type CardSourceUpdate = {
+  targetId: string;
+  printingId: string;
+  tcgplayerUrl: string;
+};
 export type CardCopyUpdate = {
   condition: CardCondition;
   location: string;
@@ -387,6 +392,7 @@ export type RecordsDataSource = {
   createSale: (input: SaleInput) => Promise<DataSourceResult>;
   updateRecordDetails: (recordId: string, update: RecordDetailsUpdate) => Promise<DataSourceResult>;
   resolveCardAttention: (update: CardAttentionUpdate) => Promise<DataSourceResult>;
+  updateCardSource: (update: CardSourceUpdate) => Promise<DataSourceResult>;
   resolveEbayCopyLinkAttention: (listingId: string) => Promise<DataSourceResult>;
   replaceRecordCards: (recordId: string, cards: CardContentsInput[]) => Promise<DataSourceResult>;
   replaceSaleCopies: (recordId: string, copyIds: string[]) => Promise<DataSourceResult>;

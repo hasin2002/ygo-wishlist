@@ -72,6 +72,7 @@ import type {
   RecordLine,
   RecordsDataSource,
   RecordsSnapshot,
+  ResolvedProductMetadata,
   ProductEdition,
   SupplyCategory,
   WishlistTarget,
@@ -1237,6 +1238,8 @@ function InventoryCardSummary({
   libraryStatus,
   knownPurchaseValueCount,
   purchaseValuePence,
+  printing,
+  onEditProductSource,
   soldQuantity,
   selectedCopy,
   target,
@@ -1245,6 +1248,8 @@ function InventoryCardSummary({
   libraryStatus: LibraryCardStatusSummary;
   knownPurchaseValueCount: number;
   purchaseValuePence: number;
+  printing: CardPrinting | null;
+  onEditProductSource?: () => void;
   soldQuantity: number;
   selectedCopy: {
     costPence: number | null;
@@ -1261,6 +1266,16 @@ function InventoryCardSummary({
       knownCopyCount: knownPurchaseValueCount,
       unknownCopyCount: unknownPurchaseValueCount,
     });
+  const productUrl = printing?.tcgplayerUrl || target.tcgplayerUrl;
+  const productUrlLabel = (() => {
+    if (!productUrl) return "No TCGplayer product link saved";
+    try {
+      const parsed = new URL(productUrl);
+      return `${parsed.hostname.replace(/^www\./, "")}${parsed.pathname.replace(/\/$/, "")}`;
+    } catch {
+      return productUrl;
+    }
+  })();
   return (
     <section aria-labelledby="inventory-card-title" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm">
       <div className="grid gap-4 p-4 sm:grid-cols-[5rem_minmax(0,1fr)_auto] sm:items-center sm:p-5">
@@ -1293,8 +1308,125 @@ function InventoryCardSummary({
           <div className="sm:flex sm:min-w-0 sm:flex-col sm:justify-center sm:px-4"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">This Copy’s cost:</dt><dd className="mt-1 font-bold text-zinc-800 tabular-nums">{selectedCopy ? selectedCopy.costPence === null ? "Cost unknown" : formatCurrency(selectedCopy.costPence) : "No Copy selected"}</dd><dd className="mt-0.5 text-xs font-medium text-zinc-500">The allocated share from its source Record.</dd></div>
           <div className="sm:min-w-0 sm:px-4 sm:last:pr-0"><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Acquired from</dt><dd className="mt-1 font-bold text-zinc-800 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-3"><span className="min-w-0">{selectedCopy?.record?.title ?? "Source unavailable"}{selectedCopy?.record ? <span className="mt-0.5 block text-xs font-medium text-zinc-500">{selectedCopy.record.source} · {formatDate(selectedCopy.record.date)}</span> : null}</span>{selectedCopy?.onViewSource ? <button className="mt-1 block min-h-11 shrink-0 text-sm font-bold text-[#8a1f2d] underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] sm:mt-0" onClick={selectedCopy.onViewSource} type="button">View source Record</button> : null}</dd></div>
         </dl>
+        {printing ? (
+          <div className="flex flex-col gap-3 border-t border-zinc-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">Product source</p>
+              <p className="mt-1 truncate text-sm font-bold text-zinc-800" title={productUrlLabel}>{productUrlLabel}</p>
+              <p className="mt-0.5 text-xs font-medium text-zinc-500">Refetch this link to correct rarity and its linked card metadata.</p>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 min-[390px]:flex-row">
+              {productUrl ? <a className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 transition hover:border-zinc-500 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={productUrl} rel="noreferrer" target="_blank">Open link<ArrowUpRight aria-hidden="true" className="size-4" /></a> : null}
+              {onEditProductSource ? <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onEditProductSource} type="button"><RefreshCcw aria-hidden="true" className="size-4" />{productUrl ? "Edit & refetch" : "Add & fetch link"}</button> : null}
+            </div>
+          </div>
+        ) : null}
       </details>
     </section>
+  );
+}
+
+function CardSourceDialog({
+  onClose,
+  onSaved,
+  printing,
+  source,
+  target,
+}: {
+  onClose: () => void;
+  onSaved: (message: string) => void;
+  printing: CardPrinting;
+  source: RecordsDataSource;
+  target: WishlistTarget;
+}) {
+  const initialUrl = printing.tcgplayerUrl || target.tcgplayerUrl || "";
+  const [url, setUrl] = useState(initialUrl);
+  const [preview, setPreview] = useState<ResolvedProductMetadata | null>(null);
+  const [fetchedUrl, setFetchedUrl] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialogRef = useViewportOverlay<HTMLDivElement>({ isOpen: true, onClose });
+  const normalizedUrl = url.trim();
+  const fetchedCurrentUrl = Boolean(preview && fetchedUrl === normalizedUrl);
+
+  async function fetchDetails() {
+    setFetching(true);
+    setError(null);
+    setPreview(null);
+    setFetchedUrl(null);
+    const result = await source.resolveTcgplayerProduct(normalizedUrl);
+    setFetching(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    if (!result.metadata.rarity.trim()) {
+      setError("This link did not return a rarity. Nothing can be updated from it.");
+      return;
+    }
+    setPreview(result.metadata);
+    setFetchedUrl(normalizedUrl);
+  }
+
+  async function saveDetails() {
+    if (!preview || !fetchedCurrentUrl) {
+      setError("Fetch the current link before saving.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const result = await source.updateCardSource({
+      targetId: target.id,
+      printingId: printing.id,
+      tcgplayerUrl: normalizedUrl,
+    });
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    onSaved(result.warning ?? "Product source and fetched card details updated.");
+    onClose();
+  }
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div aria-describedby="card-source-description" aria-labelledby="card-source-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/55 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }} role="dialog">
+      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
+        <header className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
+          <div className="min-w-0"><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">Product source</span><h2 className="mt-1 text-xl font-black" id="card-source-title">Edit and refetch link</h2><p className="mt-1 text-sm font-medium leading-5 text-zinc-500" id="card-source-description">Change only the TCGplayer link. The fetched card details are read-only and will update together.</p></div>
+          <button aria-label="Close product source editor" className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" disabled={saving} onClick={onClose} type="button"><X aria-hidden="true" className="size-5" /></button>
+        </header>
+        <div className="grid gap-4 p-4 sm:p-6">
+          <div>
+            <label className="text-sm font-bold text-zinc-700" htmlFor="card-source-url">TCGplayer product link <span className="text-rose-700">*</span></label>
+            <input aria-describedby="card-source-url-help" autoComplete="off" className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-base font-semibold outline-none transition focus:border-[#8a1f2d] focus:ring-2 focus:ring-[#8a1f2d]/20 sm:text-sm" id="card-source-url" onChange={(event) => { setUrl(event.target.value); setPreview(null); setFetchedUrl(null); setError(null); }} placeholder="https://www.tcgplayer.com/product/…" spellCheck={false} type="url" value={url} />
+            <span className="mt-1 block text-xs font-medium leading-5 text-zinc-500" id="card-source-url-help">Fetching this link refreshes rarity, card name, edition, set/code, image, and card type. Those values are not manually editable here.</span>
+          </div>
+          <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-[#8a1f2d]/30 bg-rose-50 px-4 text-sm font-black text-[#8a1f2d] transition hover:border-[#8a1f2d] hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-50" disabled={fetching || saving || !normalizedUrl} onClick={() => void fetchDetails()} type="button"><RefreshCcw aria-hidden="true" className={`size-4 ${fetching ? "animate-spin" : ""}`} />{fetching ? "Fetching card details…" : "Fetch details from link"}</button>
+          {error ? <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-3 text-sm font-bold leading-5 text-rose-900" role="alert">{error}</p> : null}
+          {preview ? (
+            <section aria-labelledby="fetched-card-title" className="overflow-hidden rounded-lg border border-emerald-300 bg-white shadow-sm">
+              <div className="flex items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900"><Check aria-hidden="true" className="size-4" /><h3 className="text-sm font-black" id="fetched-card-title">Fetched and ready to save</h3></div>
+              <div className="grid gap-4 p-3 sm:grid-cols-[4rem_minmax(0,1fr)]">
+                <div className="mx-auto grid aspect-[59/86] w-16 place-items-center overflow-hidden rounded-md border border-zinc-200 bg-zinc-100 sm:mx-0">{preview.imageUrl ? <Image alt="" className="h-full w-full object-contain" height={120} src={`/api/image-proxy?url=${encodeURIComponent(preview.imageUrl)}`} unoptimized width={82} /> : <WalletCards aria-hidden="true" className="size-6 text-zinc-400" />}</div>
+                <dl className="grid min-w-0 gap-2 text-sm">
+                  <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Card</dt><dd className="mt-0.5 break-words font-black text-zinc-950">{preview.title || target.name}</dd></div>
+                  <div className="grid grid-cols-2 gap-3"><div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">New rarity</dt><dd className="mt-0.5 font-black text-[#8a1f2d]">{preview.rarity}</dd></div><div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Current rarity</dt><dd className="mt-0.5 font-bold text-zinc-600">{target.rarity}</dd></div></div>
+                  <div><dt className="text-xs font-bold uppercase tracking-wide text-zinc-500">Printing</dt><dd className="mt-0.5 font-bold text-zinc-700">{preview.setName || printing.setName}{preview.setCode || printing.setCode ? ` · ${preview.setCode || printing.setCode}` : ""}{preview.edition ? ` · ${preview.edition}` : ""}</dd></div>
+                </dl>
+              </div>
+            </section>
+          ) : (
+            <div className="rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-5 text-center"><RefreshCcw aria-hidden="true" className="mx-auto size-5 text-zinc-400" /><p className="mt-2 text-sm font-bold text-zinc-700">Fetch the link to preview the new rarity</p><p className="mt-1 text-xs font-medium text-zinc-500">Nothing is written to the database until you review and save.</p></div>
+          )}
+        </div>
+        <footer className="flex flex-col-reverse gap-2 border-t border-zinc-300 bg-white p-4 sm:flex-row sm:justify-end sm:px-6"><button className="min-h-11 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-500 hover:text-zinc-950" disabled={saving} onClick={onClose} type="button">Cancel</button><button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-45" disabled={!fetchedCurrentUrl || saving || fetching} onClick={() => void saveDetails()} type="button">{saving ? <><RefreshCcw aria-hidden="true" className="size-4 animate-spin" />Refetching and saving…</> : "Save refreshed details"}</button></footer>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1330,6 +1462,7 @@ function InventoryCardDetailContent({
   const [savingCopy, setSavingCopy] = useState(false);
   const [confirmTargetRemoval, setConfirmTargetRemoval] = useState(false);
   const [deletingTarget, setDeletingTarget] = useState(false);
+  const [editingCardSource, setEditingCardSource] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<InventoryCardSection>("details");
   const target = source.snapshot.targets.find((item) => item.id === targetId) ?? null;
@@ -1341,6 +1474,9 @@ function InventoryCardDetailContent({
     ? requestedCopyId
     : copies[0]?.id ?? null;
   const selectedDetail = copyDetails.find((item) => item.copy.id === effectiveCopyId) ?? null;
+  const productSourcePrinting = selectedDetail?.printing
+    ?? source.snapshot.printings.find((printing) => printing.targetId === targetId)
+    ?? null;
   const selectedVariantCopyIds = selectedDetail
     ? copyDetails.flatMap((item) => (
       item.printing.id === selectedDetail.printing.id
@@ -1467,11 +1603,12 @@ function InventoryCardDetailContent({
 
   return (
     <div className="grid gap-5 sm:gap-6">
+      {editingCardSource && productSourcePrinting ? <CardSourceDialog onClose={() => setEditingCardSource(false)} onSaved={setMessage} printing={productSourcePrinting} source={source} target={target} /> : null}
       <nav aria-label="Inventory breadcrumb">
         <Link className="inline-flex min-h-11 items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={inventoryListHref(listState)}><ArrowLeft aria-hidden="true" className="size-4" /> Back to inventory</Link>
       </nav>
 
-      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} purchaseValuePence={purchaseValuePence} selectedCopy={selectedDetail ? { costPence: selectedDetail.copy.allocationPence, onViewSource: selectedDetail.group.record ? () => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id }) : undefined, record: selectedDetail.group.record } : null} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
+      <InventoryCardSummary libraryStatus={libraryStatus} knownPurchaseValueCount={knownPurchaseValueCount} onEditProductSource={productSourcePrinting ? () => setEditingCardSource(true) : undefined} printing={productSourcePrinting} purchaseValuePence={purchaseValuePence} selectedCopy={selectedDetail ? { costPence: selectedDetail.copy.allocationPence, onViewSource: selectedDetail.group.record ? () => setEditingSource({ lineId: selectedDetail.group.relevantLineId, recordId: selectedDetail.group.record!.id }) : undefined, record: selectedDetail.group.record } : null} soldQuantity={soldQuantity} target={target} unknownPurchaseValueCount={unknownPurchaseValueCount} />
 
       {selectedDetail ? (
         <nav aria-label="Card inventory sections" className="rounded-xl border border-zinc-300 bg-zinc-100 p-0.5 shadow-sm">
