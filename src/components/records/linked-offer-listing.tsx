@@ -838,7 +838,9 @@ export function LinkedOfferListing({
 
   const individual = resolvedOffer("individual");
   const setOffer = desiredSetKind ? resolvedOffer(desiredSetKind) : null;
-  const publicationSucceeded = Boolean(operationResults?.length) && operationResults.every((result) => result.state === "published" && !result.error);
+  const publicationSucceeded = operationResults?.length
+    ? operationResults.every((result) => result.state === "published" && !result.error)
+    : false;
   const nextLabel = currentPage === "stock"
     ? "Set up individual listing"
     : currentPage === "individual" && desiredSetKind
