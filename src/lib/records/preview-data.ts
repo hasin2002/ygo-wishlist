@@ -930,8 +930,18 @@ function addCopies(
 }
 
 export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {
+  const id = input.operationId ? `record-${input.operationId}` : previewId("record");
+  if (snapshot.records.some((record) => record.id === id)) {
+    return {
+      next: snapshot,
+      result: {
+        ok: true,
+        id,
+        warning: "This Purchase was already saved. No duplicate was created.",
+      } satisfies DataSourceResult,
+    };
+  }
   const next = clone(snapshot);
-  const id = previewId("record");
   const lines: RecordLine[] = [];
   let generatedTitle = "Purchase";
 

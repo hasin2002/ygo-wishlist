@@ -283,6 +283,8 @@ export type CardContentsInput = ProductIdentityInput & {
 };
 
 export type PurchaseInput = {
+  /** Stable per-form key so a retry cannot create the Purchase twice. */
+  operationId?: string;
   recordName: string;
   date: string;
   source: string;

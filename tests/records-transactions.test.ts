@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -269,6 +269,38 @@ test("authenticated purchase commits exact Copies and projects the same money in
   assert.equal(cards[0]?.ownedQuantity, 2);
   assert.equal(cards[0]?.paidPriceText, "£1.01");
   assert.equal(cards[0]?.desiredQuantity, 0, "recording a Purchase must not add the card to the Wishlist");
+});
+
+test("retries with the same Purchase operation ID create exactly one Record and one set of Copies", async () => {
+  const operationId = randomUUID();
+  const input = {
+    operationId,
+    kind: "card" as const,
+    recordName: "Idempotent timeout retry",
+    date: "2026-07-29",
+    source: "Local card shop",
+    listingUrl: "",
+    notes: "the response can be lost without duplicating inventory",
+    totalPence: 125,
+    card: card(),
+  };
+
+  const [first, retry] = await Promise.all([
+    records.createPurchase(input),
+    records.createPurchase(input),
+  ]);
+
+  assert.equal(first.id, `record-${operationId}`);
+  assert.equal(retry.id, first.id);
+  assert.equal(
+    [first.warning, retry.warning].filter(Boolean).length,
+    1,
+    "exactly one concurrent request should report that it reused the saved Purchase",
+  );
+  const matchingRecords = await db.select().from(recordEntries).where(eq(recordEntries.id, first.id));
+  const matchingCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, first.id));
+  assert.equal(matchingRecords.length, 1);
+  assert.equal(matchingCopies.length, 1);
 });
 
 test("recorded pack pulls create owned Library cards without adding Wishlist demand", async () => {

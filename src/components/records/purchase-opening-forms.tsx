@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   blankCardContents,
   CardContentsEditor,
@@ -142,6 +142,8 @@ type SealedDraft = ProductIdentityDraft & { quantity: number };
 
 type PurchaseDraft = {
   version: 8;
+  /** Added to version 8 drafts without invalidating drafts saved before this field existed. */
+  submissionId?: string;
   kind: InventoryKind | null;
   recordName: string;
   date: string;
@@ -169,6 +171,7 @@ function isPurchaseDraft(value: unknown): value is PurchaseDraft {
     "amountKnown", "notes", "card", "sealed", "useSealedOverrides", "sealedUnitAllocations", "sealedAllocationsReviewed", "bulkTotalCardCount", "bulkCards", "supplyCategory", "supplyOther", "supplyQuantity",
   ])) return false;
   return value.version === 8
+    && (value.submissionId === undefined || isString(value.submissionId))
     && (value.kind === null || isOneOf(value.kind, ["card", "sealed", "bulk", "supply"] as const))
     && isString(value.recordName)
     && isString(value.date)
@@ -193,9 +196,10 @@ function isPurchaseDraft(value: unknown): value is PurchaseDraft {
     && isInteger(value.supplyQuantity);
 }
 
-function purchaseDraft(prefilledName: string): PurchaseDraft {
+function purchaseDraft(prefilledName: string, submissionId: string): PurchaseDraft {
   return {
     version: 8,
+    submissionId,
     kind: prefilledName ? "card" : null,
     recordName: "",
     date: today(),
@@ -292,8 +296,9 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
   const prefilledPrinting = prefilledTarget
     ? source.snapshot.printings.find((printing) => printing.targetId === prefilledTarget.id)
     : null;
+  const [formSubmissionId] = useState(() => crypto.randomUUID());
   const initialDraft = useMemo<PurchaseDraft>(() => {
-    const initial = purchaseDraft(prefilledTarget?.name || prefilledName);
+    const initial = purchaseDraft(prefilledTarget?.name || prefilledName, formSubmissionId);
     if (!prefilledTarget) return initial;
     const edition: ProductEdition = prefilledTarget.edition.toLowerCase().includes("unlimited")
       ? "Unlimited Edition"
@@ -316,7 +321,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
         editedFields: [],
       },
     };
-  }, [prefilledName, prefilledPrinting, prefilledTarget]);
+  }, [formSubmissionId, prefilledName, prefilledPrinting, prefilledTarget]);
   const launchIntent = useMemo(() => ({
     kind: prefilledTargetId ? "wishlist-target" as const : "none" as const,
     id: prefilledTargetId,
@@ -342,6 +347,13 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
   const equalSealedUnitAllocations = amountKnown && draft.sealed.quantity > 0
     ? allocatePence(totalPence, draft.sealed.quantity).map(penceToPounds)
     : [];
+
+  useEffect(() => {
+    if (!lifecycle.hydrated || draft.submissionId) return;
+    setDraft((current) => current.submissionId
+      ? current
+      : { ...current, submissionId: formSubmissionId });
+  }, [draft.submissionId, formSubmissionId, lifecycle.hydrated, setDraft]);
 
   function detailsError() {
     if (!draft.recordName.trim()) return "Add a short record name before continuing.";
@@ -404,6 +416,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
     setPending(true);
 
     const common = {
+      operationId: draft.submissionId ?? formSubmissionId,
       recordName: draft.recordName.trim(),
       date: draft.date,
       source: resolvedSource,

@@ -96,3 +96,17 @@ test("saved Records surface refresh warnings without offering a duplicate submis
   assert.match(entry, /The Record is saved\. Do not submit it again/);
   assert.match(entry, /role="alert">\{warning\}/);
 });
+
+test("Purchase timeout recovery keeps one durable submission and explains ambiguous completion", () => {
+  const form = source("src/components/records/purchase-opening-forms.tsx");
+  const client = source("src/trpc/client.tsx");
+  const router = source("src/server/routers/records.ts");
+  assert.match(form, /submissionId: formSubmissionId/);
+  assert.match(form, /operationId: draft\.submissionId \?\? formSubmissionId/);
+  assert.match(client, /purchaseRequestTimeoutMs = 60_000/);
+  assert.match(client, /may still have been saved\. Check Records History before retrying/);
+  assert.match(client, /controller\.abort\(new DOMException\(requestTimeout\.message, "TimeoutError"\)\)/);
+  assert.match(router, /const recordId = `record-\$\{input\.operationId\}`/);
+  assert.match(router, /onConflictDoNothing\(\)\.returning/);
+  assert.match(router, /This Purchase was already saved\. No duplicate was created/);
+});

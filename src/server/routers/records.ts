@@ -184,15 +184,18 @@ const commonRecordSchema = z.object({
   source: z.string().trim().min(1).max(120),
   notes: z.string().trim().max(4_000),
 });
+const purchaseRecordSchema = commonRecordSchema.extend({
+  operationId: z.string().uuid().default(randomUUID),
+});
 const purchaseSchema = z.discriminatedUnion("kind", [
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("card"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
     amountKnown: z.boolean().default(true),
     card: cardInputSchema,
   }),
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("sealed"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
@@ -204,7 +207,7 @@ const purchaseSchema = z.discriminatedUnion("kind", [
       unitAllocationsReviewed: z.boolean().optional(),
     }),
   }),
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("bulk"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
@@ -212,7 +215,7 @@ const purchaseSchema = z.discriminatedUnion("kind", [
     cards: z.array(cardInputSchema).min(1),
     totalCardCount: z.number().int().positive().max(1_000_000),
   }),
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("supply"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
@@ -1379,8 +1382,9 @@ export const recordsRouter = router({
 
   createPurchase: authenticatedProcedure.input(purchaseSchema).mutation(async ({ ctx, input }) => {
     const ownerId = ctx.collectionOwnerId;
-    const recordId = id("record");
+    const recordId = `record-${input.operationId}`;
     const now = new Date();
+    let duplicate = false;
     const identifiedCount = input.kind === "bulk"
       ? input.cards.reduce((sum, card) => sum + card.quantity, 0)
       : 0;
@@ -1389,7 +1393,7 @@ export const recordsRouter = router({
     }
 
     await db.transaction(async (tx) => {
-      await insertRecord(tx, {
+      const [createdRecord] = await tx.insert(recordEntries).values({
         id: recordId,
         ownerId,
         type: "purchase",
@@ -1405,7 +1409,23 @@ export const recordsRouter = router({
         revision: 1,
         createdAt: now,
         updatedAt: now,
-      });
+      }).onConflictDoNothing().returning({ id: recordEntries.id });
+
+      if (!createdRecord) {
+        const [existingRecord] = await tx.select({
+          ownerId: recordEntries.ownerId,
+          type: recordEntries.type,
+        }).from(recordEntries).where(eq(recordEntries.id, recordId)).limit(1);
+        if (
+          !existingRecord
+          || existingRecord.ownerId !== ownerId
+          || existingRecord.type !== "purchase"
+        ) {
+          conflict("This Purchase submission ID conflicts with another Record. Start a fresh Purchase and try again.");
+        }
+        duplicate = true;
+        return;
+      }
 
       if (input.kind === "card") {
         const lineId = id("line");
@@ -1524,7 +1544,12 @@ export const recordsRouter = router({
         });
       }
     });
-    return { id: recordId };
+    return {
+      id: recordId,
+      ...(duplicate
+        ? { warning: "This Purchase was already saved. No duplicate was created." }
+        : {}),
+    };
   }),
 
   createOpening: authenticatedProcedure.input(openingSchema).mutation(async ({ ctx, input }) => {
