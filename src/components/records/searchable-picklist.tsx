@@ -42,6 +42,7 @@ export function SearchablePicklist({
   const [query, setQuery] = useState(selectedOption?.displayText ?? "");
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionPointerDownRef = useRef(false);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const normalizedQuery = query.trim().toLocaleLowerCase("en-GB");
   const selectedText = selectedOption?.displayText.toLocaleLowerCase("en-GB") ?? "";
@@ -106,6 +107,9 @@ export function SearchablePicklist({
       className="relative focus-within:z-30"
       onBlur={(event) => {
         if (containerRef.current?.contains(event.relatedTarget)) return;
+        // Safari may not focus a tapped button, so relatedTarget can be null.
+        // Keep the list mounted until the option's click selects it.
+        if (optionPointerDownRef.current) return;
         closeAndRestore();
       }}
       ref={containerRef}
@@ -161,8 +165,16 @@ export function SearchablePicklist({
                   className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${isActive ? "bg-zinc-100" : "hover:bg-zinc-50"} ${isSelected ? "text-[#8a1f2d]" : "text-zinc-900"}`}
                   id={`${listId}-${option.id}`}
                   key={option.id}
-                  onClick={() => selectOption(option)}
+                  onClick={() => {
+                    optionPointerDownRef.current = false;
+                    selectOption(option);
+                  }}
                   onFocus={() => setActiveIndex(index)}
+                  onPointerCancel={() => { optionPointerDownRef.current = false; }}
+                  onPointerDown={() => { optionPointerDownRef.current = true; }}
+                  onPointerUp={() => {
+                    window.setTimeout(() => { optionPointerDownRef.current = false; }, 0);
+                  }}
                   ref={(element) => { optionRefs.current[index] = element; }}
                   role="option"
                   type="button"
