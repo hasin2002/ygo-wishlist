@@ -29,6 +29,28 @@ export function blankCardContents(name = ""): CardContentsDraft {
   };
 }
 
+// A blank row is created as soon as someone starts adding another card. It is
+// safe to discard only while it still exactly matches that untouched state.
+// Any edit, fetch attempt, or quantity change means the row must be completed.
+export function isUntouchedNewCardContents(row: CardContentsDraft) {
+  return row.id.startsWith("card-")
+    && row.quantity === 1
+    && row.selectedTargetId === null
+    && !row.tcgplayerUrl
+    && !row.name
+    && row.imageUrl === null
+    && row.edition === "1st Edition"
+    && !row.rarity
+    && !row.setName
+    && !row.setCode
+    && !row.cardType
+    && row.fetchStatus === "idle"
+    && !row.fetchAttempted
+    && !row.fetchMessage
+    && !row.metadataNeedsAttention
+    && !row.editedFields.length;
+}
+
 export function cardContentsError(row: CardContentsDraft) {
   if (!isTcgplayerProductUrl(row.tcgplayerUrl)) return "Add a complete TCGplayer product link.";
   if (!row.fetchAttempted) return "Fetch the card details at least once.";
@@ -94,14 +116,23 @@ export function CardContentsEditor({
     return true;
   }
 
-  function addCard() {
-    if (!finishCard()) return;
+  function startAnotherCard() {
     const row = blankCardContents();
     // A newly added card is the immediate next task. Put it above completed
     // cards so its form opens directly below the add action rather than at the
     // bottom of a long Bulk or Pack Opening list.
     onChange([row, ...rows]);
     setActiveId(row.id);
+  }
+
+  function addCard() {
+    if (!finishCard()) return;
+    startAnotherCard();
+  }
+
+  function finishAndAddCard() {
+    if (!finishCard()) return;
+    startAnotherCard();
   }
 
   return (
@@ -121,7 +152,7 @@ export function CardContentsEditor({
           <div className="sticky top-2 z-10 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-t-lg border-b border-zinc-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur-sm">
             <div><p className="text-xs font-black uppercase tracking-[0.12em] text-[#8a1f2d]">{noun} {index + 1}</p><p className="mt-1 text-sm font-medium text-zinc-500">Fetch, check, then collapse this card.</p></div>
             <div className="flex flex-wrap items-center gap-2">
-              <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={finishCard} type="button"><Check className="size-4" /> Done with this card</button>
+              <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={finishAndAddCard} type="button"><Check className="size-4" /> Done with this card</button>
               {rows.length > 1 || allowRemoveLast ? (
               <button
                 aria-label={`Remove ${noun} ${index + 1}`}

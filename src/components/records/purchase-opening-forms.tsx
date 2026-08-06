@@ -16,6 +16,7 @@ import {
   blankCardContents,
   CardContentsEditor,
   cardContentsError,
+  isUntouchedNewCardContents,
   type CardContentsDraft,
 } from "@/components/records/card-contents-editor";
 import {
@@ -269,6 +270,13 @@ function cardCountSummary(cards: Array<{ quantity: number }>) {
   return `${cards.length} card ${cards.length === 1 ? "type" : "types"} · ${copies} ${copies === 1 ? "copy" : "copies"}`;
 }
 
+function completedCardContents(rows: CardContentsDraft[]) {
+  const completed = rows.filter((row) => !isUntouchedNewCardContents(row));
+  // The first card is still required. Later untouched rows are merely an
+  // abandoned "Add another card" draft and should not block the wizard.
+  return completed.length ? completed : rows;
+}
+
 export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?: string) => void }) {
   const source = useRecordsDataSource();
   const router = useRouter();
@@ -362,12 +370,13 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
       }
     }
     if (draft.kind === "bulk") {
-      if (!draft.bulkCards.length) return "Add at least one identified card.";
+      const bulkCards = completedCardContents(draft.bulkCards);
+      if (!bulkCards.length) return "Add at least one identified card.";
       const totalCardCount = Number(draft.bulkTotalCardCount);
-      const identifiedCopies = draft.bulkCards.reduce((sum, card) => sum + card.quantity, 0);
+      const identifiedCopies = bulkCards.reduce((sum, card) => sum + card.quantity, 0);
       if (!Number.isInteger(totalCardCount) || totalCardCount < 1) return "Add the exact total number of physical cards in the lot.";
       if (totalCardCount < identifiedCopies) return `The lot total cannot be less than the ${identifiedCopies} identified physical copies.`;
-      for (const card of draft.bulkCards) {
+      for (const card of bulkCards) {
         const problem = cardContentsError(card);
         if (problem) return `${card.name || "A bulk card"}: ${problem}`;
       }
@@ -411,7 +420,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
           unitAllocationsReviewed: draft.useSealedOverrides ? draft.sealedAllocationsReviewed : undefined,
         } })
         : draft.kind === "bulk"
-          ? source.createPurchase({ ...common, kind: "bulk", cards: draft.bulkCards.map((card) => ({ ...productInput(card), id: card.id, quantity: card.quantity })), totalCardCount: Number(draft.bulkTotalCardCount) })
+          ? source.createPurchase({ ...common, kind: "bulk", cards: completedCardContents(draft.bulkCards).map((card) => ({ ...productInput(card), id: card.id, quantity: card.quantity })), totalCardCount: Number(draft.bulkTotalCardCount) })
           : source.createPurchase({ ...common, kind: "supply", category: draft.supplyCategory, otherName: draft.supplyOther.trim(), quantity: draft.supplyQuantity }));
 
     setPending(false);
@@ -469,7 +478,7 @@ export function PurchaseForm({ onSaved }: { onSaved: (recordId: string, warning?
           <div className="flex items-center justify-between"><h3 className="font-bold">{selectedKind?.label}</h3><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button></div>
           {draft.kind === "card" ? <ProductReview item={draft.card} quantity={draft.card.quantity} /> : null}
           {draft.kind === "sealed" ? <><ProductReview item={draft.sealed} kind="sealed" quantity={draft.sealed.quantity} />{draft.useSealedOverrides ? <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-700">Reviewed unit costs: {draft.sealedUnitAllocations.map((value, index) => `Unit ${index + 1}: £${value || "0.00"}`).join(" · ")}</p> : amountKnown ? <p className="text-sm font-medium text-zinc-600">Each exact unit: {equalSealedUnitAllocations.map((value) => `£${value}`).join(" · ")}</p> : <p className="text-sm font-medium text-zinc-600">Each exact unit cost remains unknown.</p>}</> : null}
-          {draft.kind === "bulk" ? <><div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium"><strong className="font-bold">{cardCountSummary(draft.bulkCards)}</strong><span className="mt-1 block text-zinc-600">{draft.bulkCards.reduce((sum, card) => sum + card.quantity, 0)} identified of {draft.bulkTotalCardCount} total cards · allocation uses £{penceToPounds(totalPence)} ÷ {draft.bulkTotalCardCount}</span></div>{draft.bulkCards.map((card) => <ProductReview item={card} key={card.id} quantity={card.quantity} />)}</> : null}
+          {draft.kind === "bulk" ? <><div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium"><strong className="font-bold">{cardCountSummary(completedCardContents(draft.bulkCards))}</strong><span className="mt-1 block text-zinc-600">{completedCardContents(draft.bulkCards).reduce((sum, card) => sum + card.quantity, 0)} identified of {draft.bulkTotalCardCount} total cards · allocation uses £{penceToPounds(totalPence)} ÷ {draft.bulkTotalCardCount}</span></div>{completedCardContents(draft.bulkCards).map((card) => <ProductReview item={card} key={card.id} quantity={card.quantity} />)}</> : null}
           {draft.kind === "supply" ? <div className="rounded-lg border border-zinc-200 p-3"><p className="font-bold capitalize">{draft.supplyCategory === "other" ? draft.supplyOther : draft.supplyCategory}</p><p className="mt-1 text-sm font-medium text-zinc-500">Quantity {draft.supplyQuantity}</p></div> : null}
         </div>
         <div className="mt-4 rounded-lg border border-zinc-200 p-3"><span className="text-xs font-bold uppercase text-zinc-500">Notes</span><p className="mt-1 whitespace-pre-wrap text-sm font-medium text-zinc-700">{draft.notes || "No purchase notes."}</p></div>
@@ -617,8 +626,9 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?:
   }
 
   function pullsError() {
-    if (!draft.pulls.length) return "Add at least one pulled card.";
-    for (const pull of draft.pulls) {
+    const pulls = completedCardContents(draft.pulls);
+    if (!pulls.length) return "Add at least one pulled card.";
+    for (const pull of pulls) {
       const problem = cardContentsError(pull);
       if (problem) return `${pull.name || "A pulled card"}: ${problem}`;
     }
@@ -647,7 +657,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?:
       totalPence: openingTotalPence,
       amountKnown: openingAmountKnown,
       useTrackedStock: draft.acquisitionMode === "tracked",
-      pulls: draft.pulls.map((pull) => ({ ...productInput(pull), id: pull.id, quantity: pull.quantity })),
+      pulls: completedCardContents(draft.pulls).map((pull) => ({ ...productInput(pull), id: pull.id, quantity: pull.quantity })),
     });
     setPending(false);
     if (!result.ok) { setError(result.message); return; }
@@ -677,7 +687,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?:
 
       {step === 4 ? <StepPanel step={step}><div className="grid gap-4"><PreviewNotice label={source.mode === "preview" ? "Preview only." : "Review before saving."}>This is a read-only review. Nothing has been saved; only the confirmation button below creates the {source.mode === "preview" ? "preview " : ""}opening.</PreviewNotice><FormSection description="Check the product, source, date, pulled cards, and notes. Use Edit to correct a section." number={4} title="Review opening">
         <div className="flex items-start justify-between gap-3"><div><span className="text-xs font-bold uppercase text-zinc-500">Record name</span><h3 className="mt-1 font-bold">{draft.recordName}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Opened product · {openingSource} · {draft.date}</p></div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button></div><div className="mt-3"><ProductReview item={draft.product} kind="sealed" quantity={1} /></div>
-        <div className="mt-5 flex items-start justify-between gap-3"><div><h3 className="font-bold">Pulled cards</h3><p className="mt-1 text-sm font-medium text-zinc-500">{cardCountSummary(draft.pulls)}</p></div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button></div><div className="mt-3 grid gap-3">{draft.pulls.map((pull) => <ProductReview item={pull} key={pull.id} quantity={pull.quantity} />)}</div>
+        <div className="mt-5 flex items-start justify-between gap-3"><div><h3 className="font-bold">Pulled cards</h3><p className="mt-1 text-sm font-medium text-zinc-500">{cardCountSummary(completedCardContents(draft.pulls))}</p></div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(3)} type="button"><Pencil className="size-4" /> Edit</button></div><div className="mt-3 grid gap-3">{completedCardContents(draft.pulls).map((pull) => <ProductReview item={pull} key={pull.id} quantity={pull.quantity} />)}</div>
         <div className="mt-4 rounded-lg border border-zinc-200 p-3"><span className="text-xs font-bold uppercase text-zinc-500">Notes</span><p className="mt-1 whitespace-pre-wrap text-sm font-medium text-zinc-700">{draft.notes || "No opening notes."}</p></div>
         <div className="mt-4 rounded-lg border border-[#8a1f2d]/30 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-950"><strong className="block font-black">Ready to record?</strong><p className="mt-1">Confirm only after the product and every pulled card are correct.</p></div>
       </FormSection></div></StepPanel> : null}
