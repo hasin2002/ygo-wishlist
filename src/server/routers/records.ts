@@ -539,7 +539,10 @@ async function findOrCreatePrinting(
       normalizedRarity,
       edition: input.edition,
       normalizedEdition: normalizedEditionValue,
-      desiredQuantity: 1,
+      // A target created while recording a physical Copy belongs in the
+      // collection, not the Wishlist. Explicitly created Wishlist targets
+      // keep their normal default of one wanted Copy.
+      desiredQuantity: 0,
       imageUrl: input.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl,
       createdAt: now,
