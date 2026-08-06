@@ -267,6 +267,42 @@ test("authenticated purchase commits exact Copies and projects the same money in
   assert.equal(cards.length, 1);
   assert.equal(cards[0]?.ownedQuantity, 2);
   assert.equal(cards[0]?.paidPriceText, "£1.01");
+  assert.equal(cards[0]?.desiredQuantity, 0, "recording a Purchase must not add the card to the Wishlist");
+});
+
+test("recorded pack pulls create owned Library cards without adding Wishlist demand", async () => {
+  const opening = await records.createOpening({
+    recordName: "Wishlist-free pack pull",
+    date: "2026-07-29",
+    source: "Local card shop",
+    totalPence: 400,
+    useTrackedStock: false,
+    sealedUnitId: null,
+    notes: "",
+    product: {
+      imageUrl: null,
+      name: "Wishlist-free booster",
+      edition: "1st Edition",
+      metadataNeedsAttention: false,
+      rarity: "Sealed",
+      selectedTargetId: null,
+      setCode: "TEST-OPENING",
+      setName: "Transaction Test",
+      tcgplayerUrl: "https://www.tcgplayer.com/product/990001/wishlist-free-booster",
+    },
+    pulls: [{
+      ...card(),
+      id: "wishlist-free-pack-pull",
+      name: "Wishlist-free Pack Pull",
+      tcgplayerUrl: "https://www.tcgplayer.com/product/990002/wishlist-free-pack-pull",
+    }],
+  });
+  assert.ok(opening.id);
+
+  const cards = await library.list({ query: "Wishlist-free Pack Pull", status: "all" });
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0]?.ownedQuantity, 1);
+  assert.equal(cards[0]?.desiredQuantity, 0, "recording a pack pull must not add the card to the Wishlist");
 });
 
 test("reviewed sealed-unit reconciliation is a timestamp-stable repeated apply", async () => {
