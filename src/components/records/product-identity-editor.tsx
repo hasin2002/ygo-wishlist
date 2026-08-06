@@ -156,18 +156,19 @@ export function ProductIdentityEditor({
     }
   }
 
-  async function fetchDetails(force = false) {
-    const replacingProduct = value.fetchStatus === "stale";
-    const requestedUrl = value.tcgplayerUrl.trim();
+  async function fetchDetails(force = false, draftOverride?: ProductIdentityDraft) {
+    const currentValue = draftOverride ?? value;
+    const replacingProduct = currentValue.fetchStatus === "stale";
+    const requestedUrl = currentValue.tcgplayerUrl.trim();
     const requestValue: ProductIdentityDraft = replacingProduct
       ? {
           ...blankProductIdentity("", kind === "card" ? "1st Edition" : ""),
-          selectedTargetId: value.selectedTargetId,
+          selectedTargetId: currentValue.selectedTargetId,
           tcgplayerUrl: requestedUrl,
           fetchAttempted: true,
         }
       : {
-          ...value,
+          ...currentValue,
           tcgplayerUrl: requestedUrl,
         };
 
@@ -186,8 +187,8 @@ export function ProductIdentityEditor({
     }
     if (
       !replacingProduct &&
-      value.editedFields.length &&
-      value.fetchAttempted &&
+      currentValue.editedFields.length &&
+      currentValue.fetchAttempted &&
       !force
     ) {
       setConfirmOverwrite(true);
@@ -252,6 +253,23 @@ export function ProductIdentityEditor({
     });
   }
 
+  function updateTcgplayerUrl(nextUrl: string) {
+    requestId.current += 1;
+    setConfirmOverwrite(false);
+    setFetchError(null);
+    const nextValue = {
+      ...value,
+      tcgplayerUrl: nextUrl,
+      fetchStatus: value.fetchAttempted ? "stale" : "idle",
+      fetchMessage: value.fetchAttempted
+        ? "Link changed. Fetch details again before continuing. Previous details will be cleared when you fetch."
+        : "",
+      metadataNeedsAttention: value.fetchAttempted,
+    } as ProductIdentityDraft;
+    onChange(nextValue);
+    return nextValue;
+  }
+
   return (
     <div className="grid gap-4">
       <DestructiveToast message={fetchError} onDismiss={() => setFetchError(null)} />
@@ -262,19 +280,13 @@ export function ProductIdentityEditor({
             autoComplete="off"
             className={fieldClass}
             inputMode="url"
-            onChange={(event) => {
-              requestId.current += 1;
-              setConfirmOverwrite(false);
-              setFetchError(null);
-              onChange({
-                ...value,
-                tcgplayerUrl: event.target.value,
-                fetchStatus: value.fetchAttempted ? "stale" : "idle",
-                fetchMessage: value.fetchAttempted
-                  ? "Link changed. Fetch details again before continuing. Previous details will be cleared when you fetch."
-                  : "",
-                metadataNeedsAttention: value.fetchAttempted,
-              });
+            onChange={(event) => updateTcgplayerUrl(event.target.value)}
+            onPaste={(event) => {
+              const pastedUrl = event.clipboardData.getData("text").trim();
+              if (!pastedUrl) return;
+              event.preventDefault();
+              const nextValue = updateTcgplayerUrl(pastedUrl);
+              void fetchDetails(false, nextValue);
             }}
             placeholder="https://www.tcgplayer.com/product/…"
             required
