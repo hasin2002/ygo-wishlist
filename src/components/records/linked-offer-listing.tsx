@@ -1,12 +1,15 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowLeft,
   Boxes,
   CheckCircle2,
   ChevronDown,
+  ExternalLink,
   ImageIcon,
   Layers3,
   Loader2,
@@ -55,6 +58,7 @@ import {
   linkedOfferDescription,
   linkedOfferTitle,
 } from "@/lib/records/linked-offer-copy";
+import { ebaySoldListingsUrl } from "@/lib/records/ebay-sold-listings";
 import { cardConditionOptions, isCardCondition, type CardCondition } from "@/lib/records/types";
 import { trpc } from "@/trpc/client";
 
@@ -266,6 +270,8 @@ function OfferPage({
   onUpdate,
   printingId,
   quantityLabel,
+  rarity,
+  setCode,
   sourceCopyIds,
 }: {
   canManage: boolean;
@@ -277,8 +283,17 @@ function OfferPage({
   onUpdate: (update: Partial<OfferDraft>) => void;
   printingId: string;
   quantityLabel: string;
+  rarity: string;
+  setCode: string;
   sourceCopyIds: string[];
 }) {
+  const soldListingsUrl = ebaySoldListingsUrl({
+    edition,
+    name: cardName,
+    rarity,
+    setCode,
+  });
+
   return <div className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,.95fr)]">
     <section className="rounded-xl border border-zinc-300 bg-white p-4 shadow-sm sm:p-5">
       <p className="text-xs font-bold uppercase tracking-[.12em] text-[#8a1f2d]">{offerLabel(offer.kind)}</p>
@@ -286,6 +301,22 @@ function OfferPage({
       <p className="mt-1 text-sm font-medium leading-6 text-zinc-600">{quantityLabel}</p>
       <div className="mt-5 grid gap-4">
         <label className="text-sm font-bold">Title <span className="font-medium text-zinc-500">({offer.title.length}/80)</span><input className={fieldClass} maxLength={80} onChange={(event) => onUpdate({ title: event.target.value })} value={offer.title} /></label>
+        <aside aria-labelledby={`sold-listings-title-${offer.kind}`} className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-[#8a1f2d] ring-1 ring-zinc-200">
+              <ExternalLink aria-hidden="true" className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <h3 className="font-black text-zinc-950" id={`sold-listings-title-${offer.kind}`}>Check sold prices</h3>
+              <p className="mt-0.5 text-sm font-medium leading-5 text-zinc-600">Compare completed eBay sales for this exact Printing before setting your price.</p>
+            </div>
+          </div>
+          <a className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-800 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={soldListingsUrl} rel="noreferrer" target="_blank">
+            View sold listings
+            <ExternalLink aria-hidden="true" className="size-4" />
+            <span className="sr-only"> for {cardName} (opens in a new tab)</span>
+          </a>
+        </aside>
         <label className="text-sm font-bold">Price (£)<input className={fieldClass} inputMode="decimal" onChange={(event) => onUpdate({ price: event.target.value })} value={offer.price} /></label>
         <label className="text-sm font-bold">Description<textarea className={`${textAreaClass} min-h-72 leading-6`} maxLength={4000} onChange={(event) => onUpdate({ description: event.target.value })} value={offer.description} /></label>
       </div>
@@ -801,6 +832,12 @@ export function LinkedOfferListing({
             : "Publish plan";
 
   return <section aria-labelledby="linked-listing-title" className="mx-auto grid w-full max-w-5xl gap-4 pb-28 sm:gap-5 sm:pb-6">
+    <nav aria-label="Listing breadcrumb">
+      <Link className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 transition hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href="/records/listings" replace>
+        <ArrowLeft aria-hidden="true" className="size-4" />
+        Back to Listings
+      </Link>
+    </nav>
     <header className="max-w-3xl"><p className="text-xs font-bold uppercase tracking-[.14em] text-[#8a1f2d]">eBay</p><h1 className="mt-1 text-2xl font-black text-zinc-950" id="linked-listing-title">Create listing</h1><p className="mt-1 text-sm font-medium leading-6 text-zinc-600">Set up each offer on its own page, then check the exact stock and eBay changes before publishing.</p></header>
     <WizardProgress labels={flow.map((item) => item.label)} step={step} />
     {message ? <p className={`rounded-lg border p-3 text-sm font-semibold ${message.includes("success") || message.includes("passed") ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-950"}`} role="status">{message}</p> : null}
@@ -833,8 +870,8 @@ export function LinkedOfferListing({
         {group && selectedQuantity ? <section aria-label="Listing change preview" className="overflow-hidden rounded-xl border border-zinc-300 bg-white shadow-sm"><div className="grid lg:grid-cols-2"><div className="p-4 sm:p-5"><p className="text-xs font-bold uppercase tracking-[.12em] text-zinc-500">Current state</p><h2 className="mt-1 text-lg font-black">Active now</h2>{activeOffers.length ? <ul className="mt-3 grid gap-2">{activeOffers.map((offer) => <li className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm" key={offer.listingId}><strong>{offerLabel(offer.kind)} · quantity {offer.quantity}</strong><span className="mt-0.5 block font-medium text-zinc-600">eBay status: {offer.state === "unknown" ? "needs confirmation" : offer.state}</span>{offer.blockedReason ? <span className="mt-1 block font-bold text-rose-800">{offer.blockedReason}</span> : null}</li>)}</ul> : <p className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-5 text-center text-sm font-medium text-zinc-600">No active offers for this exact variant.</p>}{planProblem ? <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 p-3 text-sm font-bold text-rose-900">{planProblem} Resolve the related offers before publishing.</p> : null}</div><div className="border-t border-zinc-200 bg-zinc-50/70 p-4 sm:p-5 lg:border-l lg:border-t-0"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#8a1f2d]">Planned state</p><h2 className="mt-1 text-lg font-black">After this change</h2><ul className="mt-3 grid gap-2">{changes.map((change, index) => <li className="rounded-md border border-zinc-200 bg-white p-3 text-sm shadow-sm" key={`${change.action}-${index}`}><strong>{change.action}</strong><span className="mt-0.5 block font-medium text-zinc-600">{change.reason}</span></li>)}</ul></div></div></section> : null}
       </div> : null}
 
-      {currentPage === "individual" && individual && group ? <OfferPage canManage={source.mode === "live"} cardName={group.target.name} condition={group.condition} edition={group.target.edition} offer={individual} onPhotosChange={(images) => updateOffer(individual.kind, { photos: reusablePhotos(images) })} onUpdate={(update) => updateOffer(individual.kind, update)} printingId={group.printing.id} quantityLabel={`You’re creating one eBay listing with quantity ${selectedQuantity}. Each purchase is for one matching Copy.`} sourceCopyIds={selectedCopyIds} /> : null}
-      {currentPage === "set" && setOffer && group ? <OfferPage canManage={source.mode === "live"} cardName={group.target.name} condition={group.condition} edition={group.target.edition} offer={setOffer} onPhotosChange={(images) => updateOffer(setOffer.kind, { photos: reusablePhotos(images) })} onUpdate={(update) => updateOffer(setOffer.kind, update)} printingId={group.printing.id} quantityLabel={`This is one ${setOffer.kind} listing. Each purchase includes ${setOffer.kind === "x2" ? 2 : 3} matching Copies.`} sourceCopyIds={selectedCopyIds} /> : null}
+      {currentPage === "individual" && individual && group ? <OfferPage canManage={source.mode === "live"} cardName={group.target.name} condition={group.condition} edition={group.target.edition} offer={individual} onPhotosChange={(images) => updateOffer(individual.kind, { photos: reusablePhotos(images) })} onUpdate={(update) => updateOffer(individual.kind, update)} printingId={group.printing.id} quantityLabel={`You’re creating one eBay listing with quantity ${selectedQuantity}. Each purchase is for one matching Copy.`} rarity={group.target.rarity} setCode={group.printing.setCode} sourceCopyIds={selectedCopyIds} /> : null}
+      {currentPage === "set" && setOffer && group ? <OfferPage canManage={source.mode === "live"} cardName={group.target.name} condition={group.condition} edition={group.target.edition} offer={setOffer} onPhotosChange={(images) => updateOffer(setOffer.kind, { photos: reusablePhotos(images) })} onUpdate={(update) => updateOffer(setOffer.kind, update)} printingId={group.printing.id} quantityLabel={`This is one ${setOffer.kind} listing. Each purchase includes ${setOffer.kind === "x2" ? 2 : 3} matching Copies.`} rarity={group.target.rarity} setCode={group.printing.setCode} sourceCopyIds={selectedCopyIds} /> : null}
 
       {currentPage === "delivery" ? <section className="rounded-xl border border-zinc-300 bg-white shadow-sm">
         <header className="flex items-start gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-4 sm:px-5"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-[#8a1f2d] shadow-sm ring-1 ring-zinc-200"><Truck aria-hidden="true" className="size-5" /></span><div><h2 className="text-lg font-black">Shared delivery defaults</h2><p className="mt-1 text-sm font-medium text-zinc-600">These delivery details are used by every listing in this plan.</p></div></header>

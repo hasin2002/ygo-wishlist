@@ -119,6 +119,7 @@ test("the grouped UI retires Copy-led and mixed-lot entry points", () => {
   assert.match(inventory, /linkedListingHref\(target\.id, selectedDetail\.printing\.id, selectedDetail\.copy\.condition\)/);
   assert.match(grouped, /Sell cards individually/);
   assert.match(grouped, /Create linked listings/);
+  assert.match(grouped, /aria-label="Listing breadcrumb"[\s\S]*href="\/records\/listings"[\s\S]*Back to Listings/);
   assert.match(grouped, /Active now/);
   assert.match(grouped, /After this change/);
   assert.match(grouped, /Exact selected Copies/);
