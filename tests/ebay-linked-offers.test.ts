@@ -119,6 +119,7 @@ test("the grouped UI retires Copy-led and mixed-lot entry points", () => {
   assert.match(inventory, /linkedListingHref\(target\.id, selectedDetail\.printing\.id, selectedDetail\.copy\.condition\)/);
   assert.match(grouped, /Sell cards individually/);
   assert.match(grouped, /Create linked listings/);
+  assert.match(grouped, /aria-label="Listing breadcrumb"[\s\S]*href="\/records\/listings"[\s\S]*Back to Listings/);
   assert.match(grouped, /Active now/);
   assert.match(grouped, /After this change/);
   assert.match(grouped, /Exact selected Copies/);
@@ -177,6 +178,9 @@ test("the card target picker searches a bounded list with full keyboard support"
   assert.match(picker, /event\.key === "ArrowDown"/);
   assert.match(picker, /event\.key === "Enter"/);
   assert.match(picker, /event\.key === "Escape"/);
+  assert.match(picker, /if \(optionPointerDownRef\.current\) return/);
+  assert.match(picker, /event\.pointerType !== "touch"[\s\S]*selectOption\(option\)/);
+  assert.match(picker, /Math\.hypot\([\s\S]*> 10/);
   assert.match(picker, /Showing \{maxResults\} of \{filteredOptions\.length\} matches/);
 });
 
