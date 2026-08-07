@@ -254,6 +254,10 @@ test("Actions workspace keeps safe recovery controls and a human-facing paginate
   assert.match(component, /scrollIntoView\(\{ block: "start" \}\)/);
   assert.match(component, /refreshListingStatusById/);
   assert.match(component, /resolveEbayCopyLinkAttention/);
+  assert.match(component, /perform\(confirmCopyLink\.mutateAsync[\s\S]*?, "listing"\)/);
+  assert.match(component, /perform\(refresh\.mutateAsync[\s\S]*?, "listing"\)/);
+  assert.match(component, /perform\(dismiss\.mutateAsync[\s\S]*?, "actions"\)/);
+  assert.doesNotMatch(component, /const refreshQueries/);
   assert.match(component, /Open live listing/);
   assert.match(component, /const open = action\.status === "open"/);
   assert.match(component, /cardImageUrl: target\?\.imageUrl \?\? printing\?\.imageUrl \?\? null/);

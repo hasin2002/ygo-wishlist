@@ -10,8 +10,8 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import { DataLoadError } from "@/components/data-load-error";
 import { PreviewNotice } from "@/components/records/entry-form-ui";
@@ -19,6 +19,9 @@ import { OpeningForm, PurchaseForm } from "@/components/records/purchase-opening
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { SaleForm } from "@/components/records/sale-form";
 import { taskReturnHref } from "@/lib/navigation-intent";
+import type { RecordsDataSource, RecordsSnapshot } from "@/lib/records/types";
+import { RecordEditorDialog } from "@/components/records/records-app";
+import { trpc } from "@/trpc/client";
 
 export type EntryFlow = "purchase" | "pack-opening" | "sale";
 
@@ -39,6 +42,36 @@ const flowContent: Record<EntryFlow, { title: string; description: string; icon:
     icon: <ReceiptText className="size-5" />,
   },
 };
+
+function mergeById<T extends { id: string }>(base: T[], overlay: T[]) {
+  const merged = new Map(base.map((item) => [item.id, item]));
+  overlay.forEach((item) => merged.set(item.id, item));
+  return [...merged.values()];
+}
+
+function mergeEditSnapshot(base: RecordsSnapshot, overlay: RecordsSnapshot): RecordsSnapshot {
+  const exposures = new Map(base.copyEbayExposures.map((item) => [item.copyId, item]));
+  overlay.copyEbayExposures.forEach((item) => exposures.set(item.copyId, item));
+  return {
+    ...base,
+    records: mergeById(base.records, overlay.records),
+    targets: mergeById(base.targets, overlay.targets),
+    printings: mergeById(base.printings, overlay.printings),
+    copies: mergeById(base.copies, overlay.copies),
+    copyEbayExposures: [...exposures.values()],
+    sealedUnits: mergeById(base.sealedUnits, overlay.sealedUnits),
+    bulkLots: mergeById(base.bulkLots, overlay.bulkLots),
+    supplies: mergeById(base.supplies, overlay.supplies),
+  };
+}
+
+function recordMatchesFlow(type: string, flow: EntryFlow) {
+  return flow === "purchase"
+    ? type === "purchase" || type === "imported-acquisition"
+    : flow === "pack-opening"
+      ? type === "pack-opening"
+      : type === "sale";
+}
 
 function SavedState({
   flow,
@@ -75,33 +108,73 @@ function SavedState({
 
 export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
   const source = useRecordsDataSource();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const returnHref = taskReturnHref(searchParams.get("origin"));
+  const editRecordId = searchParams.get("edit");
   const [savedRecord, setSavedRecord] = useState<{ id: string; warning?: string } | null>(null);
   const content = flowContent[flow];
-  const form = source.status === "loading" ? (
+  const editQuery = trpc.records.history.useQuery({
+    includeVoid: true,
+    page: 1,
+    query: "",
+    recordId: editRecordId,
+    type: "all",
+  }, {
+    enabled: source.mode === "live" && Boolean(editRecordId),
+  });
+  const editSnapshot = source.mode === "live"
+    ? editQuery.data?.snapshot ?? null
+    : source.snapshot;
+  const editingRecord = editRecordId
+    ? editSnapshot?.records.find((record) => record.id === editRecordId) ?? null
+    : null;
+  const editSource = useMemo<RecordsDataSource | null>(() => editSnapshot
+    ? { ...source, snapshot: mergeEditSnapshot(source.snapshot, editSnapshot) }
+    : null, [editSnapshot, source]);
+  const editing = Boolean(editRecordId);
+  const form = source.status === "loading" || (editing && source.mode === "live" && editQuery.isPending) ? (
     <div className="grid min-h-64 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
       <div className="text-center"><p className="font-bold">Preparing Records</p><p className="mt-1 text-sm font-medium text-zinc-500">Loading available copies and inventory…</p></div>
     </div>
-  ) : source.status === "error" ? (
+  ) : source.status === "error" || (editing && editQuery.isError) ? (
     <DataLoadError
-      message={source.errorMessage || "Your available Records data could not be loaded. Nothing has been saved."}
-      onRetry={source.refresh}
+      message={source.errorMessage || editQuery.error?.message || "Your available Records data could not be loaded. Nothing has been saved."}
+      onRetry={() => editing && source.mode === "live" ? editQuery.refetch() : source.refresh()}
       title="Could not load the Record entry form"
+    />
+  ) : editing && (!editingRecord || !editSource || !recordMatchesFlow(editingRecord.type, flow)) ? (
+    <DataLoadError
+      message="This Record was not found, or it does not belong to this type of entry form. Return to History and open it again."
+      onRetry={() => router.push(returnHref)}
+      title="Could not open this Record for editing"
+    />
+  ) : editing && editingRecord && editSource && flow === "purchase" ? (
+    <PurchaseForm edit={{ record: editingRecord, snapshot: editSource.snapshot }} onSaved={() => router.push(returnHref)} />
+  ) : editing && editingRecord && editSource && flow === "pack-opening" ? (
+    <OpeningForm edit={{ record: editingRecord, snapshot: editSource.snapshot }} onSaved={() => router.push(returnHref)} />
+  ) : editing && editingRecord && editSource ? (
+    <RecordEditorDialog
+      backLabel="Back to History"
+      onClose={() => router.push(returnHref)}
+      onSaved={() => undefined}
+      presentation="page"
+      record={editingRecord}
+      source={editSource}
     />
   ) : flow === "purchase" ? <PurchaseForm onSaved={(id, warning) => setSavedRecord({ id, warning })} /> : flow === "pack-opening" ? <OpeningForm onSaved={(id, warning) => setSavedRecord({ id, warning })} /> : <SaleForm onSaved={(id, warning) => setSavedRecord({ id, warning })} />;
 
   return (
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
-        <AppHeader title={content.title} />
+        <AppHeader title={editing ? content.title.replace("Record ", "Edit ") : content.title} />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <Link className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950" href={returnHref} replace><ArrowLeft className="size-4" /> Back to Records</Link>
-          <p className="text-xs font-semibold text-zinc-500">Unfinished work is kept in this browser tab.</p>
+          <p className="text-xs font-semibold text-zinc-500">{editing ? "Changes update the existing Record; they never create another one." : "Unfinished work is kept in this browser tab."}</p>
         </div>
         <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#8a1f2d]">{content.icon}</span><p className="max-w-2xl pt-1 text-sm font-medium leading-6 text-zinc-600">{content.description}</p></div>
         {source.mode === "preview" ? <PreviewNotice>Submitting updates only the resettable preview in this browser tab.</PreviewNotice> : null}
-        {savedRecord ? <SavedState flow={flow} mode={source.mode} recordId={savedRecord.id} warning={savedRecord.warning} onAddAnother={() => setSavedRecord(null)} /> : form}
+        {!editing && savedRecord ? <SavedState flow={flow} mode={source.mode} recordId={savedRecord.id} warning={savedRecord.warning} onAddAnother={() => setSavedRecord(null)} /> : form}
       </div>
     </main>
   );

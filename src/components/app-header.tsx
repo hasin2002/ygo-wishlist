@@ -22,6 +22,7 @@ const addItems = [
   { description: "Open sealed product and record pulls", href: "/records/new/opening", icon: PackageOpen, label: "Pack opening" },
   { description: "Sell exact physical card copies", href: "/records/new/sale", icon: ReceiptText, label: "Sale" },
   { description: "Sell a matching card variant individually or with linked x2/x3 offers", href: "/records/listings/new", icon: Layers3, label: "Create listing" },
+  { description: "Sell different exact physical card Copies together in one fixed-price offer", href: "/records/listings/new-lot", icon: Layers3, label: "Mixed card lot" },
 ] as const;
 
 function GlobalAddMenu() {
@@ -121,7 +122,7 @@ function GlobalAddMenu() {
           let menuItemIndex = 0;
           return addItems.map((item) => {
           const Icon = item.icon;
-          const isListing = item.href === "/records/listings/new";
+          const isListing = item.href === "/records/listings/new" || item.href === "/records/listings/new-lot";
           // Planning and inventory-photo staging stay local. eBay permission
           // is checked only when the seller explicitly runs Review or Publish.
           const unavailable = isListing && recordsPreview;

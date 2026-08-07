@@ -46,6 +46,12 @@ const targetInputSchema = z.object({
   notes: z.string().trim().optional(),
 });
 const updateTargetSchema = targetInputSchema.extend({ id: z.string().min(1) });
+const estimatePricingSchema = z.object({
+  selectedTargetId: z.string().min(1).nullable().optional(),
+  name: z.string().trim().min(1).max(160),
+  rarity: z.string().trim().min(1).max(80),
+  edition: editionSchema,
+});
 const trackerPageSchema = z.object({
   chaseFilters: z.array(trackerChaseFilterSchema).default([]),
   page: z.number().int().min(1).default(1),
@@ -487,14 +493,43 @@ export const libraryRouter = router({
     )).limit(1);
     if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Wishlist Target not found." });
     const pricing = await fetchEbayPricing(target);
+    const estimatedPricePence = pricing.estimatedPricePence ?? target.estimatedPricePence;
     await db.update(cardTargets).set({
-      estimatedPricePence: pricing.estimatedPricePence,
+      estimatedPricePence,
       ebaySearchUrl: pricing.ebaySearchUrl,
       updatedAt: new Date(),
     }).where(and(eq(cardTargets.id, target.id), eq(cardTargets.ownerId, ctx.collectionOwnerId)));
     return {
-      estimatedPricePence: pricing.estimatedPricePence,
+      estimatedPricePence,
+      foundNewEstimate: pricing.estimatedPricePence !== null,
       id: target.id,
+      sampleSize: pricing.sampleSize,
+    };
+  }),
+
+  estimatePricing: authenticatedProcedure.input(estimatePricingSchema).mutation(async ({ ctx, input }) => {
+    const normalizedName = normalize(input.name);
+    const normalizedRarity = normalize(input.rarity);
+    const normalizedEditionValue = normalize(input.edition);
+    const [existing] = input.selectedTargetId
+      ? await db.select().from(cardTargets).where(and(
+          eq(cardTargets.id, input.selectedTargetId),
+          eq(cardTargets.ownerId, ctx.collectionOwnerId),
+        )).limit(1)
+      : await db.select().from(cardTargets).where(and(
+          eq(cardTargets.ownerId, ctx.collectionOwnerId),
+          eq(cardTargets.normalizedName, normalizedName),
+          eq(cardTargets.normalizedRarity, normalizedRarity),
+          eq(cardTargets.normalizedEdition, normalizedEditionValue),
+        )).limit(1);
+    const pricing = await fetchEbayPricing({ name: input.name, rarity: input.rarity });
+    const estimatedPricePence = pricing.estimatedPricePence ?? existing?.estimatedPricePence ?? null;
+    return {
+      ebaySearchUrl: pricing.ebaySearchUrl,
+      estimatedPricePence,
+      foundNewEstimate: pricing.estimatedPricePence !== null,
+      identityKey: existing?.id ?? [normalizedName, normalizedRarity, normalizedEditionValue].join("::"),
+      previousEstimatedPricePence: existing?.estimatedPricePence ?? null,
       sampleSize: pricing.sampleSize,
     };
   }),

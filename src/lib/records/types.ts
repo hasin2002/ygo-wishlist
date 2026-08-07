@@ -273,6 +273,10 @@ export type ProductIdentityInput = {
   setName: string;
   setCode: string;
   metadataNeedsAttention: boolean;
+  pricing?: {
+    estimatedPricePence: number | null;
+    ebaySearchUrl: string;
+  };
 };
 
 export type CardContentsInput = ProductIdentityInput & {
@@ -283,6 +287,8 @@ export type CardContentsInput = ProductIdentityInput & {
 };
 
 export type PurchaseInput = {
+  /** Stable per-form key so a retry cannot create the Purchase twice. */
+  operationId?: string;
   recordName: string;
   date: string;
   source: string;
@@ -408,18 +414,18 @@ export type RecordsDataSource = {
   createPurchase: (input: PurchaseInput) => Promise<DataSourceResult>;
   createOpening: (input: OpeningInput) => Promise<DataSourceResult>;
   createSale: (input: SaleInput) => Promise<DataSourceResult>;
-  updateRecordDetails: (recordId: string, update: RecordDetailsUpdate) => Promise<DataSourceResult>;
+  updateRecordDetails: (recordId: string, update: RecordDetailsUpdate, expectedRevision?: number) => Promise<DataSourceResult>;
   resolveCardAttention: (update: CardAttentionUpdate) => Promise<DataSourceResult>;
   updateCardSource: (update: CardSourceUpdate) => Promise<DataSourceResult>;
   resolveEbayCopyLinkAttention: (listingId: string) => Promise<DataSourceResult>;
-  replaceRecordCards: (recordId: string, cards: CardContentsInput[]) => Promise<DataSourceResult>;
-  replaceSaleCopies: (recordId: string, copyIds: string[]) => Promise<DataSourceResult>;
+  replaceRecordCards: (recordId: string, cards: CardContentsInput[], expectedRevision?: number) => Promise<DataSourceResult>;
+  replaceSaleCopies: (recordId: string, copyIds: string[], expectedRevision?: number) => Promise<DataSourceResult>;
   updateCardCopy: (copyId: string, update: CardCopyUpdate) => Promise<DataSourceResult>;
   removeCardCopy: (copyId: string) => Promise<DataSourceResult>;
-  updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate) => Promise<DataSourceResult>;
+  updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate, expectedRevision?: number) => Promise<DataSourceResult>;
   deleteWishlistTarget: (targetId: string) => Promise<DataSourceResult>;
-  voidRecord: (recordId: string) => Promise<DataSourceResult>;
-  restoreRecord: (recordId: string) => Promise<DataSourceResult>;
+  voidRecord: (recordId: string, expectedRevision?: number) => Promise<DataSourceResult>;
+  restoreRecord: (recordId: string, expectedRevision?: number) => Promise<DataSourceResult>;
   setDraft: (key: keyof RecordsDrafts, value: unknown) => void;
   clearDraft: (key: keyof RecordsDrafts) => void;
   resetPreview?: () => void;

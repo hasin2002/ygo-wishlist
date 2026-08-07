@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/db";
+import { db, withDatabaseTiming } from "@/db";
 import {
   bulkLots,
   cardCopies,
@@ -64,7 +64,7 @@ import {
   normalizePrintingValue,
 } from "@/server/printing-identity";
 import { adminProcedure, authenticatedProcedure, router } from "@/server/trpc";
-import { dismissRecordsSuggestion, listRecordsActions, urgentRecordsActionCount } from "@/server/records/actions";
+import { dismissRecordsSuggestion, listRecordsActions, syncRecordsActions } from "@/server/records/actions";
 import { fetchLinkMetadata } from "@/server/metadata";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -171,6 +171,10 @@ const cardInputSchema = z.object({
   setCode: z.string().trim().max(80),
   metadataNeedsAttention: z.boolean(),
   quantity: z.number().int().positive().max(10_000),
+  pricing: z.object({
+    estimatedPricePence: z.number().int().nonnegative().nullable(),
+    ebaySearchUrl: z.string().url(),
+  }).optional(),
 });
 const productInputSchema = cardInputSchema.omit({ condition: true, id: true, quantity: true }).extend({
   rarity: z.string().trim().max(80),
@@ -184,15 +188,20 @@ const commonRecordSchema = z.object({
   source: z.string().trim().min(1).max(120),
   notes: z.string().trim().max(4_000),
 });
+const purchaseRecordSchema = commonRecordSchema.extend({
+  operationId: z.string().uuid({
+    message: "This Purchase was opened before duplicate protection was available. Refresh the page, recover the saved draft, and submit it again.",
+  }).optional(),
+});
 const purchaseSchema = z.discriminatedUnion("kind", [
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("card"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
     amountKnown: z.boolean().default(true),
     card: cardInputSchema,
   }),
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("sealed"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
@@ -204,7 +213,7 @@ const purchaseSchema = z.discriminatedUnion("kind", [
       unitAllocationsReviewed: z.boolean().optional(),
     }),
   }),
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("bulk"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
@@ -212,7 +221,7 @@ const purchaseSchema = z.discriminatedUnion("kind", [
     cards: z.array(cardInputSchema).min(1),
     totalCardCount: z.number().int().positive().max(1_000_000),
   }),
-  commonRecordSchema.extend({
+  purchaseRecordSchema.extend({
     kind: z.literal("supply"),
     listingUrl: z.string().trim().url().or(z.literal("")),
     totalPence: z.number().int().nonnegative(),
@@ -509,6 +518,14 @@ async function findOrCreatePrinting(
   const normalizedName = normalize(input.name);
   const normalizedRarity = normalize(input.rarity);
   const normalizedEditionValue = normalizeEdition(input.edition);
+  const pricingValues = input.pricing
+    ? {
+        ebaySearchUrl: input.pricing.ebaySearchUrl,
+        ...(input.pricing.estimatedPricePence === null
+          ? {}
+          : { estimatedPricePence: input.pricing.estimatedPricePence }),
+      }
+    : {};
   let target = input.selectedTargetId
     ? (await tx.select().from(cardTargets).where(and(
         eq(cardTargets.id, input.selectedTargetId),
@@ -546,6 +563,7 @@ async function findOrCreatePrinting(
       desiredQuantity: 0,
       imageUrl: input.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl,
+      ...pricingValues,
       createdAt: now,
       updatedAt: now,
     }).returning();
@@ -573,6 +591,7 @@ async function findOrCreatePrinting(
       normalizedEdition: normalizedEditionValue,
       imageUrl: input.imageUrl || target.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl || target.tcgplayerUrl,
+      ...pricingValues,
       updatedAt: now,
     }).where(and(
       eq(cardTargets.id, target.id),
@@ -582,6 +601,7 @@ async function findOrCreatePrinting(
     const updates = {
       imageUrl: target.imageUrl || input.imageUrl,
       tcgplayerUrl: target.tcgplayerUrl || input.tcgplayerUrl,
+      ...pricingValues,
       updatedAt: now,
     };
     [target] = await tx.update(cardTargets).set(updates).where(and(
@@ -650,18 +670,78 @@ async function insertLine(
   return values.id;
 }
 
-export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnapshot> {
-  const [records, lines, targets, printings, copies, lineCopyLinks, sealed, lots, supplies] = await Promise.all([
-    db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId)).orderBy(desc(recordEntries.occurredOn), desc(recordEntries.createdAt)),
-    db.select().from(recordLines).where(eq(recordLines.ownerId, ownerId)).orderBy(asc(recordLines.position)),
-    db.select().from(cardTargets).where(eq(cardTargets.ownerId, ownerId)).orderBy(asc(cardTargets.name)),
-    db.select().from(cardPrintings).where(eq(cardPrintings.ownerId, ownerId)),
-    db.select().from(cardCopies).where(eq(cardCopies.ownerId, ownerId)),
-    db.select().from(recordLineCopies).where(eq(recordLineCopies.ownerId, ownerId)),
-    db.select().from(sealedUnits).where(eq(sealedUnits.ownerId, ownerId)),
-    db.select().from(bulkLots).where(eq(bulkLots.ownerId, ownerId)),
-    db.select().from(supplyItems).where(eq(supplyItems.ownerId, ownerId)),
+type RecordsSnapshotScope = "full" | "inventory" | "listings" | "purchase-form" | "opening-form" | "sale-form";
+
+export async function loadRecordsSnapshot(
+  ownerId: string,
+  options: { recordIds?: string[]; scope?: RecordsSnapshotScope } = {},
+): Promise<RecordsSnapshot> {
+  const scoped = options.recordIds !== undefined;
+  const ids = options.recordIds ?? [];
+  const scope = options.scope ?? "full";
+  const includeCopies = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form";
+  // Copy eligibility depends on the active/void status of the acquisition
+  // Record. Any scope that returns Copies must therefore return their source
+  // Records too, even when Record lines are intentionally omitted.
+  const includeRecords = scope === "full" || scope === "opening-form" || includeCopies;
+  const includeLines = scope === "full";
+  const includeCardCatalog = true;
+  const includeInventoryEntities = scope === "full" || scope === "inventory" || scope === "opening-form";
+  const includeEbay = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form";
+  const includeAttention = scope === "full";
+  const recordWhere = scoped
+    ? and(eq(recordEntries.ownerId, ownerId), inArray(recordEntries.id, ids.length ? ids : ["__none__"]))
+    : eq(recordEntries.ownerId, ownerId);
+  const lineWhere = scoped
+    ? and(eq(recordLines.ownerId, ownerId), inArray(recordLines.recordId, ids.length ? ids : ["__none__"]))
+    : eq(recordLines.ownerId, ownerId);
+  const copyWhere = scoped
+    ? and(eq(cardCopies.ownerId, ownerId), or(
+        inArray(cardCopies.acquiredRecordId, ids.length ? ids : ["__none__"]),
+        inArray(cardCopies.soldRecordId, ids.length ? ids : ["__none__"]),
+      ))
+    : eq(cardCopies.ownerId, ownerId);
+  const [records, lines, copies, lineCopyLinks, sealed, lots, supplies] = await Promise.all([
+    scoped || includeRecords ? db.select().from(recordEntries).where(recordWhere).orderBy(desc(recordEntries.occurredOn), desc(recordEntries.createdAt)) : Promise.resolve([] as Array<typeof recordEntries.$inferSelect>),
+    scoped || includeLines ? db.select().from(recordLines).where(lineWhere).orderBy(asc(recordLines.position)) : Promise.resolve([] as Array<typeof recordLines.$inferSelect>),
+    scoped || includeCopies ? db.select().from(cardCopies).where(copyWhere) : Promise.resolve([] as Array<typeof cardCopies.$inferSelect>),
+    scoped || includeLines ? db.select().from(recordLineCopies).where(scoped
+      ? and(eq(recordLineCopies.ownerId, ownerId), inArray(recordLineCopies.recordId, ids.length ? ids : ["__none__"]))
+      : eq(recordLineCopies.ownerId, ownerId)) : Promise.resolve([] as Array<typeof recordLineCopies.$inferSelect>),
+    scoped || includeInventoryEntities ? db.select().from(sealedUnits).where(scoped
+      ? and(eq(sealedUnits.ownerId, ownerId), or(
+          inArray(sealedUnits.acquiredRecordId, ids.length ? ids : ["__none__"]),
+          inArray(sealedUnits.openedRecordId, ids.length ? ids : ["__none__"]),
+        ))
+      : eq(sealedUnits.ownerId, ownerId)) : Promise.resolve([] as Array<typeof sealedUnits.$inferSelect>),
+    scoped || includeInventoryEntities ? db.select().from(bulkLots).where(scoped
+      ? and(eq(bulkLots.ownerId, ownerId), inArray(bulkLots.acquiredRecordId, ids.length ? ids : ["__none__"]))
+      : eq(bulkLots.ownerId, ownerId)) : Promise.resolve([] as Array<typeof bulkLots.$inferSelect>),
+    scoped || includeInventoryEntities ? db.select().from(supplyItems).where(scoped
+      ? and(eq(supplyItems.ownerId, ownerId), inArray(supplyItems.acquiredRecordId, ids.length ? ids : ["__none__"]))
+      : eq(supplyItems.ownerId, ownerId)) : Promise.resolve([] as Array<typeof supplyItems.$inferSelect>),
   ]);
+  const linkedCopyIds = lineCopyLinks.map((link) => link.copyId);
+  if (scoped && linkedCopyIds.length) {
+    const linkedCopies = await db.select().from(cardCopies).where(and(
+      eq(cardCopies.ownerId, ownerId),
+      inArray(cardCopies.id, linkedCopyIds),
+    ));
+    const seen = new Set(copies.map((copy) => copy.id));
+    copies.push(...linkedCopies.filter((copy) => !seen.has(copy.id)));
+  }
+  const printingIds = [...new Set(copies.map((copy) => copy.printingId))];
+  const printings = scoped
+    ? printingIds.length
+      ? await db.select().from(cardPrintings).where(and(eq(cardPrintings.ownerId, ownerId), inArray(cardPrintings.id, printingIds)))
+      : []
+    : includeCardCatalog ? await db.select().from(cardPrintings).where(eq(cardPrintings.ownerId, ownerId)) : [];
+  const targetIds = [...new Set(printings.map((printing) => printing.targetId))];
+  const targets = scoped
+    ? targetIds.length
+      ? await db.select().from(cardTargets).where(and(eq(cardTargets.ownerId, ownerId), inArray(cardTargets.id, targetIds))).orderBy(asc(cardTargets.name))
+      : []
+    : includeCardCatalog ? await db.select().from(cardTargets).where(eq(cardTargets.ownerId, ownerId)).orderBy(asc(cardTargets.name)) : [];
 
   const entityIdsByLine = new Map<string, string[]>();
   const addEntity = (lineId: string | null, entityId: string) => {
@@ -704,9 +784,15 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
   const targetById = new Map(targets.map((target) => [target.id, target]));
   const printingById = new Map(printings.map((printing) => [printing.id, printing]));
   const copyById = new Map(copies.map((copy) => [copy.id, copy]));
-  if (await hasEbayCompositionSchema()) {
+  if (includeAttention && await hasEbayCompositionSchema()) {
+    const scopedCopyIds = copies.map((copy) => copy.id);
     const protectedListings = await db.select().from(ebayListings).where(
-      eq(ebayListings.ownerId, ownerId),
+      scoped
+        ? and(
+            eq(ebayListings.ownerId, ownerId),
+            inArray(ebayListings.copyId, scopedCopyIds.length ? scopedCopyIds : ["__none__"]),
+          )
+        : eq(ebayListings.ownerId, ownerId),
     );
     const listingIds = protectedListings.map((listing) => listing.id);
     const members = listingIds.length
@@ -760,7 +846,7 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       }
     }
   }
-  for (const target of targets) {
+  for (const target of includeAttention ? targets : []) {
     if (normalizeEdition(target.edition) === "unknown edition") {
       attention.push({
         id: `attention-edition-${target.id}`,
@@ -780,7 +866,7 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       });
     }
   }
-  for (const printing of printings) {
+  for (const printing of includeAttention ? printings : []) {
     if (!printing.metadataNeedsAttention) continue;
     const target = targetById.get(printing.targetId);
     attention.push({
@@ -792,7 +878,7 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
       field: "tcgplayer",
     });
   }
-  for (const record of records) {
+  for (const record of includeAttention || scoped ? records : []) {
     if (record.type !== "imported-acquisition" || record.amountKnown) continue;
     const sealedOrCard = linesByRecord.get(record.id)?.[0];
     attention.push({
@@ -804,10 +890,9 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
     });
   }
 
-  const relatedListings = await getEbayListingsForCopiesMembershipFirst(
-    ownerId,
-    copies.map((copy) => copy.id),
-  );
+  const relatedListings = includeEbay && copies.length
+    ? await getEbayListingsForCopiesMembershipFirst(ownerId, copies.map((copy) => copy.id))
+    : [];
   const ebayOffers: EbayOfferExposure[] = relatedListings.map((related) => ({
     cancelledAt: related.listing.cancelledAt?.toISOString() ?? null,
     copyId: related.copyId,
@@ -938,20 +1023,79 @@ export async function loadRecordsSnapshot(ownerId: string): Promise<RecordsSnaps
   };
 }
 
-export const recordsRouter = router({
-  snapshot: authenticatedProcedure.query(({ ctx }) => loadRecordsSnapshot(ctx.collectionOwnerId)),
+const historyPageSchema = z.object({
+  includeVoid: z.boolean().default(true),
+  page: z.number().int().positive().default(1),
+  query: z.string().trim().max(160).default(""),
+  recordId: z.string().trim().max(160).nullable().default(null),
+  type: z.enum(["all", "purchase", "pack-opening", "sale", "imported-acquisition"]).default("all"),
+});
 
-  actions: authenticatedProcedure.query(async ({ ctx }) => (
-    listRecordsActions(ctx.collectionOwnerId, await loadRecordsSnapshot(ctx.collectionOwnerId))
+const workspaceSnapshotSchema = z.object({
+  scope: z.enum(["full", "inventory", "listings", "purchase-form", "opening-form", "sale-form"]).default("full"),
+}).default({ scope: "full" });
+
+async function loadRecordsHistory(ownerId: string, input: z.infer<typeof historyPageSchema>) {
+  const pageSize = 15;
+  const pattern = `%${input.query.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+  const where = and(
+    eq(recordEntries.ownerId, ownerId),
+    input.includeVoid ? undefined : eq(recordEntries.status, "active"),
+    input.type === "all" ? undefined : eq(recordEntries.type, input.type),
+    input.query ? or(
+      ilike(recordEntries.title, pattern),
+      ilike(recordEntries.source, pattern),
+      ilike(recordEntries.notes, pattern),
+      sql`exists (
+        select 1 from ${recordLines}
+        where ${recordLines.ownerId} = ${ownerId}
+          and ${recordLines.recordId} = ${recordEntries.id}
+          and ${recordLines.name} ilike ${pattern} escape '\\'
+      )`,
+    ) : undefined,
+  );
+  const [{ total }] = await db.select({ total: count() }).from(recordEntries).where(where);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(input.page, pageCount);
+  const rows = await db.select({ id: recordEntries.id }).from(recordEntries)
+    .where(where)
+    .orderBy(desc(recordEntries.occurredOn), desc(recordEntries.createdAt))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  const recordIds = rows.map((row) => row.id);
+  if (input.recordId && !recordIds.includes(input.recordId)) {
+    const [requested] = await db.select({ id: recordEntries.id }).from(recordEntries).where(and(
+      eq(recordEntries.ownerId, ownerId),
+      eq(recordEntries.id, input.recordId),
+    )).limit(1);
+    if (requested) recordIds.push(requested.id);
+  }
+  return {
+    page,
+    pageCount,
+    pageSize,
+    snapshot: await loadRecordsSnapshot(ownerId, { recordIds }),
+    total,
+  };
+}
+
+export const recordsRouter = router({
+  snapshot: authenticatedProcedure.input(workspaceSnapshotSchema).query(({ ctx, input }) => (
+    withDatabaseTiming(`records.snapshot.${input.scope}`, () => loadRecordsSnapshot(ctx.collectionOwnerId, input))
   )),
 
-  urgentActionCount: authenticatedProcedure.query(async ({ ctx }) => ({
-    count: await urgentRecordsActionCount(ctx.collectionOwnerId, await loadRecordsSnapshot(ctx.collectionOwnerId)),
+  history: authenticatedProcedure.input(historyPageSchema).query(({ ctx, input }) => (
+    withDatabaseTiming("records.history", () => loadRecordsHistory(ctx.collectionOwnerId, input))
+  )),
+
+  actions: authenticatedProcedure.query(({ ctx }) => withDatabaseTiming("records.actions", async () => {
+    const snapshot = await loadRecordsSnapshot(ctx.collectionOwnerId);
+    const actions = await syncRecordsActions(ctx.collectionOwnerId, snapshot);
+    return { actions, snapshot };
   })),
 
   dismissSuggestion: authenticatedProcedure.input(z.object({ dedupeKey: z.string().min(1) })).mutation(async ({ ctx, input }) => {
-    const snapshot = await loadRecordsSnapshot(ctx.collectionOwnerId);
-    const action = (await listRecordsActions(ctx.collectionOwnerId, snapshot)).find((candidate) => candidate.dedupeKey === input.dedupeKey && candidate.status === "open");
+    const action = (await listRecordsActions(ctx.collectionOwnerId)).find((candidate) => candidate.dedupeKey === input.dedupeKey && candidate.status === "open");
     if (!action || action.category !== "suggestion") throw new TRPCError({ code: "NOT_FOUND", message: "That suggestion is no longer available." });
     await dismissRecordsSuggestion(ctx.collectionOwnerId, action);
     return { ok: true };
@@ -1378,9 +1522,17 @@ export const recordsRouter = router({
   }),
 
   createPurchase: authenticatedProcedure.input(purchaseSchema).mutation(async ({ ctx, input }) => {
+    if (!input.operationId) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "This Purchase was opened before duplicate protection was available. Refresh the page, recover the saved draft, and submit it again.",
+      });
+    }
+    const operationId = input.operationId;
     const ownerId = ctx.collectionOwnerId;
-    const recordId = id("record");
+    let recordId = id("record");
     const now = new Date();
+    let duplicate = false;
     const identifiedCount = input.kind === "bulk"
       ? input.cards.reduce((sum, card) => sum + card.quantity, 0)
       : 0;
@@ -1389,9 +1541,10 @@ export const recordsRouter = router({
     }
 
     await db.transaction(async (tx) => {
-      await insertRecord(tx, {
+      const [createdRecord] = await tx.insert(recordEntries).values({
         id: recordId,
         ownerId,
+        submissionId: operationId,
         type: "purchase",
         status: "active",
         occurredOn: input.date,
@@ -1405,7 +1558,28 @@ export const recordsRouter = router({
         revision: 1,
         createdAt: now,
         updatedAt: now,
-      });
+      }).onConflictDoNothing().returning({ id: recordEntries.id });
+
+      if (!createdRecord) {
+        const [existingRecord] = await tx.select({
+          id: recordEntries.id,
+          ownerId: recordEntries.ownerId,
+          type: recordEntries.type,
+        }).from(recordEntries).where(and(
+          eq(recordEntries.ownerId, ownerId),
+          eq(recordEntries.submissionId, operationId),
+        )).limit(1);
+        if (
+          !existingRecord
+          || existingRecord.ownerId !== ownerId
+          || existingRecord.type !== "purchase"
+        ) {
+          conflict("This Purchase submission ID conflicts with another Record. Start a fresh Purchase and try again.");
+        }
+        recordId = existingRecord.id;
+        duplicate = true;
+        return;
+      }
 
       if (input.kind === "card") {
         const lineId = id("line");
@@ -1524,7 +1698,12 @@ export const recordsRouter = router({
         });
       }
     });
-    return { id: recordId };
+    return {
+      id: recordId,
+      ...(duplicate
+        ? { warning: "This Purchase was already saved. No duplicate was created." }
+        : {}),
+    };
   }),
 
   createOpening: authenticatedProcedure.input(openingSchema).mutation(async ({ ctx, input }) => {

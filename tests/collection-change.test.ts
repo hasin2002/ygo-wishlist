@@ -13,24 +13,29 @@ import {
   type CollectionStorage,
 } from "../src/lib/collection-change.ts";
 
-test("records and copy changes refresh every collection projection", () => {
-  for (const change of ["records", "copies"] as const) {
-    assert.deepEqual(collectionInvalidationMatrix[change], [
-      "records.snapshot", "records.listEbayListings", "library.binderList", "library.chaseQueue",
-      "library.list", "library.summary", "library.trackerPage", "binder.layout",
-      "spend.currentMonth", "spend.monthlyFavourites", "wheel.state",
-    ]);
-  }
+test("records and copy changes refresh every affected collection projection", () => {
+  assert.deepEqual(collectionInvalidationMatrix.records, [
+    "records.snapshot", "records.actions", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue",
+    "library.list", "library.summary", "library.trackerPage", "binder.layout",
+    "spend.currentMonth", "spend.monthlyFavourites", "wheel.state",
+  ]);
+  assert.deepEqual(collectionInvalidationMatrix.copies, [
+    "records.snapshot", "records.actions", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue",
+    "library.list", "library.summary", "library.trackerPage", "binder.layout",
+    "spend.currentMonth", "spend.monthlyFavourites", "wheel.state",
+  ]);
 });
 
-test("target, favourite, binder, wheel, listing, and photo changes have precise invalidations", () => {
+test("actions, target, favourite, binder, wheel, listing, and photo changes have precise invalidations", () => {
+  assert.deepEqual(collectionInvalidationMatrix.actions, ["records.actions"]);
   assert.equal(collectionInvalidationMatrix.target.includes("records.snapshot"), true);
+  assert.equal(collectionInvalidationMatrix.target.includes("records.history"), true);
   assert.deepEqual(collectionInvalidationMatrix.target.slice(-4), ["binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"]);
   assert.deepEqual(collectionInvalidationMatrix.binder, ["binder.layout"]);
   assert.deepEqual(collectionInvalidationMatrix.favourite, ["spend.monthlyFavourites"]);
   assert.deepEqual(collectionInvalidationMatrix.wheel, ["wheel.state"]);
-  assert.deepEqual(collectionInvalidationMatrix.listing, ["records.snapshot", "records.listEbayListings"]);
-  assert.deepEqual(collectionInvalidationMatrix.photos, ["records.snapshot", "records.listEbayListings"]);
+  assert.deepEqual(collectionInvalidationMatrix.listing, ["records.snapshot", "records.actions", "records.listEbayListings"]);
+  assert.deepEqual(collectionInvalidationMatrix.photos, ["records.snapshot", "records.actions", "records.listEbayListings"]);
 });
 
 test("a confirmed write remains successful when projection refresh fails", async () => {

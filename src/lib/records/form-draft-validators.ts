@@ -31,6 +31,7 @@ export function hasFields(value: UnknownRecord, fields: readonly string[]) {
 const editions = ["", "1st Edition", "Unlimited Edition", "Limited Edition"] as const;
 const cardConditions = ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played", "Damaged"] as const;
 const fetchStatuses = ["idle", "fetching", "resolved", "attention", "stale"] as const;
+const pricingStatuses = ["checking", "estimated", "no-match", "failed"] as const;
 
 /** Structural validation for the persisted ProductIdentityDraft payload. */
 export function isProductIdentityDraft(value: unknown): value is UnknownRecord {
@@ -60,7 +61,16 @@ export function isCardContentsDraft(value: unknown): value is UnknownRecord {
   return isProductIdentityDraft(value)
     && isString(value.id)
     && isInteger(value.quantity)
-    && (!("condition" in value) || isOneOf(value.condition, cardConditions));
+    && (!("condition" in value) || isOneOf(value.condition, cardConditions))
+    && (!("pricing" in value) || value.pricing === undefined || (
+      isRecord(value.pricing)
+      && isString(value.pricing.ebaySearchUrl)
+      && (value.pricing.estimatedPricePence === null || isInteger(value.pricing.estimatedPricePence))
+      && isString(value.pricing.identityKey)
+      && isString(value.pricing.message)
+      && isInteger(value.pricing.sampleSize)
+      && isOneOf(value.pricing.status, pricingStatuses)
+    ));
 }
 
 export function isStringRecord(value: unknown): value is Record<string, string> {

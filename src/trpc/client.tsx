@@ -23,6 +23,9 @@ import { useState, type ReactNode } from "react";
 
 export const trpc = createTRPCReact<AppRouter>();
 const requestTimeoutMs = 15_000;
+const purchaseRequestTimeoutMs = 60_000;
+const requestTimeoutMessage = "The request took too long. Check your connection, then try again.";
+const purchaseRequestTimeoutMessage = "This Purchase is taking longer than expected and may still have been saved. Check Records History before retrying; a retry will not create a duplicate.";
 const queryCacheMaxAgeMs = 15 * 60 * 1_000;
 export { queryCacheStorageKey } from "@/lib/query-cache-persistence";
 
@@ -41,6 +44,28 @@ function getBaseUrl() {
   return "http://localhost:3000";
 }
 
+function timeoutForRequest(url: RequestInfo | URL) {
+  return String(url).includes("records.createPurchase")
+    ? {
+        message: purchaseRequestTimeoutMessage,
+        milliseconds: purchaseRequestTimeoutMs,
+      }
+    : {
+        message: requestTimeoutMessage,
+        milliseconds: requestTimeoutMs,
+      };
+}
+
+export function shouldRetryQuery(failureCount: number, error: unknown) {
+  if (failureCount >= 1) return false;
+  const message = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : String(error).toLowerCase();
+  return !message.includes("abort")
+    && !message.includes("timeout")
+    && !message.includes("took too long")
+    && !message.includes("unauthorized")
+    && !message.includes("sign in");
+}
+
 export function TrpcProvider({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -48,7 +73,7 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
         defaultOptions: {
           queries: {
             gcTime: queryCacheMaxAgeMs,
-            retry: 1,
+            retry: shouldRetryQuery,
             staleTime: 10_000,
           },
         },
@@ -69,14 +94,15 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
         httpBatchLink({
           fetch(url, options) {
             const controller = new AbortController();
+            const requestTimeout = timeoutForRequest(url);
             const timeout = window.setTimeout(
-              () => controller.abort(),
-              requestTimeoutMs,
+              () => controller.abort(new DOMException(requestTimeout.message, "TimeoutError")),
+              requestTimeout.milliseconds,
             );
 
             options?.signal?.addEventListener(
               "abort",
-              () => controller.abort(),
+              () => controller.abort(options.signal?.reason ?? new DOMException("The request was cancelled.", "AbortError")),
               { once: true },
             );
 

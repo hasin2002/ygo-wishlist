@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -48,7 +48,18 @@ const context = {
     user: { id: ownerId, role: "admin" },
   },
 } as never;
-const records = recordsRouter.createCaller(context);
+const rawRecords = recordsRouter.createCaller(context);
+const records = new Proxy(rawRecords, {
+  get(target, property, receiver) {
+    if (property === "createPurchase") {
+      return (input: Parameters<typeof rawRecords.createPurchase>[0]) => rawRecords.createPurchase({
+        ...input,
+        operationId: input.operationId ?? randomUUID(),
+      });
+    }
+    return Reflect.get(target, property, receiver);
+  },
+}) as typeof rawRecords;
 const nonSellerContext = {
   collectionOwnerId: ownerId,
   session: {
@@ -66,7 +77,18 @@ const secondOwnerContext = {
     user: { id: secondOwnerId, role: "user" },
   },
 } as never;
-const secondOwnerRecords = recordsRouter.createCaller(secondOwnerContext);
+const rawSecondOwnerRecords = recordsRouter.createCaller(secondOwnerContext);
+const secondOwnerRecords = new Proxy(rawSecondOwnerRecords, {
+  get(target, property, receiver) {
+    if (property === "createPurchase") {
+      return (input: Parameters<typeof rawSecondOwnerRecords.createPurchase>[0]) => rawSecondOwnerRecords.createPurchase({
+        ...input,
+        operationId: input.operationId ?? randomUUID(),
+      });
+    }
+    return Reflect.get(target, property, receiver);
+  },
+}) as typeof rawSecondOwnerRecords;
 const library = libraryRouter.createCaller(context);
 const spend = spendRouter.createCaller(context);
 
@@ -269,6 +291,57 @@ test("authenticated purchase commits exact Copies and projects the same money in
   assert.equal(cards[0]?.ownedQuantity, 2);
   assert.equal(cards[0]?.paidPriceText, "£1.01");
   assert.equal(cards[0]?.desiredQuantity, 0, "recording a Purchase must not add the card to the Wishlist");
+});
+
+test("retries with the same Purchase operation ID create exactly one Record and one set of Copies", async () => {
+  const operationId = randomUUID();
+  const input = {
+    operationId,
+    kind: "card" as const,
+    recordName: "Idempotent timeout retry",
+    date: "2026-07-29",
+    source: "Local card shop",
+    listingUrl: "",
+    notes: "the response can be lost without duplicating inventory",
+    totalPence: 125,
+    card: card(),
+  };
+
+  const [first, retry] = await Promise.all([
+    records.createPurchase(input),
+    records.createPurchase(input),
+  ]);
+
+  assert.equal(retry.id, first.id);
+  assert.equal(
+    [first.warning, retry.warning].filter(Boolean).length,
+    1,
+    "exactly one concurrent request should report that it reused the saved Purchase",
+  );
+  const matchingRecords = await db.select().from(recordEntries).where(eq(recordEntries.submissionId, operationId));
+  const matchingCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, first.id));
+  assert.equal(matchingRecords.length, 1);
+  assert.equal(matchingRecords[0]?.id, first.id);
+  assert.equal(matchingCopies.length, 1);
+});
+
+test("a stale Purchase client without an operation ID is rejected before writing", async () => {
+  const before = await db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId));
+  await assert.rejects(
+    rawRecords.createPurchase({
+      kind: "card",
+      recordName: "Stale client must not write",
+      date: "2026-07-29",
+      source: "Old browser tab",
+      listingUrl: "",
+      notes: "missing duplicate-protection key",
+      totalPence: 125,
+      card: card(),
+    }),
+    /opened before duplicate protection was available/i,
+  );
+  const after = await db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId));
+  assert.equal(after.length, before.length);
 });
 
 test("recorded pack pulls create owned Library cards without adding Wishlist demand", async () => {
@@ -581,6 +654,54 @@ test("unknown cost remains unknown until explicitly changed to a known £0", asy
   assert.equal(zeroRecord.amountKnown, true);
   assert.equal(zeroRecord.lines[0]?.allocationPence, 0);
   assert.deepEqual(knownZero.copies.filter((copy) => copy.acquiredRecordId === created.id).map((copy) => copy.allocationPence), [0, 0]);
+});
+
+test("a later Purchase refreshes one shared Target price and never erases an older estimate with no match", async () => {
+  const pricingCard = {
+    ...card(),
+    id: "pricing-blue-eyes-a",
+    name: "Pricing Blue-Eyes White Dragon",
+    rarity: "Secret Rare",
+    tcgplayerUrl: "https://www.tcgplayer.com/product/54321/pricing-blue-eyes",
+    pricing: {
+      ebaySearchUrl: "https://www.ebay.co.uk/sch/i.html?_nkw=pricing-blue-eyes",
+      estimatedPricePence: 1234,
+    },
+  };
+  await records.createPurchase({
+    kind: "card",
+    recordName: "Pricing purchase A",
+    date: "2026-07-29",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "",
+    totalPence: 100,
+    card: pricingCard,
+  });
+  const [afterFirst] = await db.select().from(cardTargets).where(eq(cardTargets.normalizedName, "pricing blue-eyes white dragon"));
+  assert.equal(afterFirst?.estimatedPricePence, 1234);
+
+  await records.createPurchase({
+    kind: "card",
+    recordName: "Pricing purchase B",
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "",
+    totalPence: 200,
+    card: {
+      ...pricingCard,
+      id: "pricing-blue-eyes-b",
+      pricing: {
+        ebaySearchUrl: "https://www.ebay.co.uk/sch/i.html?_nkw=pricing-blue-eyes-current",
+        estimatedPricePence: null,
+      },
+    },
+  });
+  const matchingTargets = await db.select().from(cardTargets).where(eq(cardTargets.normalizedName, "pricing blue-eyes white dragon"));
+  assert.equal(matchingTargets.length, 1);
+  assert.equal(matchingTargets[0]?.estimatedPricePence, 1234);
+  assert.match(matchingTargets[0]?.ebaySearchUrl ?? "", /current/);
 });
 
 test("unknown bulk cost stays unknown when its total changes or an identified Copy is removed", async () => {
@@ -1407,6 +1528,90 @@ test("tracked-Sale reconciliation and linked Sale lifecycle updates require sell
     nonSellerRecords.changeStatus({ expectedRevision: saleRecord.revision, recordId: saleRecord.id, status: "void" }),
     /seller permission/i,
   );
+});
+
+test("History pages on the server and returns only the requested Record context", async () => {
+  const createdAt = new Date("2026-08-07T12:00:00.000Z");
+  const historyRecords = Array.from({ length: 17 }, (_, index) => ({
+    amountKnown: true,
+    amountPence: index,
+    createdAt: new Date(createdAt.getTime() + index),
+    id: `history-page-record-${index}`,
+    notes: "isolated pagination coverage",
+    occurredOn: "2026-08-07",
+    ownerId,
+    source: "History pagination test",
+    status: "active" as const,
+    title: `History pagination ${index}`,
+    titleGenerated: false,
+    type: "imported-acquisition" as const,
+    updatedAt: new Date(createdAt.getTime() + index),
+  }));
+  await db.insert(recordEntries).values(historyRecords);
+  await db.insert(recordLines).values(historyRecords.map((record, index) => ({
+    allocationPence: index,
+    createdAt: record.createdAt,
+    detail: null,
+    id: `history-page-line-${index}`,
+    kind: "supply" as const,
+    name: `Only line match ${index}`,
+    ownerId,
+    position: 0,
+    quantity: 1,
+    recordId: record.id,
+    updatedAt: record.updatedAt,
+  })));
+
+  const firstPage = await records.history({
+    includeVoid: true,
+    page: 1,
+    query: "History pagination",
+    recordId: null,
+    type: "all",
+  });
+  const secondPage = await records.history({
+    includeVoid: true,
+    page: 2,
+    query: "History pagination",
+    recordId: null,
+    type: "all",
+  });
+  const lineSearch = await records.history({
+    includeVoid: true,
+    page: 1,
+    query: "Only line match 16",
+    recordId: null,
+    type: "all",
+  });
+
+  assert.equal(firstPage.total, 17);
+  assert.equal(firstPage.pageSize, 15);
+  assert.equal(firstPage.snapshot.records.length, 15);
+  assert.equal(secondPage.snapshot.records.length, 2);
+  assert.equal(lineSearch.total, 1);
+  assert.equal(lineSearch.snapshot.records[0]?.id, "history-page-record-16");
+  assert.equal(lineSearch.snapshot.records[0]?.lines[0]?.name, "Only line match 16");
+
+  const purchaseForm = await records.snapshot({ scope: "purchase-form" });
+  assert.equal(purchaseForm.records.length, 0);
+  assert.equal(purchaseForm.copies.length, 0);
+  assert.ok(purchaseForm.targets.length > 0);
+
+  for (const scope of ["inventory", "listings", "sale-form"] as const) {
+    const snapshot = await records.snapshot({ scope });
+    assert.ok(snapshot.copies.length > 0, `${scope} should load physical Copies`);
+    const recordIds = new Set(snapshot.records.map((record) => record.id));
+    assert.deepEqual(
+      snapshot.copies.filter((copy) => !recordIds.has(copy.acquiredRecordId)).map((copy) => copy.id),
+      [],
+      `${scope} must include every source Record required for Copy eligibility`,
+    );
+    assert.deepEqual(
+      snapshot.copyEbayExposures.filter((exposure) => /source Record is unavailable/i.test(exposure.action.reason)).map((exposure) => exposure.copyId),
+      [],
+      `${scope} must not block valid Copies because scoped data omitted their source Records`,
+    );
+  }
 });
 
 test.after(async () => {

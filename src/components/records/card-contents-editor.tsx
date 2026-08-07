@@ -24,7 +24,17 @@ const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-5
 export type CardContentsDraft = ProductIdentityDraft & {
   condition?: CardCondition;
   id: string;
+  pricing?: CardPricingDraft;
   quantity: number;
+};
+
+export type CardPricingDraft = {
+  ebaySearchUrl: string;
+  estimatedPricePence: number | null;
+  identityKey: string;
+  message: string;
+  sampleSize: number;
+  status: "checking" | "estimated" | "no-match" | "failed";
 };
 
 export function blankCardContents(name = ""): CardContentsDraft {
@@ -56,6 +66,7 @@ export function isUntouchedNewCardContents(row: CardContentsDraft) {
     && !row.fetchAttempted
     && !row.fetchMessage
     && !row.metadataNeedsAttention
+    && !row.pricing
     && !row.editedFields.length;
 }
 
@@ -79,6 +90,7 @@ export function CardContentsEditor({
   initialActiveId = null,
   noun = "card",
   onChange,
+  onFinishCard,
   rows,
   showCondition = true,
 }: {
@@ -88,6 +100,7 @@ export function CardContentsEditor({
   initialActiveId?: string | null;
   noun?: "card" | "pulled card";
   onChange: (rows: CardContentsDraft[]) => void;
+  onFinishCard?: (card: CardContentsDraft) => void;
   rows: CardContentsDraft[];
   showCondition?: boolean;
 }) {
@@ -142,8 +155,10 @@ export function CardContentsEditor({
   }
 
   function finishAndAddCard() {
+    const completed = active;
     if (!finishCard()) return;
     startAnotherCard();
+    if (completed) onFinishCard?.(completed);
   }
 
   return (
@@ -198,7 +213,15 @@ export function CardContentsEditor({
               )}
               compact
               kind="card"
-              onChange={(identity) => update(row.id, identity)}
+              onChange={(identity) => {
+                const pricingIdentityChanged = identity.selectedTargetId !== row.selectedTargetId
+                  || identity.name !== row.name
+                  || identity.rarity !== row.rarity
+                  || identity.edition !== row.edition;
+                update(row.id, pricingIdentityChanged
+                  ? { ...identity, pricing: undefined }
+                  : identity);
+              }}
               value={row}
             />
           </div>
@@ -209,7 +232,7 @@ export function CardContentsEditor({
             {row.imageUrl ? (
               <Image alt="" className="size-12 shrink-0 rounded-md object-contain" height={48} src={`/api/image-proxy?url=${encodeURIComponent(row.imageUrl)}`} unoptimized width={48} />
             ) : <span className="grid size-12 shrink-0 place-items-center rounded-md bg-zinc-100 text-[10px] font-bold text-zinc-400">CARD</span>}
-            <div className="min-w-0"><p className="font-bold leading-5 text-zinc-950">{row.name || `Unnamed ${noun}`}</p><p className="mt-0.5 text-sm font-medium leading-5 text-zinc-500">{row.setCode || row.edition || "Printing missing"} · {row.rarity || "Rarity missing"}{showCondition ? ` · ${row.condition ?? "Near Mint"}` : ""} · Qty {row.quantity}</p></div>
+            <div className="min-w-0"><p className="font-bold leading-5 text-zinc-950">{row.name || `Unnamed ${noun}`}</p><p className="mt-0.5 text-sm font-medium leading-5 text-zinc-500">{row.setCode || row.edition || "Printing missing"} · {row.rarity || "Rarity missing"}{showCondition ? ` · ${row.condition ?? "Near Mint"}` : ""} · Qty {row.quantity}</p>{row.pricing ? <p className={`mt-1 text-xs font-bold ${row.pricing.status === "failed" ? "text-rose-700" : row.pricing.status === "estimated" ? "text-emerald-700" : "text-zinc-500"}`}>{row.pricing.message}</p> : null}</div>
           </div>
           <div className="flex gap-2">
             <button className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 sm:flex-none" onClick={() => { setActiveId(row.id); setError(null); }} type="button"><Pencil className="size-4" /> Edit</button>

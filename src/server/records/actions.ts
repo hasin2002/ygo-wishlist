@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   ebayConnections,
@@ -137,7 +137,25 @@ function rowToAction(row: typeof recordsActions.$inferSelect): RecordsAction | n
   };
 }
 
-export async function listRecordsActions(ownerId: string, snapshot: RecordsSnapshot) {
+function sortedActions(rows: Array<typeof recordsActions.$inferSelect>) {
+  return rows.flatMap((row) => {
+    const action = rowToAction(row);
+    return action ? [action] : [];
+  }).sort((left, right) => (
+    Number(left.status !== "open") - Number(right.status !== "open")
+    || Number(left.category !== "required") - Number(right.category !== "required")
+    || (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)
+    || left.dedupeKey.localeCompare(right.dedupeKey)
+  ));
+}
+
+export async function listRecordsActions(ownerId: string) {
+  const rows = await db.select().from(recordsActions)
+    .where(eq(recordsActions.ownerId, ownerId));
+  return sortedActions(rows);
+}
+
+export async function syncRecordsActions(ownerId: string, snapshot: RecordsSnapshot) {
   const derived = await deriveCurrentActions(ownerId, snapshot);
   const now = new Date();
   return db.transaction(async (tx) => {
@@ -145,6 +163,7 @@ export async function listRecordsActions(ownerId: string, snapshot: RecordsSnaps
       .where(eq(recordsActions.ownerId, ownerId));
     const existingByKey = new Map(existing.map((row) => [row.dedupeKey, row]));
 
+    const changedRows: Array<typeof recordsActions.$inferInsert> = [];
     for (const action of derived) {
       const old = existingByKey.get(action.dedupeKey);
       const unchangedDismissal = action.category === "suggestion"
@@ -163,15 +182,43 @@ export async function listRecordsActions(ownerId: string, snapshot: RecordsSnaps
         resolvedAt: null,
         dismissedAt: unchangedDismissal ? old.dismissedAt ?? now : null,
       };
-      await tx.insert(recordsActions).values({
+      const changed = !old
+        || old.kind !== values.kind
+        || old.category !== values.category
+        || old.area !== values.area
+        || old.severity !== values.severity
+        || old.status !== values.status
+        || old.sourceFingerprint !== values.sourceFingerprint
+        || JSON.stringify(old.reason) !== JSON.stringify(values.reason)
+        || JSON.stringify(old.references) !== JSON.stringify(values.references)
+        || old.resolvedAt !== values.resolvedAt
+        || old.dismissedAt?.getTime() !== values.dismissedAt?.getTime();
+      if (!changed) continue;
+      changedRows.push({
         ...values,
         id: old?.id ?? randomUUID(),
         ownerId,
         dedupeKey: action.dedupeKey,
         createdAt: old?.createdAt ?? now,
-      }).onConflictDoUpdate({
+      });
+    }
+
+    if (changedRows.length) {
+      await tx.insert(recordsActions).values(changedRows).onConflictDoUpdate({
         target: [recordsActions.ownerId, recordsActions.dedupeKey],
-        set: values,
+        set: {
+          kind: sql`excluded.kind`,
+          category: sql`excluded.category`,
+          area: sql`excluded.area`,
+          severity: sql`excluded.severity`,
+          status: sql`excluded.status`,
+          reason: sql`excluded.reason`,
+          references: sql`excluded.references`,
+          sourceFingerprint: sql`excluded.source_fingerprint`,
+          updatedAt: sql`excluded.updated_at`,
+          resolvedAt: sql`excluded.resolved_at`,
+          dismissedAt: sql`excluded.dismissed_at`,
+        },
       });
     }
 
@@ -190,15 +237,7 @@ export async function listRecordsActions(ownerId: string, snapshot: RecordsSnaps
 
     const rows = await tx.select().from(recordsActions)
       .where(eq(recordsActions.ownerId, ownerId));
-    return rows.flatMap((row) => {
-      const action = rowToAction(row);
-      return action ? [action] : [];
-    }).sort((left, right) => (
-      Number(left.status !== "open") - Number(right.status !== "open")
-      || Number(left.category !== "required") - Number(right.category !== "required")
-      || (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0)
-      || left.dedupeKey.localeCompare(right.dedupeKey)
-    ));
+    return sortedActions(rows);
   });
 }
 
@@ -218,10 +257,4 @@ export async function dismissRecordsSuggestion(ownerId: string, action: RecordsA
     eq(recordsActions.status, "open"),
   )).returning({ id: recordsActions.id });
   if (!updated.length) throw new Error("That suggestion is no longer open.");
-}
-
-export async function urgentRecordsActionCount(ownerId: string, snapshot: RecordsSnapshot) {
-  return (await listRecordsActions(ownerId, snapshot)).filter((action) => (
-    action.status === "open" && action.category === "required"
-  )).length;
 }
