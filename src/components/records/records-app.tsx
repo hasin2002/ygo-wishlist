@@ -31,11 +31,12 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   CardContentsEditor,
   type CardContentsDraft,
+  type CardPricingDraft,
 } from "@/components/records/card-contents-editor";
 import { CardInventoryImages } from "@/components/records/card-inventory-images";
 import { InventoryListingPhotoSets } from "@/components/records/listing-photo-set-manager";
@@ -51,11 +52,13 @@ import { DataLoadError } from "@/components/data-load-error";
 import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
+import { useCardPricing } from "@/components/records/use-card-pricing";
 import { SearchablePicklist, type SearchablePicklistOption } from "@/components/records/searchable-picklist";
 import { getLibraryCardStatus, type LibraryCardStatusSummary } from "@/lib/records/library-status";
 import { deriveSnapshotRecordsActions, type RecordsAction } from "@/lib/records/actions";
 import { ownedCardTotalLabel, paidCostSummary } from "@/lib/records/paid-cost-summary";
-import { parseSaleReviewIntent } from "@/lib/navigation-intent";
+import { cardPricingIdentityKey } from "@/lib/records/card-pricing";
+import { parseSaleReviewIntent, recordEditHref } from "@/lib/navigation-intent";
 import {
   recordImagePreviewsFor,
   type RecordImagePreview,
@@ -91,6 +94,7 @@ import {
   type InventoryListState,
 } from "@/lib/records/inventory-route-state";
 import { trpc } from "@/trpc/client";
+import { useCollectionChange } from "@/lib/use-collection-change";
 
 export type RecordsView = "overview" | "history" | "inventory";
 
@@ -342,6 +346,70 @@ function RecordRow({
   );
 }
 
+function recordPricingTargetIds(record: RecordEntry, snapshot: RecordsSnapshot) {
+  const copyById = new Map(snapshot.copies.map((copy) => [copy.id, copy]));
+  const printingById = new Map(snapshot.printings.map((printing) => [printing.id, printing]));
+  const targetIds = new Set<string>();
+  for (const copyId of record.lines.flatMap((line) => line.entityIds)) {
+    const copy = copyById.get(copyId);
+    const printing = copy ? printingById.get(copy.printingId) : null;
+    if (printing) targetIds.add(printing.targetId);
+  }
+  return [...targetIds];
+}
+
+function RecordPricingRefreshButton({ record, snapshot }: { record: RecordEntry; snapshot: RecordsSnapshot }) {
+  const targetIds = recordPricingTargetIds(record, snapshot);
+  const refreshPricing = trpc.library.refreshPricing.useMutation();
+  const collectionChanged = useCollectionChange();
+  const [progress, setProgress] = useState<{ completed: number; failed: number; total: number } | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  if (!targetIds.length) return null;
+
+  async function refreshRecordPricing() {
+    if (progress && progress.completed < progress.total) return;
+    setMessage(null);
+    setProgress({ completed: 0, failed: 0, total: targetIds.length });
+    let completed = 0;
+    let failed = 0;
+    for (let index = 0; index < targetIds.length; index += 2) {
+      const results = await Promise.allSettled(
+        targetIds.slice(index, index + 2).map((id) => refreshPricing.mutateAsync({ id })),
+      );
+      completed += results.length;
+      failed += results.filter((result) => result.status === "rejected").length;
+      setProgress({ completed, failed, total: targetIds.length });
+    }
+    try {
+      await collectionChanged("target");
+    } catch {
+      setMessage("Estimates were checked, but another open screen may need a manual refresh.");
+      return;
+    }
+    setMessage(failed
+      ? `${targetIds.length - failed} estimate${targetIds.length - failed === 1 ? "" : "s"} refreshed; ${failed} failed.`
+      : `${targetIds.length} card estimate${targetIds.length === 1 ? "" : "s"} refreshed.`);
+  }
+
+  const running = progress !== null && progress.completed < progress.total;
+  return (
+    <div className="grid justify-items-end gap-1">
+      <button
+        aria-label={`Refresh UK eBay estimates for ${record.title}`}
+        className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
+        disabled={running}
+        onClick={() => void refreshRecordPricing()}
+        type="button"
+      >
+        <RefreshCcw aria-hidden="true" className={`size-3.5 ${running ? "animate-spin motion-reduce:animate-none" : ""}`} />
+        {running ? `${progress.completed}/${progress.total}` : `Refresh estimates (${targetIds.length})`}
+      </button>
+      {message ? <span className="max-w-64 text-right text-xs font-semibold text-zinc-500" role="status">{message}</span> : null}
+    </div>
+  );
+}
+
 function cardDraftsForRecord(record: RecordEntry, snapshot: RecordsSnapshot): CardContentsDraft[] {
   return record.lines.filter((line) => line.kind === "card").map((line) => {
     const copy = snapshot.copies.find((item) => line.entityIds.includes(item.id));
@@ -387,6 +455,12 @@ function RecordCardItemsEditor({
   source: RecordsDataSource;
 }) {
   const [rows, setRows] = useState<CardContentsDraft[]>(() => cardDraftsForRecord(record, source.snapshot));
+  const updateCardPricing = useCallback((cardId: string, pricing: CardPricingDraft) => {
+    setRows((current) => current.map((row) => row.id === cardId && cardPricingIdentityKey(row) === pricing.identityKey
+      ? { ...row, pricing }
+      : row));
+  }, []);
+  const cardPricing = useCardPricing(updateCardPricing);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const cardLines = record.lines.filter((line) => line.kind === "card");
@@ -413,6 +487,15 @@ function RecordCardItemsEditor({
       setName: row.setName,
       setCode: row.setCode,
       metadataNeedsAttention: row.metadataNeedsAttention,
+      pricing: row.pricing
+        && row.pricing.status !== "checking"
+        && row.pricing.status !== "failed"
+        && row.pricing.ebaySearchUrl
+        ? {
+            ebaySearchUrl: row.pricing.ebaySearchUrl,
+            estimatedPricePence: row.pricing.estimatedPricePence,
+          }
+        : undefined,
     })), record.revision);
     setSaving(false);
     if (result.ok) {
@@ -449,8 +532,8 @@ function RecordCardItemsEditor({
       ) : null}
       <div><h3 className="font-bold">{record.type === "pack-opening" ? "Pulled cards" : "Card items"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Edit a card, change its quantity, remove it, or add another where this Record supports multiple cards. Manage condition on each exact Copy in Inventory.</p></div>
       {message ? <p className={`rounded-md border px-3 py-2 text-sm font-bold ${message === "Card items saved." ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-300 bg-rose-50 text-rose-900"}`} role={message === "Card items saved." ? "status" : "alert"}>{message}</p> : null}
-      <CardContentsEditor allowAdd={isMultiCardRecord} allowExistingIncomplete allowRemoveLast={hasBulkContainer} initialActiveId={initialCardLineId} noun={record.type === "pack-opening" ? "pulled card" : "card"} onChange={setRows} rows={rows} showCondition={false} />
-      <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60 sm:justify-self-start" disabled={saving} onClick={saveCards} type="button">{saving ? "Saving…" : "Save card changes"}</button>
+      <CardContentsEditor allowAdd={isMultiCardRecord} allowExistingIncomplete allowRemoveLast={hasBulkContainer} initialActiveId={initialCardLineId} noun={record.type === "pack-opening" ? "pulled card" : "card"} onChange={setRows} onFinishCard={source.mode === "live" ? cardPricing.requestPricing : undefined} rows={rows} showCondition={false} />
+      <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60 sm:justify-self-start" disabled={saving || cardPricing.pendingCount > 0} onClick={saveCards} type="button">{saving ? "Saving…" : cardPricing.pendingCount > 0 ? "Finishing estimates…" : "Save card changes"}</button>
     </section>
   );
 }
@@ -614,13 +697,14 @@ function RecordStatusConfirmationDialog({
   );
 }
 
-function RecordEditorDialog({
+export function RecordEditorDialog({
   backLabel,
   costOnly = false,
   initialCardLineId = null,
   initialPanel = "details",
   onClose,
   onSaved,
+  presentation = "dialog",
   record,
   reviewSale = false,
   source,
@@ -631,6 +715,7 @@ function RecordEditorDialog({
   initialPanel?: "details" | "items";
   onClose: () => void;
   onSaved: (message: string) => void;
+  presentation?: "dialog" | "page";
   record: RecordEntry;
   reviewSale?: boolean;
   source: RecordsDataSource;
@@ -651,7 +736,7 @@ function RecordEditorDialog({
   const statusButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useViewportOverlay<HTMLDivElement>({
     initialFocusRef: closeButtonRef,
-    isOpen: true,
+    isOpen: presentation === "dialog",
     onClose: () => {
       if (!saving && !statusConfirmationOpen) onClose();
     },
@@ -670,7 +755,9 @@ function RecordEditorDialog({
     ? "Review this sale record and its exact physical Copies. You can correct its details or items before continuing."
     : costOnly
       ? "Add the acquisition cost to resolve this attention item."
-      : "Edit this Record and its items without leaving the current view.";
+      : presentation === "page"
+        ? "Update this Record and its items on the same full page used for this Record type."
+        : "Edit this Record and its items without leaving the current view.";
   async function save() {
     const parsedAmount = editsCashflow && amountKnown ? parsePoundsToPence(amount) : 0;
     if (editsCashflow && amountKnown && parsedAmount === null) {
@@ -699,12 +786,10 @@ function RecordEditorDialog({
     onClose();
   }
 
-  if (typeof document === "undefined") return null;
+  if (presentation === "dialog" && typeof document === "undefined") return null;
 
-  return <>
-  {createPortal(
-    <div aria-describedby="record-editor-description" aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving && !statusConfirmationOpen) onClose(); }} role="dialog">
-      <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]" ref={dialogRef} tabIndex={-1}>
+  const editor = (
+      <div className={presentation === "page" ? "w-full overflow-hidden rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-sm" : "max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-xl border border-zinc-300 bg-[#f6f4ef] shadow-2xl sm:max-h-[calc(100dvh-3rem)]"} ref={dialogRef} tabIndex={presentation === "dialog" ? -1 : undefined}>
         <div className="flex items-start justify-between gap-4 border-b border-zinc-300 bg-white px-4 py-4 sm:px-6">
           <div><span className="text-xs font-bold uppercase tracking-[0.12em] text-[#8a1f2d]">{reviewSale ? "Review sale" : costOnly ? "Resolve attention" : recordTypeLabels[record.type]}</span><h2 className="mt-1 text-xl font-black" id="record-editor-title">{reviewSale ? "Review sale" : costOnly ? "Add acquisition cost" : "Edit record"}</h2><p className="mt-1 text-sm font-medium text-zinc-500" id="record-editor-description">{dialogDescription}</p></div>
           <button aria-label={reviewSale ? "Close Review sale" : backLabel || "Close record editor"} className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={onClose} ref={closeButtonRef} type="button">{backLabel ? <ArrowLeft className="size-5" /> : <X className="size-5" />}</button>
@@ -732,6 +817,12 @@ function RecordEditorDialog({
           <div className="flex flex-col-reverse gap-2 sm:flex-row"><button className="inline-flex min-h-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-700 transition hover:border-zinc-950" disabled={saving} onClick={onClose} type="button">{activePanel === "details" ? "Cancel" : "Close"}</button>{activePanel === "details" ? <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60" disabled={saving} onClick={save} type="button">{saving ? "Saving…" : costOnly ? "Save acquisition cost" : "Save details"}</button> : null}</div>
         </div>
       </div>
+  );
+
+  return <>
+  {presentation === "page" ? editor : createPortal(
+    <div aria-describedby="record-editor-description" aria-labelledby="record-editor-title" aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-zinc-950/45 p-3 sm:place-items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving && !statusConfirmationOpen) onClose(); }} role="dialog">
+      {editor}
     </div>,
     document.body,
   )}
@@ -1133,6 +1224,25 @@ function HistoryView() {
     : previewRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const editingRecord = historySnapshot.records.find((record) => record.id === editingRecordId) ?? null;
   const statusRecord = historySnapshot.records.find((record) => record.id === statusRecordId) ?? null;
+  const saleEditorSnapshotQuery = trpc.records.snapshot.useQuery({ scope: "sale-form" }, {
+    enabled: source.mode === "live" && editingRecord?.type === "sale",
+    staleTime: 30_000,
+  });
+  const editorSnapshot = useMemo(() => {
+    if (!editingRecord || source.mode !== "live" || editingRecord.type !== "sale") {
+      return historySnapshot;
+    }
+    if (!saleEditorSnapshotQuery.data) return null;
+    return {
+      ...saleEditorSnapshotQuery.data,
+      records: saleEditorSnapshotQuery.data.records.map((record) => (
+        record.id === editingRecord.id ? editingRecord : record
+      )),
+    };
+  }, [editingRecord, historySnapshot, saleEditorSnapshotQuery.data, source.mode]);
+  const editorSource = useMemo<RecordsDataSource | null>(() => editorSnapshot
+    ? { ...source, snapshot: editorSnapshot }
+    : null, [editorSnapshot, source]);
 
   useEffect(() => {
     if (!requestedReviewValue || handledReviewId.current === requestedReviewValue) return;
@@ -1192,8 +1302,9 @@ function HistoryView() {
         {visibleRecords.length ? visibleRecords.map((record) => (
           <RecordRow
             actions={
-              <div className="flex items-center gap-2">
-                <button aria-label={`Edit ${record.title}`} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" onClick={() => setEditingRecordId(record.id)} type="button"><Pencil className="size-3.5" /> Edit</button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {source.mode === "live" ? <RecordPricingRefreshButton record={record} snapshot={historySnapshot} /> : null}
+                <Link aria-label={`Edit ${record.title}`} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={recordEditHref(record)}><Pencil className="size-3.5" /> Edit</Link>
                 <button
                   className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
                   onClick={(event) => {
@@ -1222,7 +1333,9 @@ function HistoryView() {
         <div className="flex items-center gap-2"><button aria-label="Previous history page" className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white transition hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-40" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /></button><span>Page {currentPage} of {pageCount}</span><button aria-label="Next history page" className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white transition hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-40" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button"><ChevronRight className="size-4" /></button></div>
       </nav> : null}
     </section>
-    {editingRecord ? <RecordEditorDialog key={editingRecord.id} onClose={() => setEditingRecordId(null)} onSaved={setMessage} record={editingRecord} reviewSale={requestedReviewId === editingRecord.id} source={source} /> : null}
+    {editingRecord && editorSource ? <RecordEditorDialog key={editingRecord.id} onClose={() => setEditingRecordId(null)} onSaved={setMessage} record={editingRecord} reviewSale={requestedReviewId === editingRecord.id} source={editorSource} /> : null}
+    {editingRecord?.type === "sale" && saleEditorSnapshotQuery.isPending ? <p className="fixed bottom-4 right-4 z-[80] rounded-md bg-zinc-950 px-4 py-3 text-sm font-bold text-white shadow-xl" role="status">Preparing the Sale editor…</p> : null}
+    {editingRecord?.type === "sale" && saleEditorSnapshotQuery.isError ? <div className="mt-4"><DataLoadError message={saleEditorSnapshotQuery.error.message} onRetry={() => saleEditorSnapshotQuery.refetch()} title="Sale editor data could not be loaded" /></div> : null}
     {statusRecord ? <RecordStatusConfirmationDialog onClose={() => setStatusRecordId(null)} onSuccess={(statusMessage) => { setStatusRecordId(null); setMessage(statusMessage); }} record={statusRecord} source={source} triggerRef={statusButtonRef} /> : null}
     </>
   );

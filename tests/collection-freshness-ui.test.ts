@@ -108,8 +108,9 @@ test("Purchase timeout recovery keeps one durable submission and explains ambigu
   assert.match(client, /purchaseRequestTimeoutMs = 60_000/);
   assert.match(client, /may still have been saved\. Check Records History before retrying/);
   assert.match(client, /controller\.abort\(new DOMException\(requestTimeout\.message, "TimeoutError"\)\)/);
-  assert.match(router, /submissionId: input\.operationId/);
-  assert.match(router, /eq\(recordEntries\.submissionId, input\.operationId\)/);
+  assert.match(router, /submissionId: operationId/);
+  assert.match(router, /eq\(recordEntries\.submissionId, operationId\)/);
+  assert.doesNotMatch(router, /operationId: z\.string\(\)\.uuid\(\)\.default/);
   assert.match(router, /onConflictDoNothing\(\)\.returning/);
   assert.match(router, /This Purchase was already saved\. No duplicate was created/);
   assert.match(schema, /record_entries_owner_submission_unique/);
@@ -125,6 +126,7 @@ test("the protected navigation keeps prefetching but has no global Actions badge
 });
 
 test("History owns a bounded server page and workspace routes request scoped snapshots", () => {
+  const app = source("src/components/records/records-app.tsx");
   const router = source("src/server/routers/records.ts");
   const provider = source("src/components/records/records-preview-provider.tsx");
   assert.match(router, /const pageSize = 15/);
@@ -132,4 +134,7 @@ test("History owns a bounded server page and workspace routes request scoped sna
   assert.match(provider, /pathname === "\/records" \|\| pathname === "\/records\/history" \|\| pathname === "\/records\/actions"/);
   assert.match(provider, /snapshotQuery = trpc\.records\.snapshot\.useQuery\(\{ scope: snapshotScope \}/);
   assert.match(provider, /enabled: clientReady && !routeOwnsSnapshot/);
+  assert.match(router, /includeRecords = scope === "full" \|\| scope === "opening-form" \|\| includeCopies/);
+  assert.match(app, /saleEditorSnapshotQuery = trpc\.records\.snapshot\.useQuery\(\{ scope: "sale-form" \}/);
+  assert.match(app, /\{ \.\.\.source, snapshot: editorSnapshot \}/);
 });

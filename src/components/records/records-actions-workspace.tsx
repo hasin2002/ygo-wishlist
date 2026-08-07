@@ -27,7 +27,9 @@ import {
   type RecordsAction,
 } from "@/lib/records/actions";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
+import type { CollectionChange } from "@/lib/collection-change";
 import type { RecordsSnapshot } from "@/lib/records/types";
+import { useCollectionChange } from "@/lib/use-collection-change";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
 import { trpc } from "@/trpc/client";
 
@@ -169,17 +171,11 @@ const primaryButtonClass = "col-span-2 inline-flex min-h-11 w-full items-center 
 const secondaryButtonClass = "inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 bg-white px-4 text-sm font-bold text-zinc-800 transition hover:border-zinc-500 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-[#8a1f2d]/20 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto";
 
 function ActionCard({ action, live, snapshot }: { action: RecordsAction; live: boolean; snapshot: RecordsSnapshot }) {
-  const utils = trpc.useUtils();
+  const collectionChanged = useCollectionChange();
   const [error, setError] = useState<string | null>(null);
-  const refreshQueries = async () => {
-    await Promise.all([
-      utils.records.actions.invalidate(),
-      utils.records.snapshot.invalidate(),
-    ]);
-  };
-  const dismiss = trpc.records.dismissSuggestion.useMutation({ onSuccess: refreshQueries });
-  const refresh = trpc.ebay.refreshListingStatusById.useMutation({ onSuccess: refreshQueries });
-  const confirmCopyLink = trpc.records.resolveEbayCopyLinkAttention.useMutation({ onSuccess: refreshQueries });
+  const dismiss = trpc.records.dismissSuggestion.useMutation();
+  const refresh = trpc.ebay.refreshListingStatusById.useMutation();
+  const confirmCopyLink = trpc.records.resolveEbayCopyLinkAttention.useMutation();
   const destination = actionDestination(action);
   const pending = dismiss.isPending || refresh.isPending || confirmCopyLink.isPending;
   const context = actionContext(action, snapshot);
@@ -191,10 +187,11 @@ function ActionCard({ action, live, snapshot }: { action: RecordsAction; live: b
   const required = action.category === "required";
   const open = action.status === "open";
 
-  async function perform(change: Promise<unknown>) {
+  async function perform(change: Promise<unknown>, affectedCollection: CollectionChange) {
     setError(null);
     try {
       await change;
+      await collectionChanged(affectedCollection);
     } catch (reason) {
       setError(actionError(reason));
     }
@@ -205,13 +202,13 @@ function ActionCard({ action, live, snapshot }: { action: RecordsAction; live: b
     primaryAction = <Link className={primaryButtonClass} href="/ebay"><Wrench aria-hidden="true" className="size-4" />Reconnect eBay</Link>;
   } else if (open && live && action.recovery.includes("confirm_copy_link") && action.references.listingId) {
     primaryAction = (
-      <button className={primaryButtonClass} disabled={pending} onClick={() => void perform(confirmCopyLink.mutateAsync({ listingId: action.references.listingId! }))} type="button">
+      <button className={primaryButtonClass} disabled={pending} onClick={() => void perform(confirmCopyLink.mutateAsync({ listingId: action.references.listingId! }), "listing")} type="button">
         <Link2 aria-hidden="true" className="size-4" />{confirmCopyLink.isPending ? "Confirming…" : "Confirm Copy link"}
       </button>
     );
   } else if (open && live && action.recovery.includes("refresh_status") && action.references.listingId) {
     primaryAction = (
-      <button className={primaryButtonClass} disabled={pending} onClick={() => void perform(refresh.mutateAsync({ listingId: action.references.listingId! }))} type="button">
+      <button className={primaryButtonClass} disabled={pending} onClick={() => void perform(refresh.mutateAsync({ listingId: action.references.listingId! }), "listing")} type="button">
         <RefreshCw aria-hidden="true" className={`size-4 ${refresh.isPending ? "motion-safe:animate-spin" : ""}`} />{refresh.isPending ? "Refreshing…" : "Refresh from eBay"}
       </button>
     );
@@ -294,7 +291,7 @@ function ActionCard({ action, live, snapshot }: { action: RecordsAction; live: b
               <a className={secondaryButtonClass} href={action.references.listingUrl} rel="noreferrer" target="_blank"><ExternalLink aria-hidden="true" className="size-4" /><span className="sm:hidden">View eBay</span><span className="hidden sm:inline">Open live listing</span><span className="sr-only"> (opens in a new tab)</span></a>
             ) : null}
             {live && action.category === "suggestion" ? (
-              <button className={secondaryButtonClass} disabled={pending} onClick={() => void perform(dismiss.mutateAsync({ dedupeKey: action.dedupeKey }))} type="button">{dismiss.isPending ? "Dismissing…" : "Dismiss"}</button>
+              <button className={secondaryButtonClass} disabled={pending} onClick={() => void perform(dismiss.mutateAsync({ dedupeKey: action.dedupeKey }), "actions")} type="button">{dismiss.isPending ? "Dismissing…" : "Dismiss"}</button>
             ) : null}
           </>
         ) : (

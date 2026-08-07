@@ -273,6 +273,10 @@ export type ProductIdentityInput = {
   setName: string;
   setCode: string;
   metadataNeedsAttention: boolean;
+  pricing?: {
+    estimatedPricePence: number | null;
+    ebaySearchUrl: string;
+  };
 };
 
 export type CardContentsInput = ProductIdentityInput & {

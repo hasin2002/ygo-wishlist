@@ -44,6 +44,7 @@ function useRefreshCollection() {
       "spend.monthlyFavourites": () => utils.spend.monthlyFavourites.invalidate(),
       "wheel.state": () => utils.wheel.state.invalidate(),
       "records.snapshot": () => utils.records.snapshot.invalidate(),
+      "records.actions": () => utils.records.actions.invalidate(),
       "records.history": () => utils.records.history.invalidate(),
       "records.listEbayListings": () => utils.records.listEbayListings.invalidate(),
     };

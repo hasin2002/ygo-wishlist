@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation";
+import { EbayLotListing } from "@/components/records/ebay-lot-listing";
 
 export default function NewEbayLotPage() {
-  // Historical lot records still render in the Listings workspace; only the
-  // creation journey is retired.
-  redirect("/records/listings/new");
+  return <EbayLotListing />;
 }

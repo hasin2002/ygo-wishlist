@@ -400,7 +400,9 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
       expectedRevision,
     ),
     updateCardCopy: (copyId, update) => finish(updateCopy.mutateAsync({ copyId, update }), "copies"),
-    removeCardCopy: (copyId) => finish(removeCopy.mutateAsync({ copyId }), "copies"),
+    // Removing a Copy can also rewrite or delete its Record line, so History
+    // and Actions must refresh alongside inventory projections.
+    removeCardCopy: (copyId) => finish(removeCopy.mutateAsync({ copyId }), "records"),
     updateRecordLine: (recordId, lineId, update, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => updateLine.mutateAsync({ recordId, expectedRevision, lineId, update }),

@@ -107,15 +107,17 @@ test("the 2, 3, 4, and 6-Copy previews state every keep, increase, end, and crea
   assert.deepEqual(planLinkedOfferChanges([], 6).map((change) => change.action), ["Create individual offer", "Create x3 offer"]);
 });
 
-test("the grouped UI retires Copy-led and mixed-lot entry points", () => {
+test("linked offers and mixed-lot creation remain separate listing flows", () => {
   const header = readFileSync(new URL("../src/components/app-header.tsx", import.meta.url), "utf8");
   const inventory = readFileSync(new URL("../src/components/records/records-app.tsx", import.meta.url), "utf8");
   const grouped = readFileSync(new URL("../src/components/records/linked-offer-listing.tsx", import.meta.url), "utf8");
   const newListingPage = readFileSync(new URL("../src/app/records/(workspace)/listings/new/page.tsx", import.meta.url), "utf8");
   const legacySellRoute = readFileSync(new URL("../src/app/records/(workspace)/inventory/cards/[targetId]/copies/[copyId]/sell/page.tsx", import.meta.url), "utf8");
-  const legacyLotRoute = readFileSync(new URL("../src/app/records/(workspace)/listings/new-lot/page.tsx", import.meta.url), "utf8");
+  const mixedLotRoute = readFileSync(new URL("../src/app/records/(workspace)/listings/new-lot/page.tsx", import.meta.url), "utf8");
+  const mixedLot = readFileSync(new URL("../src/components/records/ebay-lot-listing.tsx", import.meta.url), "utf8");
   assert.match(header, /label: "Create listing"/);
-  assert.doesNotMatch(header, /label: "Mixed card lot"/);
+  assert.match(header, /label: "Mixed card lot"/);
+  assert.match(header, /href: "\/records\/listings\/new-lot"/);
   assert.doesNotMatch(inventory, /EbayListingAction/);
   assert.match(inventory, /linkedListingHref\(target\.id, selectedDetail\.printing\.id, selectedDetail\.copy\.condition\)/);
   assert.match(grouped, /Sell cards individually/);
@@ -159,9 +161,13 @@ test("the grouped UI retires Copy-led and mixed-lot entry points", () => {
   assert.match(grouped, /router\.replace\(resumeHref\(saved\.familyId\), \{ scroll: false \}\)/);
   assert.match(newListingPage, /resume\?: string/);
   assert.match(newListingPage, /initialResumeFamilyId=\{resume\}/);
+  assert.match(mixedLotRoute, /<EbayLotListing \/>/);
+  assert.match(mixedLot, /Create mixed card lot/);
+  assert.match(mixedLot, /copySelectionAvailabilityReason/);
+  assert.match(mixedLot, /sourceInventoryCopyId/);
   assert.doesNotMatch(grouped, /anchor Copy|Keep anchor only|Move up|Move down/);
   assert.match(legacySellRoute, /redirect\(`\/records\/listings\/new\?target=/);
-  assert.match(legacyLotRoute, /redirect\("\/records\/listings\/new"\)/);
+  assert.doesNotMatch(mixedLotRoute, /redirect\(/);
 });
 
 test("the card target picker searches a bounded list with full keyboard support", () => {

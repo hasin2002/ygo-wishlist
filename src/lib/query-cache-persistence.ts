@@ -6,14 +6,16 @@ import {
 } from "./collection-change.ts";
 
 export const legacyQueryCacheStorageKey = "ygo-wishlist:query-cache:v1";
-export const queryCacheStorageKey = "ygo-wishlist:query-cache:v4";
-export const queryCacheBuster = "v4";
+export const queryCacheStorageKey = "ygo-wishlist:query-cache:v5";
+export const queryCacheBuster = "v5";
 
 type PersistedEnvelope = { cache: unknown; collectionRevision: CollectionRevision };
 type PersistedQuery = { queryKey?: unknown; state?: { isInvalidated?: boolean } };
 
 const collectionQueryPaths = new Set([
   "records.snapshot",
+  "records.actions",
+  "records.history",
   "records.listEbayListings",
   "library.binderList",
   "library.chaseQueue",

@@ -106,7 +106,7 @@ export function protectedLoginHref(
   return loginHref(parseNavigationIntent(proxyIntent) ?? fallback);
 }
 
-export function addTaskHref(taskPathname: "/wishlist/new" | "/records/new/purchase" | "/records/new/opening" | "/records/new/sale" | "/records/listings/new", origin: string | NavigationIntent | null | undefined) {
+export function addTaskHref(taskPathname: "/wishlist/new" | "/records/new/purchase" | "/records/new/opening" | "/records/new/sale" | "/records/listings/new" | "/records/listings/new-lot", origin: string | NavigationIntent | null | undefined) {
   const intent = typeof origin === "string" ? parseNavigationIntent(origin) : origin;
   if (!intent) return taskPathname;
   return `${taskPathname}?origin=${encodeURIComponent(serializeNavigationIntent(intent))}`;
@@ -124,6 +124,19 @@ export function parseSaleReviewIntent(value: unknown): SaleReviewIntent | null {
 export function reviewSaleHref(value: unknown) {
   const intent = parseSaleReviewIntent(value);
   return intent ? `/records/history?record=${encodeURIComponent(intent.recordId)}` : "/records/history";
+}
+
+export function recordEditHref(record: {
+  id: string;
+  type: "purchase" | "pack-opening" | "sale" | "imported-acquisition";
+}) {
+  const route = record.type === "sale"
+    ? "/records/new/sale"
+    : record.type === "pack-opening"
+      ? "/records/new/opening"
+      : "/records/new/purchase";
+  const params = new URLSearchParams({ edit: record.id, origin: "/records/history" });
+  return `${route}?${params}`;
 }
 
 function parseBoundedIntentId(value: unknown) {

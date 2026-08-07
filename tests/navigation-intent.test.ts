@@ -9,6 +9,7 @@ import {
   parsePaidEbaySaleReviewIntent,
   parseSaleReviewIntent,
   protectedLoginHref,
+  recordEditHref,
   reviewSaleHref,
   safeNavigationHref,
   serializeNavigationIntent,
@@ -82,6 +83,13 @@ test("Review Sale uses only a bounded, non-control record ID", () => {
   assert.equal(parseSaleReviewIntent(""), null);
   assert.equal(parseSaleReviewIntent("sale\u0000id"), null);
   assert.equal(reviewSaleHref(""), "/records/history");
+});
+
+test("History edit links return each Record to its full-page entry route", () => {
+  assert.equal(recordEditHref({ id: "purchase-1", type: "purchase" }), "/records/new/purchase?edit=purchase-1&origin=%2Frecords%2Fhistory");
+  assert.equal(recordEditHref({ id: "import-1", type: "imported-acquisition" }), "/records/new/purchase?edit=import-1&origin=%2Frecords%2Fhistory");
+  assert.equal(recordEditHref({ id: "opening-1", type: "pack-opening" }), "/records/new/opening?edit=opening-1&origin=%2Frecords%2Fhistory");
+  assert.equal(recordEditHref({ id: "sale-1", type: "sale" }), "/records/new/sale?edit=sale-1&origin=%2Frecords%2Fhistory");
 });
 
 test("paid eBay Sale review carries one bounded exact Listing and Copy", () => {

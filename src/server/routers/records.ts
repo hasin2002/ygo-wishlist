@@ -171,6 +171,10 @@ const cardInputSchema = z.object({
   setCode: z.string().trim().max(80),
   metadataNeedsAttention: z.boolean(),
   quantity: z.number().int().positive().max(10_000),
+  pricing: z.object({
+    estimatedPricePence: z.number().int().nonnegative().nullable(),
+    ebaySearchUrl: z.string().url(),
+  }).optional(),
 });
 const productInputSchema = cardInputSchema.omit({ condition: true, id: true, quantity: true }).extend({
   rarity: z.string().trim().max(80),
@@ -185,7 +189,9 @@ const commonRecordSchema = z.object({
   notes: z.string().trim().max(4_000),
 });
 const purchaseRecordSchema = commonRecordSchema.extend({
-  operationId: z.string().uuid().default(randomUUID),
+  operationId: z.string().uuid({
+    message: "This Purchase was opened before duplicate protection was available. Refresh the page, recover the saved draft, and submit it again.",
+  }).optional(),
 });
 const purchaseSchema = z.discriminatedUnion("kind", [
   purchaseRecordSchema.extend({
@@ -512,6 +518,14 @@ async function findOrCreatePrinting(
   const normalizedName = normalize(input.name);
   const normalizedRarity = normalize(input.rarity);
   const normalizedEditionValue = normalizeEdition(input.edition);
+  const pricingValues = input.pricing
+    ? {
+        ebaySearchUrl: input.pricing.ebaySearchUrl,
+        ...(input.pricing.estimatedPricePence === null
+          ? {}
+          : { estimatedPricePence: input.pricing.estimatedPricePence }),
+      }
+    : {};
   let target = input.selectedTargetId
     ? (await tx.select().from(cardTargets).where(and(
         eq(cardTargets.id, input.selectedTargetId),
@@ -549,6 +563,7 @@ async function findOrCreatePrinting(
       desiredQuantity: 0,
       imageUrl: input.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl,
+      ...pricingValues,
       createdAt: now,
       updatedAt: now,
     }).returning();
@@ -576,6 +591,7 @@ async function findOrCreatePrinting(
       normalizedEdition: normalizedEditionValue,
       imageUrl: input.imageUrl || target.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl || target.tcgplayerUrl,
+      ...pricingValues,
       updatedAt: now,
     }).where(and(
       eq(cardTargets.id, target.id),
@@ -585,6 +601,7 @@ async function findOrCreatePrinting(
     const updates = {
       imageUrl: target.imageUrl || input.imageUrl,
       tcgplayerUrl: target.tcgplayerUrl || input.tcgplayerUrl,
+      ...pricingValues,
       updatedAt: now,
     };
     [target] = await tx.update(cardTargets).set(updates).where(and(
@@ -662,9 +679,12 @@ export async function loadRecordsSnapshot(
   const scoped = options.recordIds !== undefined;
   const ids = options.recordIds ?? [];
   const scope = options.scope ?? "full";
-  const includeRecords = scope === "full" || scope === "opening-form";
-  const includeLines = scope === "full";
   const includeCopies = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form";
+  // Copy eligibility depends on the active/void status of the acquisition
+  // Record. Any scope that returns Copies must therefore return their source
+  // Records too, even when Record lines are intentionally omitted.
+  const includeRecords = scope === "full" || scope === "opening-form" || includeCopies;
+  const includeLines = scope === "full";
   const includeCardCatalog = true;
   const includeInventoryEntities = scope === "full" || scope === "inventory" || scope === "opening-form";
   const includeEbay = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form";
@@ -1502,6 +1522,13 @@ export const recordsRouter = router({
   }),
 
   createPurchase: authenticatedProcedure.input(purchaseSchema).mutation(async ({ ctx, input }) => {
+    if (!input.operationId) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "This Purchase was opened before duplicate protection was available. Refresh the page, recover the saved draft, and submit it again.",
+      });
+    }
+    const operationId = input.operationId;
     const ownerId = ctx.collectionOwnerId;
     let recordId = id("record");
     const now = new Date();
@@ -1517,7 +1544,7 @@ export const recordsRouter = router({
       const [createdRecord] = await tx.insert(recordEntries).values({
         id: recordId,
         ownerId,
-        submissionId: input.operationId,
+        submissionId: operationId,
         type: "purchase",
         status: "active",
         occurredOn: input.date,
@@ -1540,7 +1567,7 @@ export const recordsRouter = router({
           type: recordEntries.type,
         }).from(recordEntries).where(and(
           eq(recordEntries.ownerId, ownerId),
-          eq(recordEntries.submissionId, input.operationId),
+          eq(recordEntries.submissionId, operationId),
         )).limit(1);
         if (
           !existingRecord

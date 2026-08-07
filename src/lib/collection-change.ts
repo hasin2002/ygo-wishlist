@@ -1,5 +1,6 @@
 /** A confirmed mutation expressed in terms of affected collection projections. */
 export type CollectionChange =
+  | "actions"
   | "binder"
   | "copies"
   | "favourite"
@@ -63,14 +64,15 @@ export async function settleCollectionPropagation(
 }
 
 export const collectionInvalidationMatrix = {
-  target: ["records.snapshot", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
-  copies: ["records.snapshot", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
-  records: ["records.snapshot", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
+  actions: ["records.actions"],
+  target: ["records.snapshot", "records.actions", "records.history", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
+  copies: ["records.snapshot", "records.actions", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
+  records: ["records.snapshot", "records.actions", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
   binder: ["binder.layout"],
   favourite: ["spend.monthlyFavourites"],
   wheel: ["wheel.state"],
-  listing: ["records.snapshot", "records.listEbayListings"],
-  photos: ["records.snapshot", "records.listEbayListings"],
+  listing: ["records.snapshot", "records.actions", "records.listEbayListings"],
+  photos: ["records.snapshot", "records.actions", "records.listEbayListings"],
 } as const;
 
 export type CollectionProjection = (typeof collectionInvalidationMatrix)[CollectionChange][number];

@@ -48,7 +48,18 @@ const context = {
     user: { id: ownerId, role: "admin" },
   },
 } as never;
-const records = recordsRouter.createCaller(context);
+const rawRecords = recordsRouter.createCaller(context);
+const records = new Proxy(rawRecords, {
+  get(target, property, receiver) {
+    if (property === "createPurchase") {
+      return (input: Parameters<typeof rawRecords.createPurchase>[0]) => rawRecords.createPurchase({
+        ...input,
+        operationId: input.operationId ?? randomUUID(),
+      });
+    }
+    return Reflect.get(target, property, receiver);
+  },
+}) as typeof rawRecords;
 const nonSellerContext = {
   collectionOwnerId: ownerId,
   session: {
@@ -66,7 +77,18 @@ const secondOwnerContext = {
     user: { id: secondOwnerId, role: "user" },
   },
 } as never;
-const secondOwnerRecords = recordsRouter.createCaller(secondOwnerContext);
+const rawSecondOwnerRecords = recordsRouter.createCaller(secondOwnerContext);
+const secondOwnerRecords = new Proxy(rawSecondOwnerRecords, {
+  get(target, property, receiver) {
+    if (property === "createPurchase") {
+      return (input: Parameters<typeof rawSecondOwnerRecords.createPurchase>[0]) => rawSecondOwnerRecords.createPurchase({
+        ...input,
+        operationId: input.operationId ?? randomUUID(),
+      });
+    }
+    return Reflect.get(target, property, receiver);
+  },
+}) as typeof rawSecondOwnerRecords;
 const library = libraryRouter.createCaller(context);
 const spend = spendRouter.createCaller(context);
 
@@ -301,6 +323,25 @@ test("retries with the same Purchase operation ID create exactly one Record and 
   assert.equal(matchingRecords.length, 1);
   assert.equal(matchingRecords[0]?.id, first.id);
   assert.equal(matchingCopies.length, 1);
+});
+
+test("a stale Purchase client without an operation ID is rejected before writing", async () => {
+  const before = await db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId));
+  await assert.rejects(
+    rawRecords.createPurchase({
+      kind: "card",
+      recordName: "Stale client must not write",
+      date: "2026-07-29",
+      source: "Old browser tab",
+      listingUrl: "",
+      notes: "missing duplicate-protection key",
+      totalPence: 125,
+      card: card(),
+    }),
+    /opened before duplicate protection was available/i,
+  );
+  const after = await db.select().from(recordEntries).where(eq(recordEntries.ownerId, ownerId));
+  assert.equal(after.length, before.length);
 });
 
 test("recorded pack pulls create owned Library cards without adding Wishlist demand", async () => {
@@ -613,6 +654,54 @@ test("unknown cost remains unknown until explicitly changed to a known £0", asy
   assert.equal(zeroRecord.amountKnown, true);
   assert.equal(zeroRecord.lines[0]?.allocationPence, 0);
   assert.deepEqual(knownZero.copies.filter((copy) => copy.acquiredRecordId === created.id).map((copy) => copy.allocationPence), [0, 0]);
+});
+
+test("a later Purchase refreshes one shared Target price and never erases an older estimate with no match", async () => {
+  const pricingCard = {
+    ...card(),
+    id: "pricing-blue-eyes-a",
+    name: "Pricing Blue-Eyes White Dragon",
+    rarity: "Secret Rare",
+    tcgplayerUrl: "https://www.tcgplayer.com/product/54321/pricing-blue-eyes",
+    pricing: {
+      ebaySearchUrl: "https://www.ebay.co.uk/sch/i.html?_nkw=pricing-blue-eyes",
+      estimatedPricePence: 1234,
+    },
+  };
+  await records.createPurchase({
+    kind: "card",
+    recordName: "Pricing purchase A",
+    date: "2026-07-29",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "",
+    totalPence: 100,
+    card: pricingCard,
+  });
+  const [afterFirst] = await db.select().from(cardTargets).where(eq(cardTargets.normalizedName, "pricing blue-eyes white dragon"));
+  assert.equal(afterFirst?.estimatedPricePence, 1234);
+
+  await records.createPurchase({
+    kind: "card",
+    recordName: "Pricing purchase B",
+    date: "2026-07-30",
+    source: "Local shop",
+    listingUrl: "",
+    notes: "",
+    totalPence: 200,
+    card: {
+      ...pricingCard,
+      id: "pricing-blue-eyes-b",
+      pricing: {
+        ebaySearchUrl: "https://www.ebay.co.uk/sch/i.html?_nkw=pricing-blue-eyes-current",
+        estimatedPricePence: null,
+      },
+    },
+  });
+  const matchingTargets = await db.select().from(cardTargets).where(eq(cardTargets.normalizedName, "pricing blue-eyes white dragon"));
+  assert.equal(matchingTargets.length, 1);
+  assert.equal(matchingTargets[0]?.estimatedPricePence, 1234);
+  assert.match(matchingTargets[0]?.ebaySearchUrl ?? "", /current/);
 });
 
 test("unknown bulk cost stays unknown when its total changes or an identified Copy is removed", async () => {
@@ -1507,6 +1596,22 @@ test("History pages on the server and returns only the requested Record context"
   assert.equal(purchaseForm.records.length, 0);
   assert.equal(purchaseForm.copies.length, 0);
   assert.ok(purchaseForm.targets.length > 0);
+
+  for (const scope of ["inventory", "listings", "sale-form"] as const) {
+    const snapshot = await records.snapshot({ scope });
+    assert.ok(snapshot.copies.length > 0, `${scope} should load physical Copies`);
+    const recordIds = new Set(snapshot.records.map((record) => record.id));
+    assert.deepEqual(
+      snapshot.copies.filter((copy) => !recordIds.has(copy.acquiredRecordId)).map((copy) => copy.id),
+      [],
+      `${scope} must include every source Record required for Copy eligibility`,
+    );
+    assert.deepEqual(
+      snapshot.copyEbayExposures.filter((exposure) => /source Record is unavailable/i.test(exposure.action.reason)).map((exposure) => exposure.copyId),
+      [],
+      `${scope} must not block valid Copies because scoped data omitted their source Records`,
+    );
+  }
 });
 
 test.after(async () => {

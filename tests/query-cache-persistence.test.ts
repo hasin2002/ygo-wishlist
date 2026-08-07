@@ -57,6 +57,8 @@ test("collection query matching uses exact tRPC paths, not input substrings", ()
   assert.equal(collectionQueryPath([["library", "list"], { input: { query: "wheel" } }]), "library.list");
   assert.equal(collectionQueryPath([["spend", "monthlyFavourites"], { input: { month: "wheel" } }]), "spend.monthlyFavourites");
   assert.equal(collectionQueryPath([["spend", "monthlyFavourite"], { input: null }]), null);
+  assert.equal(collectionQueryPath([["records", "actions"], { input: null }]), "records.actions");
+  assert.equal(collectionQueryPath([["records", "history"], { input: { page: 1 } }]), "records.history");
 });
 
 test("only an active failed affected projection makes a settled refresh fail", () => {
@@ -91,6 +93,6 @@ test("a same-kind concurrent change cannot let a lower revision restore stale co
 
 test("the incompatible cache has a new storage key and buster", () => {
   assert.equal(legacyQueryCacheStorageKey, "ygo-wishlist:query-cache:v1");
-  assert.equal(queryCacheStorageKey, "ygo-wishlist:query-cache:v4");
-  assert.equal(queryCacheBuster, "v4");
+  assert.equal(queryCacheStorageKey, "ygo-wishlist:query-cache:v5");
+  assert.equal(queryCacheBuster, "v5");
 });
