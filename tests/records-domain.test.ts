@@ -9,7 +9,7 @@ import { ordinaryPurchaseCopyAllocations } from "../src/lib/records/purchase-acc
 import { getLibraryCardStatus } from "../src/lib/records/library-status.ts";
 import { recordImagePreviewsFor } from "../src/lib/records/record-images.ts";
 import { applyOpening, applyPurchase, changeRecordStatus, createPreviewSnapshot, deleteWishlistTarget, removeCardCopy, replaceRecordCards, updateCardCopy, updateCardSource, updateRecordDetails, updateRecordLine } from "../src/lib/records/preview-data.ts";
-import type { RecordsSnapshot } from "../src/lib/records/types.ts";
+import { ebayConditionDescriptorValueId, type RecordsSnapshot } from "../src/lib/records/types.ts";
 
 test("physical Copy identifiers prefer sticker and location details over an opaque Copy code", () => {
   assert.equal(copyPhysicalIdentifier({ id: "copy-abcdef", stickerNumber: "00042", location: "Binder 2 · Page 7" }), "Sticker 00042 · Binder 2 · Page 7");
@@ -122,6 +122,40 @@ test("ordinary Purchase allocation keeps known £0 distinct from unknown", () =>
   assert.deepEqual(ordinaryPurchaseCopyAllocations({ amountKnown: true, amountPence: 101, copyCount: 2 }), [51, 50]);
   assert.deepEqual(ordinaryPurchaseCopyAllocations({ amountKnown: false, amountPence: 0, copyCount: 2 }), [null, null]);
   assert.throws(() => ordinaryPurchaseCopyAllocations({ amountKnown: true, amountPence: 1, copyCount: 0 }), /at least one physical Copy/i);
+});
+
+test("selected card condition reaches preview Copies and the closest eBay descriptor", () => {
+  const created = applyPurchase(createPreviewSnapshot([]), {
+    kind: "card",
+    recordName: "Played Dark Magician",
+    date: "2026-08-07",
+    source: "Local card shop",
+    listingUrl: "",
+    totalPence: 100,
+    notes: "",
+    card: {
+      id: "played-dark-magician",
+      condition: "Damaged",
+      selectedTargetId: null,
+      tcgplayerUrl: "https://www.tcgplayer.com/product/12345/dark-magician",
+      name: "Dark Magician",
+      imageUrl: null,
+      edition: "1st Edition",
+      rarity: "Ultra Rare",
+      setName: "Legend of Blue Eyes White Dragon",
+      setCode: "LOB-005",
+      metadataNeedsAttention: false,
+      quantity: 2,
+    },
+  });
+
+  assert.equal(created.result.ok, true);
+  const createdRecordId = created.result.ok ? created.result.id : null;
+  assert.deepEqual(
+    created.next.copies.filter((copy) => copy.acquiredRecordId === createdRecordId).map((copy) => copy.condition),
+    ["Damaged", "Damaged"],
+  );
+  assert.equal(ebayConditionDescriptorValueId("Damaged"), "400017");
 });
 
 test("Library paid summary labels partial totals and preserves intentional zero", () => {

@@ -15,7 +15,7 @@ import type {
   EbayListingItemSpecifics,
   EbayListingLanguage,
 } from "@/lib/ebay-listing-options";
-import { cardConditionOptions } from "@/lib/records/types";
+import { ebayConditionDescriptorValueId, isCardCondition } from "@/lib/records/types";
 import { decideEbayCopyListingEligibility } from "@/lib/records/ebay-copy-listing-eligibility";
 import { ebayLotXmlContract } from "@/lib/records/ebay-lot";
 import {
@@ -577,9 +577,10 @@ async function lockHomogeneousQuantityMembers(
   if (incompatibility) {
     throw new EbayListingError(`Copy #${incompatibility.copyId.slice(-6)} is incompatible: ${incompatibility.message}`);
   }
-  const expectedCondition = cardConditionOptions.find(
-    (option) => option.value === members[0]!.copy.condition,
-  )?.ebayDescriptorValueId;
+  const copyCondition = members[0]!.copy.condition;
+  const expectedCondition = isCardCondition(copyCondition)
+    ? ebayConditionDescriptorValueId(copyCondition)
+    : null;
   if (!expectedCondition || details.cardConditionDescriptorValueId !== expectedCondition) {
     throw new EbayListingError("The shared eBay condition no longer matches every selected Copy. Refresh and review the quantity offer again.");
   }

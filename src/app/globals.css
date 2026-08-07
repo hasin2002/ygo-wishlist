@@ -58,6 +58,28 @@ textarea {
   font: inherit;
 }
 
+/* Keep every native picklist aligned with the Lucide chevrons used by our
+   searchable comboboxes instead of relying on browser-specific select arrows. */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.75rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem 1rem;
+  min-height: 2.75rem;
+  padding-right: 2.75rem;
+}
+
+@media (forced-colors: active) {
+  select:not([multiple]) {
+    -webkit-appearance: auto;
+    appearance: auto;
+    background-image: none;
+    padding-right: 0.75rem;
+  }
+}
+
 button,
 a,
 input,

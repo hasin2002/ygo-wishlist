@@ -29,6 +29,7 @@ export function hasFields(value: UnknownRecord, fields: readonly string[]) {
 }
 
 const editions = ["", "1st Edition", "Unlimited Edition", "Limited Edition"] as const;
+const cardConditions = ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played", "Damaged"] as const;
 const fetchStatuses = ["idle", "fetching", "resolved", "attention", "stale"] as const;
 
 /** Structural validation for the persisted ProductIdentityDraft payload. */
@@ -58,7 +59,8 @@ export function isProductIdentityDraft(value: unknown): value is UnknownRecord {
 export function isCardContentsDraft(value: unknown): value is UnknownRecord {
   return isProductIdentityDraft(value)
     && isString(value.id)
-    && isInteger(value.quantity);
+    && isInteger(value.quantity)
+    && (!("condition" in value) || isOneOf(value.condition, cardConditions));
 }
 
 export function isStringRecord(value: unknown): value is Record<string, string> {

@@ -59,7 +59,7 @@ import {
   linkedOfferTitle,
 } from "@/lib/records/linked-offer-copy";
 import { ebaySoldListingsUrl } from "@/lib/records/ebay-sold-listings";
-import { cardConditionOptions, isCardCondition, type CardCondition } from "@/lib/records/types";
+import { ebayConditionDescriptorValueId, isCardCondition, type CardCondition } from "@/lib/records/types";
 import { trpc } from "@/trpc/client";
 
 type ListingPhoto = {
@@ -129,7 +129,7 @@ function pence(value: string) {
 }
 
 function conditionDescriptor(condition: string) {
-  return cardConditionOptions.find((option) => option.value === condition)?.ebayDescriptorValueId ?? "400010";
+  return isCardCondition(condition) ? ebayConditionDescriptorValueId(condition) : "400010";
 }
 
 function editionFeature(edition: string) {

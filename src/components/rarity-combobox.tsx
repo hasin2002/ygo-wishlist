@@ -69,7 +69,7 @@ export function RarityCombobox({
           />
           <button
             aria-label="Show rarities"
-            className="absolute right-0 top-1/2 grid size-11 -translate-y-1/2 place-items-center rounded text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
+            className="absolute inset-y-0 right-0 flex w-11 items-center justify-end rounded pr-3 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-950"
             onClick={() => setOpen((current) => !current)}
             type="button"
           >

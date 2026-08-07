@@ -43,8 +43,10 @@ import {
 } from "@/lib/records/inventory-route-state";
 import { reviewSaleHref, type PaidEbaySaleReviewIntent } from "@/lib/navigation-intent";
 import {
-  cardConditionOptions,
+  ebayCardConditionDescriptorOptions,
+  ebayConditionDescriptorValueId,
   isCardCondition,
+  type EbayCardConditionDescriptorValueId,
   type CardCopy,
   type CardPrinting,
   type CopyEbayExposureState,
@@ -91,7 +93,7 @@ type ListingPhoto = {
   sourceInventoryKey?: string;
 };
 type InventoryPhoto = { key: string; position: number; previewUrl: string };
-type ConditionId = "400010" | "400015" | "400016" | "400017";
+type ConditionId = EbayCardConditionDescriptorValueId;
 type ListingForm = {
   categoryId: typeof ebayCardCategory.id;
   cardConditionDescriptorValueId: ConditionId;
@@ -149,7 +151,7 @@ function pounds(value: number | null) {
 }
 
 function conditionId(value: string): ConditionId {
-  return cardConditionOptions.find((option) => option.value === value)?.ebayDescriptorValueId ?? "400010";
+  return isCardCondition(value) ? ebayConditionDescriptorValueId(value) : "400010";
 }
 
 function listingCopyTextInput(
@@ -1288,7 +1290,7 @@ function EbayListingWorkspace({
               </label>
               <label className="grid min-w-0 gap-1.5 text-sm font-bold">Condition
                 <select className={inputClass} disabled={isQuantity} onChange={(event) => update("cardConditionDescriptorValueId", event.target.value as ConditionId)} value={form.cardConditionDescriptorValueId}>
-                  {cardConditionOptions.map((option) => <option key={option.value} value={option.ebayDescriptorValueId}>{option.label}</option>)}
+                  {ebayCardConditionDescriptorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
                 <span className="text-xs font-medium text-zinc-500">Mapped from {copy.condition}.{isQuantity ? " Shared and locked for every selected Copy." : ""}</span>
               </label>

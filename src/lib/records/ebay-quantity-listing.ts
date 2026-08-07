@@ -44,6 +44,7 @@ function conditionAbbreviation(value: string) {
     "Lightly Played": "LP",
     "Moderately Played": "MP",
     "Heavily Played": "HP",
+    "Damaged": "DMG",
   } as Record<string, string>)[value] ?? value;
 }
 

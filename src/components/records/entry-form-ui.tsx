@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, type FocusEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { localCalendarDate } from "@/lib/records/form-draft-lifecycle";
 
 export const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
@@ -100,14 +101,14 @@ export function DestructiveToast({
     return () => window.clearTimeout(timeout);
   }, [message, onDismiss]);
 
-  if (!message) {
+  if (!message || typeof document === "undefined") {
     return null;
   }
 
-  return (
+  return createPortal(
     <div
       aria-live="assertive"
-      className="fixed inset-x-4 top-4 z-50 mx-auto flex max-w-md items-start gap-3 rounded-lg border border-rose-300 bg-rose-700 px-4 py-3 text-sm text-white shadow-xl sm:inset-x-auto sm:right-4 sm:mx-0"
+      className="fixed inset-x-4 top-[max(1rem,env(safe-area-inset-top))] z-[100] mx-auto flex max-w-md items-start gap-3 rounded-lg border border-rose-300 bg-rose-700 px-4 py-3 text-sm text-white shadow-xl sm:inset-x-auto sm:right-4 sm:mx-0"
       role="alert"
     >
       <CircleX className="mt-0.5 size-5 shrink-0" />
@@ -123,7 +124,8 @@ export function DestructiveToast({
       >
         <X className="size-4" />
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
