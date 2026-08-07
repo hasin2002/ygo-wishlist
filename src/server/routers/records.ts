@@ -256,18 +256,19 @@ const recordMutationIdentitySchema = z.object({
   recordId: z.string().min(1),
   expectedRevision: z.number().int().positive(),
 });
+const recordDetailsUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  date: dateSchema,
+  source: z.string().trim().min(1).max(120),
+  listingUrl: z.string().trim().url().nullable().or(z.literal("")),
+  amountPence: z.number().int().nonnegative(),
+  amountKnown: z.boolean().optional(),
+  /** Required before replacing reviewed unequal sealed-unit allocations. */
+  sealedAllocationOverrideConfirmed: z.boolean().optional(),
+  notes: z.string().trim().max(4_000),
+});
 const updateRecordDetailsSchema = recordMutationIdentitySchema.extend({
-  update: z.object({
-    title: z.string().trim().min(1).max(80),
-    date: dateSchema,
-    source: z.string().trim().min(1).max(120),
-    listingUrl: z.string().trim().url().nullable().or(z.literal("")),
-    amountPence: z.number().int().nonnegative(),
-    amountKnown: z.boolean().optional(),
-    /** Required before replacing reviewed unequal sealed-unit allocations. */
-    sealedAllocationOverrideConfirmed: z.boolean().optional(),
-    notes: z.string().trim().max(4_000),
-  }),
+  update: recordDetailsUpdateSchema,
 });
 const resolveCardAttentionSchema = z.object({
   targetId: z.string().min(1),
@@ -297,6 +298,11 @@ const ebayListingsWorkspaceSchema = z.object({
 });
 const replaceRecordCardsSchema = recordMutationIdentitySchema.extend({
   cards: z.array(cardInputSchema),
+  /** Purchase-form edits apply cards, receipt details, and lot size atomically. */
+  purchaseUpdate: z.object({
+    details: recordDetailsUpdateSchema,
+    bulkTotalQuantity: z.number().int().positive().max(1_000_000).optional(),
+  }).optional(),
 });
 const replaceSaleCopiesSchema = recordMutationIdentitySchema.extend({
   copyIds: z.array(z.string().min(1)).min(1),
@@ -336,6 +342,8 @@ const updateRecordLineSchema = recordMutationIdentitySchema.extend({
     category: supplyCategorySchema.optional(),
     totalQuantity: z.number().int().positive().max(1_000_000).optional(),
   }),
+  /** Non-card Purchase edits keep their item and receipt write in one transaction. */
+  recordUpdate: recordDetailsUpdateSchema.optional(),
 });
 
 async function lockRecord(
@@ -1021,6 +1029,110 @@ export async function loadRecordsSnapshot(
     })),
     attention,
   };
+}
+
+async function applyRecordDetailsUpdate(
+  tx: Transaction,
+  ownerId: string,
+  record: typeof recordEntries.$inferSelect,
+  update: z.infer<typeof recordDetailsUpdateSchema>,
+  now: Date,
+) {
+  const nextAmountKnown = update.amountKnown ?? record.amountKnown;
+  const [lot] = await tx.select().from(bulkLots).where(and(
+    eq(bulkLots.ownerId, ownerId), eq(bulkLots.acquiredRecordId, record.id),
+  )).limit(1);
+  // Validate the complete ordinary-card shape before the Record itself is
+  // touched, so an unsupported crafted edit cannot partially write.
+  if (record.type === "purchase" && !lot) {
+    const syncedCardPurchase = await syncOrdinaryPurchaseAccounting(
+      tx,
+      ownerId,
+      record.id,
+      nextAmountKnown,
+      update.amountPence,
+      now,
+    );
+    if (!syncedCardPurchase) {
+      const syncedSealedPurchase = await syncSealedPurchaseAccounting(
+        tx,
+        ownerId,
+        record.id,
+        nextAmountKnown,
+        update.amountPence,
+        now,
+        update.sealedAllocationOverrideConfirmed,
+      );
+      if (!syncedSealedPurchase) {
+        const lines = await tx.select().from(recordLines).where(and(
+          eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
+        )).for("update");
+        if (lines.length !== 1) {
+          conflict("A Purchase must have one allocation source. No changes were saved.");
+        }
+        await tx.update(recordLines).set({
+          allocationPence: ordinaryPurchaseLineAllocation({
+            amountKnown: nextAmountKnown,
+            amountPence: update.amountPence,
+          }),
+          updatedAt: now,
+        }).where(and(eq(recordLines.id, lines[0]!.id), eq(recordLines.ownerId, ownerId)));
+      }
+    }
+  }
+  await tx.update(recordEntries).set({
+    title: update.title,
+    titleGenerated: false,
+    occurredOn: update.date,
+    source: update.source,
+    listingUrl: update.listingUrl || null,
+    amountPence: nextAmountKnown ? update.amountPence : 0,
+    amountKnown: nextAmountKnown,
+    notes: update.notes,
+    updatedAt: now,
+  }).where(and(eq(recordEntries.id, record.id), eq(recordEntries.ownerId, ownerId)));
+
+  if (lot && (record.amountPence !== update.amountPence || record.amountKnown !== nextAmountKnown)) {
+    const copies = await tx.select().from(cardCopies).where(and(
+      eq(cardCopies.ownerId, ownerId), eq(cardCopies.bulkLotId, lot.id),
+    ));
+    for (const copy of copies) {
+      if (copy.allocationIndex === null) continue;
+      await tx.update(cardCopies).set({
+        allocationPence: nextAmountKnown
+          ? allocatePenceAt(update.amountPence, lot.totalQuantity, copy.allocationIndex)
+          : null,
+        updatedAt: now,
+      }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
+    }
+    const lines = await tx.select().from(recordLines).where(and(
+      eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id), eq(recordLines.kind, "card"),
+    ));
+    for (const line of lines) {
+      const lineCopies = copies.filter((copy) => copy.acquiredLineId === line.id);
+      await tx.update(recordLines).set({
+        allocationPence: nextAmountKnown
+          ? lineCopies.reduce((sum, copy) => (
+              sum + (copy.allocationIndex === null
+                ? 0
+                : allocatePenceAt(update.amountPence, lot.totalQuantity, copy.allocationIndex))
+            ), 0)
+          : null,
+        updatedAt: now,
+      }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
+    }
+  }
+  if (record.type === "imported-acquisition") {
+    const lines = await tx.select().from(recordLines).where(and(
+      eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
+    )).for("update");
+    if (lines.length === 1) {
+      await tx.update(recordLines).set({
+        allocationPence: ordinaryPurchaseLineAllocation({ amountKnown: nextAmountKnown, amountPence: update.amountPence }),
+        updatedAt: now,
+      }).where(and(eq(recordLines.id, lines[0]!.id), eq(recordLines.ownerId, ownerId)));
+    }
+  }
 }
 
 const historyPageSchema = z.object({
@@ -2023,101 +2135,7 @@ export const recordsRouter = router({
     await db.transaction(async (tx) => {
       const record = await lockRecord(tx, ownerId, input.recordId, input.expectedRevision);
       if (record.status === "void") conflict("Restore this Record before editing it.");
-      const nextAmountKnown = input.update.amountKnown ?? record.amountKnown;
-      const [lot] = await tx.select().from(bulkLots).where(and(
-        eq(bulkLots.ownerId, ownerId), eq(bulkLots.acquiredRecordId, record.id),
-      )).limit(1);
-      // Validate the complete ordinary-card shape before the Record itself is
-      // touched, so an unsupported crafted edit cannot partially write.
-      if (record.type === "purchase" && !lot) {
-        const syncedCardPurchase = await syncOrdinaryPurchaseAccounting(
-          tx,
-          ownerId,
-          record.id,
-          nextAmountKnown,
-          input.update.amountPence,
-          now,
-        );
-        if (!syncedCardPurchase) {
-          const syncedSealedPurchase = await syncSealedPurchaseAccounting(
-            tx,
-            ownerId,
-            record.id,
-            nextAmountKnown,
-            input.update.amountPence,
-            now,
-            input.update.sealedAllocationOverrideConfirmed,
-          );
-          if (!syncedSealedPurchase) {
-            const lines = await tx.select().from(recordLines).where(and(
-              eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
-            )).for("update");
-            if (lines.length !== 1) {
-              conflict("A Purchase must have one allocation source. No changes were saved.");
-            }
-            await tx.update(recordLines).set({
-              allocationPence: ordinaryPurchaseLineAllocation({
-                amountKnown: nextAmountKnown,
-                amountPence: input.update.amountPence,
-              }),
-              updatedAt: now,
-            }).where(and(eq(recordLines.id, lines[0]!.id), eq(recordLines.ownerId, ownerId)));
-          }
-        }
-      }
-      await tx.update(recordEntries).set({
-        title: input.update.title,
-        titleGenerated: false,
-        occurredOn: input.update.date,
-        source: input.update.source,
-        listingUrl: input.update.listingUrl || null,
-        amountPence: nextAmountKnown ? input.update.amountPence : 0,
-        amountKnown: nextAmountKnown,
-        notes: input.update.notes,
-        updatedAt: now,
-      }).where(and(eq(recordEntries.id, record.id), eq(recordEntries.ownerId, ownerId)));
-
-      if (lot && (record.amountPence !== input.update.amountPence || record.amountKnown !== nextAmountKnown)) {
-        const copies = await tx.select().from(cardCopies).where(and(
-          eq(cardCopies.ownerId, ownerId), eq(cardCopies.bulkLotId, lot.id),
-        ));
-        for (const copy of copies) {
-          if (copy.allocationIndex === null) continue;
-          await tx.update(cardCopies).set({
-            allocationPence: nextAmountKnown
-              ? allocatePenceAt(input.update.amountPence, lot.totalQuantity, copy.allocationIndex)
-              : null,
-            updatedAt: now,
-          }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
-        }
-        const lines = await tx.select().from(recordLines).where(and(
-          eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id), eq(recordLines.kind, "card"),
-        ));
-        for (const line of lines) {
-          const lineCopies = copies.filter((copy) => copy.acquiredLineId === line.id);
-          await tx.update(recordLines).set({
-            allocationPence: nextAmountKnown
-              ? lineCopies.reduce((sum, copy) => (
-                  sum + (copy.allocationIndex === null
-                    ? 0
-                    : allocatePenceAt(input.update.amountPence, lot.totalQuantity, copy.allocationIndex))
-                ), 0)
-              : null,
-            updatedAt: now,
-          }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
-        }
-      }
-      if (record.type === "imported-acquisition") {
-        const lines = await tx.select().from(recordLines).where(and(
-          eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
-        )).for("update");
-        if (lines.length === 1) {
-          await tx.update(recordLines).set({
-            allocationPence: ordinaryPurchaseLineAllocation({ amountKnown: nextAmountKnown, amountPence: input.update.amountPence }),
-            updatedAt: now,
-          }).where(and(eq(recordLines.id, lines[0]!.id), eq(recordLines.ownerId, ownerId)));
-        }
-      }
+      await applyRecordDetailsUpdate(tx, ownerId, record, input.update, now);
       await bumpRecord(tx, ownerId, record.id, record.revision, now);
     });
     return { id: input.recordId };
@@ -2139,6 +2157,17 @@ export const recordsRouter = router({
       const [bulkLot] = await tx.select().from(bulkLots).where(and(
         eq(bulkLots.ownerId, ownerId), eq(bulkLots.acquiredRecordId, record.id),
       )).limit(1);
+      if (input.purchaseUpdate && record.type !== "purchase" && record.type !== "imported-acquisition") {
+        conflict("Receipt details can only be updated with a Purchase.");
+      }
+      if (input.purchaseUpdate?.bulkTotalQuantity !== undefined && !bulkLot) {
+        conflict("A total card count can only be updated for a Bulk Lot.");
+      }
+      const effectiveBulkTotal = input.purchaseUpdate?.bulkTotalQuantity ?? bulkLot?.totalQuantity;
+      const effectiveAmountKnown = input.purchaseUpdate?.details.amountKnown ?? record.amountKnown;
+      const effectiveAmountPence = effectiveAmountKnown
+        ? input.purchaseUpdate?.details.amountPence ?? record.amountPence
+        : 0;
       const allRecordLines = await tx.select().from(recordLines).where(and(
         eq(recordLines.ownerId, ownerId), eq(recordLines.recordId, record.id),
       )).orderBy(asc(recordLines.position));
@@ -2150,9 +2179,9 @@ export const recordsRouter = router({
       }
 
       const requestedCount = input.cards.reduce((sum, card) => sum + card.quantity, 0);
-      if (bulkLot && requestedCount > bulkLot.totalQuantity) {
+      if (bulkLot && effectiveBulkTotal !== undefined && requestedCount > effectiveBulkTotal) {
         conflict(
-          `This Bulk Lot contains ${bulkLot.totalQuantity} cards in total. Reduce the identified quantities or update the lot total first.`,
+          `This Bulk Lot contains ${effectiveBulkTotal} cards in total. Reduce the identified quantities or update the lot total first.`,
         );
       }
 
@@ -2172,6 +2201,9 @@ export const recordsRouter = router({
           ))
         : [];
       const copyIdsWithSaleHistory = new Set(historyLinks.map((link) => link.copyId));
+      if (bulkLot && effectiveBulkTotal !== bulkLot.totalQuantity && historyLinks.length) {
+        conflict("The lot total cannot change after one of its Copies has Sale history.");
+      }
       const copiesByLine = new Map<string, typeof acquiredCopies>();
       for (const copy of acquiredCopies) {
         copiesByLine.set(copy.acquiredLineId, [...(copiesByLine.get(copy.acquiredLineId) ?? []), copy]);
@@ -2319,8 +2351,8 @@ export const recordsRouter = router({
           .flatMap((copy) => copy.allocationIndex === null ? [] : [copy.allocationIndex]),
       );
       const takeBulkIndexes = (quantity: number) => {
-        if (!bulkLot) return [];
-        const available = Array.from({ length: bulkLot.totalQuantity }, (_, index) => index)
+        if (!bulkLot || effectiveBulkTotal === undefined) return [];
+        const available = Array.from({ length: effectiveBulkTotal }, (_, index) => index)
           .filter((index) => !usedBulkIndexes.has(index))
           .slice(0, quantity);
         if (available.length !== quantity) conflict("The Bulk Lot total has no unallocated card positions left.");
@@ -2336,8 +2368,8 @@ export const recordsRouter = router({
           return {
             id: id("copy"), ownerId, printingId: plan.printingId, acquiredRecordId: record.id,
             acquiredLineId: lineId, bulkLotId: bulkLot?.id ?? null, allocationIndex,
-            allocationPence: bulkLot && allocationIndex !== null && record.amountKnown
-              ? allocatePenceAt(record.amountPence, bulkLot.totalQuantity, allocationIndex)
+            allocationPence: bulkLot && effectiveBulkTotal !== undefined && allocationIndex !== null && effectiveAmountKnown
+              ? allocatePenceAt(effectiveAmountPence, effectiveBulkTotal, allocationIndex)
               : null,
             status: "available" as const, condition: plan.input.condition, createdAt: now, updatedAt: now,
           };
@@ -2347,13 +2379,13 @@ export const recordsRouter = router({
           ...addedCopies,
         ].sort((left, right) => left.id.localeCompare(right.id));
         const allocationPence = bulkLot
-          ? record.amountKnown ? resultingCopies.reduce((sum, copy) => sum + (
+          ? effectiveAmountKnown && effectiveBulkTotal !== undefined ? resultingCopies.reduce((sum, copy) => sum + (
               copy.allocationIndex === null
                 ? 0
-                : allocatePenceAt(record.amountPence, bulkLot.totalQuantity, copy.allocationIndex)
+                : allocatePenceAt(effectiveAmountPence, effectiveBulkTotal, copy.allocationIndex)
             ), 0) : null
           : record.type === "purchase"
-            ? ordinaryPurchaseLineAllocation({ amountKnown: record.amountKnown, amountPence: record.amountPence })
+            ? ordinaryPurchaseLineAllocation({ amountKnown: effectiveAmountKnown, amountPence: effectiveAmountPence })
             : null;
         const lineValues = {
           position: bulkLot ? index + 1 : index,
@@ -2371,16 +2403,22 @@ export const recordsRouter = router({
           });
         }
         if (addedCopies.length) await tx.insert(cardCopies).values(addedCopies);
-        if (plan.retainedCopies.length) {
-          await tx.update(cardCopies).set({ printingId: plan.printingId, updatedAt: now }).where(and(
-            eq(cardCopies.ownerId, ownerId),
-            inArray(cardCopies.id, plan.retainedCopies.map((copy) => copy.id)),
-          ));
+        for (const copy of plan.retainedCopies) {
+          await tx.update(cardCopies).set({
+            printingId: plan.printingId,
+            condition: plan.input.condition,
+            allocationPence: bulkLot && effectiveBulkTotal !== undefined && copy.allocationIndex !== null
+              ? effectiveAmountKnown
+                ? allocatePenceAt(effectiveAmountPence, effectiveBulkTotal, copy.allocationIndex)
+                : null
+              : copy.allocationPence,
+            updatedAt: now,
+          }).where(and(eq(cardCopies.id, copy.id), eq(cardCopies.ownerId, ownerId)));
         }
         if (record.type === "purchase" && !bulkLot) {
           const allocations = ordinaryPurchaseCopyAllocations({
-            amountKnown: record.amountKnown,
-            amountPence: record.amountPence,
+            amountKnown: effectiveAmountKnown,
+            amountPence: effectiveAmountPence,
             copyCount: resultingCopies.length,
           });
           for (const [allocationIndex, copy] of resultingCopies.entries()) {
@@ -2400,14 +2438,18 @@ export const recordsRouter = router({
       if (bulkLot) {
         await tx.update(bulkLots).set({
           itemizedQuantity: requestedCount,
-          status: requestedCount >= bulkLot.totalQuantity ? "itemized" : "open",
+          totalQuantity: effectiveBulkTotal,
+          status: effectiveBulkTotal !== undefined && requestedCount >= effectiveBulkTotal ? "itemized" : "open",
           updatedAt: now,
         }).where(and(eq(bulkLots.id, bulkLot.id), eq(bulkLots.ownerId, ownerId)));
         await tx.update(recordLines).set({
-          detail: `${requestedCount} identified of ${bulkLot.totalQuantity} total cards`, updatedAt: now,
+          detail: `${requestedCount} identified of ${effectiveBulkTotal} total cards`, updatedAt: now,
         }).where(and(
           eq(recordLines.id, bulkLot.acquiredLineId), eq(recordLines.ownerId, ownerId),
         ));
+      }
+      if (input.purchaseUpdate) {
+        await applyRecordDetailsUpdate(tx, ownerId, record, input.purchaseUpdate.details, now);
       }
       await bumpRecord(tx, ownerId, record.id, record.revision, now);
     });
@@ -2497,6 +2539,9 @@ export const recordsRouter = router({
     await db.transaction(async (tx) => {
       const record = await lockRecord(tx, ownerId, input.recordId, input.expectedRevision);
       if (record.status === "void") conflict("Restore this Record before editing its items.");
+      if (input.recordUpdate && record.type !== "purchase" && record.type !== "imported-acquisition") {
+        conflict("Receipt details can only be updated with a Purchase.");
+      }
       const [line] = await tx.select().from(recordLines).where(and(
         eq(recordLines.id, input.lineId),
         eq(recordLines.ownerId, ownerId),
@@ -2654,6 +2699,9 @@ export const recordsRouter = router({
           detail: `${lot.itemizedQuantity} identified of ${nextTotal} total cards`,
           updatedAt: now,
         }).where(and(eq(recordLines.id, line.id), eq(recordLines.ownerId, ownerId)));
+      }
+      if (input.recordUpdate) {
+        await applyRecordDetailsUpdate(tx, ownerId, record, input.recordUpdate, now);
       }
       await bumpRecord(tx, ownerId, record.id, record.revision, now);
     });

@@ -247,11 +247,32 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
         : resolved;
     },
     resolveEbayCopyLinkAttention: async () => ({ ok: false, message: "eBay Copy-link repairs are available in your live Records." }),
-    replaceRecordCards: (recordId, cards) => withSnapshot((current) => replaceRecordCards(current, recordId, cards)),
+    replaceRecordCards: (recordId, cards, _expectedRevision, purchaseUpdate) => withSnapshot((current) => {
+      let outcome = replaceRecordCards(current, recordId, cards);
+      if (!outcome.result.ok || !purchaseUpdate) return outcome;
+      if (purchaseUpdate.bulkTotalQuantity !== undefined) {
+        const bulkLine = outcome.next.records.find((record) => record.id === recordId)?.lines.find((line) => line.kind === "bulk");
+        if (!bulkLine) return { next: current, result: { ok: false, message: "The Bulk Lot item is unavailable." } };
+        outcome = updateRecordLine(outcome.next, recordId, bulkLine.id, {
+          name: bulkLine.name,
+          quantity: bulkLine.quantity,
+          detail: bulkLine.detail ?? "",
+          totalQuantity: purchaseUpdate.bulkTotalQuantity,
+        });
+        if (!outcome.result.ok) return { next: current, result: outcome.result };
+      }
+      const details = updateRecordDetails(outcome.next, recordId, purchaseUpdate.details);
+      return details.result.ok ? details : { next: current, result: details.result };
+    }),
     replaceSaleCopies: (recordId, copyIds) => withSnapshot((current) => replaceSaleCopies(current, recordId, copyIds)),
     updateCardCopy: (copyId, update: CardCopyUpdate) => withSnapshot((current) => updateCardCopy(current, copyId, update)),
     removeCardCopy: (copyId) => withSnapshot((current) => removeCardCopy(current, copyId)),
-    updateRecordLine: (recordId, lineId, update) => withSnapshot((current) => updateRecordLine(current, recordId, lineId, update)),
+    updateRecordLine: (recordId, lineId, update, _expectedRevision, recordUpdate) => withSnapshot((current) => {
+      const lineResult = updateRecordLine(current, recordId, lineId, update);
+      if (!lineResult.result.ok || !recordUpdate) return lineResult;
+      const details = updateRecordDetails(lineResult.next, recordId, recordUpdate);
+      return details.result.ok ? details : { next: current, result: details.result };
+    }),
     deleteWishlistTarget: (targetId) => withSnapshot((current) => deleteWishlistTarget(current, targetId)),
     voidRecord: (recordId) => withSnapshot((current) => changeRecordStatus(current, recordId, "void")),
     restoreRecord: (recordId) => withSnapshot((current) => changeRecordStatus(current, recordId, "active")),
@@ -389,9 +410,9 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
     resolveEbayCopyLinkAttention: (listingId) => finish(
       resolveEbayCopyLinkAttention.mutateAsync({ listingId }),
     ),
-    replaceRecordCards: (recordId, cards, expectedRevision) => withRevision(
+    replaceRecordCards: (recordId, cards, expectedRevision, purchaseUpdate) => withRevision(
       recordId,
-      (expectedRevision) => replaceCards.mutateAsync({ recordId, expectedRevision, cards }),
+      (expectedRevision) => replaceCards.mutateAsync({ recordId, expectedRevision, cards, purchaseUpdate }),
       expectedRevision,
     ),
     replaceSaleCopies: (recordId, copyIds, expectedRevision) => withRevision(
@@ -403,9 +424,9 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
     // Removing a Copy can also rewrite or delete its Record line, so History
     // and Actions must refresh alongside inventory projections.
     removeCardCopy: (copyId) => finish(removeCopy.mutateAsync({ copyId }), "records"),
-    updateRecordLine: (recordId, lineId, update, expectedRevision) => withRevision(
+    updateRecordLine: (recordId, lineId, update, expectedRevision, recordUpdate) => withRevision(
       recordId,
-      (expectedRevision) => updateLine.mutateAsync({ recordId, expectedRevision, lineId, update }),
+      (expectedRevision) => updateLine.mutateAsync({ recordId, expectedRevision, lineId, update, recordUpdate }),
       expectedRevision,
     ),
     deleteWishlistTarget: (targetId) => finish(

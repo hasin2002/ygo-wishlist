@@ -597,51 +597,7 @@ export function PurchaseForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved
       notes: draft.notes.trim(),
     };
     if (edit) {
-      let revision = edit.record.revision;
-      let savedPart = false;
-      const warnings: string[] = [];
-      const accept = (result: DataSourceResult) => {
-        if (!result.ok) {
-          setError(`${result.message}${savedPart ? " Some item changes were already saved; retry to finish the remaining update." : ""}`);
-          return false;
-        }
-        savedPart = true;
-        revision += 1;
-        if (result.warning) warnings.push(result.warning);
-        return true;
-      };
-      const bulkLine = edit.record.lines.find((line) => line.kind === "bulk");
-      const itemLine = edit.record.lines.find((line) => line.kind === draft.kind);
-      if (draft.kind === "bulk" && bulkLine) {
-        const result = await source.updateRecordLine(edit.record.id, bulkLine.id, {
-          name: bulkLine.name,
-          quantity: bulkLine.quantity,
-          detail: bulkLine.detail ?? "",
-          totalQuantity: Number(draft.bulkTotalCardCount),
-        }, revision);
-        if (!accept(result)) { setPending(false); return; }
-      }
-      if (draft.kind === "card" || draft.kind === "bulk") {
-        const cards = draft.kind === "card" ? [draft.card] : completedCardContents(draft.bulkCards);
-        const result = await source.replaceRecordCards(edit.record.id, cards.map(cardInput), revision);
-        if (!accept(result)) { setPending(false); return; }
-      } else if (itemLine) {
-        const itemName = draft.kind === "sealed"
-          ? draft.sealed.name.trim()
-          : draft.supplyCategory === "other"
-            ? draft.supplyOther.trim()
-            : draft.supplyCategory.charAt(0).toUpperCase() + draft.supplyCategory.slice(1);
-        const itemQuantity = draft.kind === "sealed" ? draft.sealed.quantity : draft.supplyQuantity;
-        const result = await source.updateRecordLine(edit.record.id, itemLine.id, {
-          name: itemName,
-          quantity: itemQuantity,
-          detail: draft.kind === "sealed" ? draft.sealed.edition : itemLine.detail ?? "Supply or extra",
-          edition: draft.kind === "sealed" && draft.sealed.edition ? draft.sealed.edition : undefined,
-          category: draft.kind === "supply" ? draft.supplyCategory : undefined,
-        }, revision);
-        if (!accept(result)) { setPending(false); return; }
-      }
-      const detailsResult = await source.updateRecordDetails(edit.record.id, {
+      const detailsUpdate = {
         title: common.recordName,
         date: common.date,
         source: common.source,
@@ -650,11 +606,41 @@ export function PurchaseForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved
         amountKnown: common.amountKnown,
         notes: common.notes,
         sealedAllocationOverrideConfirmed: draft.kind === "sealed" && draft.sealedAllocationsReviewed,
-      }, revision);
+      };
+      const itemLine = edit.record.lines.find((line) => line.kind === draft.kind);
+      let result: DataSourceResult;
+      if (draft.kind === "card" || draft.kind === "bulk") {
+        const cards = draft.kind === "card" ? [draft.card] : completedCardContents(draft.bulkCards);
+        result = await source.replaceRecordCards(
+          edit.record.id,
+          cards.map(cardInput),
+          edit.record.revision,
+          {
+            details: detailsUpdate,
+            bulkTotalQuantity: draft.kind === "bulk" ? Number(draft.bulkTotalCardCount) : undefined,
+          },
+        );
+      } else if (itemLine) {
+        const itemName = draft.kind === "sealed"
+          ? draft.sealed.name.trim()
+          : draft.supplyCategory === "other"
+            ? draft.supplyOther.trim()
+            : draft.supplyCategory.charAt(0).toUpperCase() + draft.supplyCategory.slice(1);
+        const itemQuantity = draft.kind === "sealed" ? draft.sealed.quantity : draft.supplyQuantity;
+        result = await source.updateRecordLine(edit.record.id, itemLine.id, {
+          name: itemName,
+          quantity: itemQuantity,
+          detail: draft.kind === "sealed" ? draft.sealed.edition : itemLine.detail ?? "Supply or extra",
+          edition: draft.kind === "sealed" && draft.sealed.edition ? draft.sealed.edition : undefined,
+          category: draft.kind === "supply" ? draft.supplyCategory : undefined,
+        }, edit.record.revision, detailsUpdate);
+      } else {
+        result = { ok: false, message: "The Purchase item is no longer available. Refresh and recover this saved draft before retrying." };
+      }
       setPending(false);
-      if (!accept(detailsResult)) return;
+      if (!result.ok) { setError(`${result.message} Your draft is still saved in this tab.`); return; }
       lifecycle.discard();
-      onSaved(edit.record.id, warnings.filter(Boolean).join(" ") || undefined);
+      onSaved(edit.record.id, result.warning);
       return;
     }
 

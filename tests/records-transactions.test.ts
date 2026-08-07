@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { db } from "../src/db/index.ts";
 import {
+  bulkLots,
   cardCopies,
   cardCopyImages,
   cardPrintings,
@@ -624,6 +625,117 @@ test("ordinary Purchase edits preserve exact Copy identities, deterministically 
   assert.equal(purchase.amountPence, 300);
   assert.equal(lines[0]?.allocationPence, 300);
   assert.deepEqual(allocations, [100, 100, 100]);
+});
+
+test("Bulk Purchase edits atomically save cards, conditions, lot total, and receipt details", async () => {
+  const created = await records.createPurchase({
+    kind: "bulk",
+    recordName: "Atomic bulk before",
+    date: "2026-08-04",
+    source: "eBay",
+    listingUrl: "",
+    notes: "before",
+    totalPence: 400,
+    totalCardCount: 4,
+    cards: [{ ...card(2), condition: "Near Mint" as const }],
+  });
+  const before = await records.snapshot();
+  const record = before.records.find((item) => item.id === created.id)!;
+  const cardLine = record.lines.find((line) => line.kind === "card")!;
+  const originalCopyIds = before.copies
+    .filter((copy) => copy.acquiredRecordId === created.id)
+    .map((copy) => copy.id)
+    .sort();
+
+  await records.replaceRecordCards({
+    recordId: created.id,
+    expectedRevision: record.revision,
+    cards: [
+      { ...card(3), id: cardLine.id, condition: "Lightly Played" as const },
+      {
+        ...card(1),
+        id: "new-blue-eyes-line",
+        name: "Blue-Eyes White Dragon",
+        setCode: "LOB-001",
+        tcgplayerUrl: "https://www.tcgplayer.com/product/54321/blue-eyes-white-dragon",
+        condition: "Moderately Played" as const,
+      },
+    ],
+    purchaseUpdate: {
+      bulkTotalQuantity: 6,
+      details: {
+        title: "Atomic bulk after",
+        date: "2026-08-05",
+        source: "Updated eBay seller",
+        listingUrl: "https://www.ebay.co.uk/itm/123456789",
+        amountPence: 600,
+        amountKnown: true,
+        notes: "after",
+      },
+    },
+  });
+
+  const after = await records.snapshot();
+  const updated = after.records.find((item) => item.id === created.id)!;
+  const updatedCopies = after.copies.filter((copy) => copy.acquiredRecordId === created.id);
+  const updatedCopyRows = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, created.id));
+  const retainedCopies = updatedCopies.filter((copy) => originalCopyIds.includes(copy.id));
+  const addedDarkMagician = updatedCopyRows.filter((copy) => (
+    copy.acquiredLineId === cardLine.id && !originalCopyIds.includes(copy.id)
+  ));
+  const blueEyesLine = updated.lines.find((line) => line.name === "Blue-Eyes White Dragon")!;
+  const blueEyesCopies = updatedCopyRows.filter((copy) => copy.acquiredLineId === blueEyesLine.id);
+  const [lot] = await db.select().from(bulkLots).where(eq(bulkLots.acquiredRecordId, created.id));
+
+  assert.equal(updated.revision, record.revision + 1, "the complete edit must use one revision bump");
+  assert.equal(updated.title, "Atomic bulk after");
+  assert.equal(updated.date, "2026-08-05");
+  assert.equal(updated.source, "Updated eBay seller");
+  assert.equal(updated.listingUrl, "https://www.ebay.co.uk/itm/123456789");
+  assert.equal(updated.amountPence, 600);
+  assert.equal(updated.notes, "after");
+  assert.equal(lot?.totalQuantity, 6);
+  assert.equal(lot?.itemizedQuantity, 4);
+  assert.equal(updated.lines.find((line) => line.kind === "bulk")?.detail, "4 identified of 6 total cards");
+  assert.equal(updatedCopies.length, 4);
+  assert.deepEqual(retainedCopies.map((copy) => copy.id).sort(), originalCopyIds, "existing physical Copy IDs must remain stable");
+  assert.ok(retainedCopies.every((copy) => copy.condition === "Lightly Played"));
+  assert.equal(addedDarkMagician.length, 1);
+  assert.equal(addedDarkMagician[0]?.condition, "Lightly Played");
+  assert.equal(blueEyesCopies.length, 1);
+  assert.equal(blueEyesCopies[0]?.condition, "Moderately Played");
+  assert.ok(updatedCopies.every((copy) => copy.allocationPence === 100));
+
+  const rowsBeforeStaleRetry = {
+    record: await db.select().from(recordEntries).where(eq(recordEntries.id, created.id)),
+    lot: await db.select().from(bulkLots).where(eq(bulkLots.acquiredRecordId, created.id)),
+    lines: await db.select().from(recordLines).where(eq(recordLines.recordId, created.id)),
+    copies: await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, created.id)),
+  };
+  await assert.rejects(records.replaceRecordCards({
+    recordId: created.id,
+    expectedRevision: record.revision,
+    cards: [{ ...card(1), id: cardLine.id, condition: "Damaged" as const }],
+    purchaseUpdate: {
+      bulkTotalQuantity: 290,
+      details: {
+        title: "Stale edit must not land",
+        date: "2026-08-06",
+        source: "Stale source",
+        listingUrl: "",
+        amountPence: 1,
+        amountKnown: true,
+        notes: "stale",
+      },
+    },
+  }), /changed elsewhere/i);
+  const rowsAfterStaleRetry = {
+    record: await db.select().from(recordEntries).where(eq(recordEntries.id, created.id)),
+    lot: await db.select().from(bulkLots).where(eq(bulkLots.acquiredRecordId, created.id)),
+    lines: await db.select().from(recordLines).where(eq(recordLines.recordId, created.id)),
+    copies: await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, created.id)),
+  };
+  assert.deepEqual(rowsAfterStaleRetry, rowsBeforeStaleRetry, "a stale retry must not partially change any Purchase data");
 });
 
 test("unknown cost remains unknown until explicitly changed to a known £0", async () => {

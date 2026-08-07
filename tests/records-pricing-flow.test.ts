@@ -48,6 +48,9 @@ test("Purchase and Pack Opening edits open on card details with a three-step pro
   assert.match(forms, /step=\{wizardStep\} totalSteps=\{wizardTotalSteps\}/);
   assert.match(forms, /finalLabel=\{edit \? "Update purchase"/);
   assert.match(forms, /finalLabel=\{edit \? "Update opening"/);
-  assert.match(forms, /source\.replaceRecordCards\(edit\.record\.id/);
-  assert.match(forms, /source\.updateRecordDetails\(edit\.record\.id/);
+  assert.match(forms, /source\.replaceRecordCards\(\s*edit\.record\.id/);
+  assert.match(forms, /bulkTotalQuantity: draft\.kind === "bulk"/);
+  assert.match(forms, /details: detailsUpdate/);
+  assert.match(forms, /Your draft is still saved in this tab/);
+  assert.doesNotMatch(forms, /Some item changes were already saved/);
 });

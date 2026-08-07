@@ -383,6 +383,10 @@ export type RecordLineUpdate = {
   category?: SupplyCategory;
   totalQuantity?: number;
 };
+export type PurchaseCardEditUpdate = {
+  details: RecordDetailsUpdate;
+  bulkTotalQuantity?: number;
+};
 export type ResolveProductResult =
   | { ok: true; metadata: ResolvedProductMetadata }
   | { ok: false; message: string };
@@ -418,11 +422,11 @@ export type RecordsDataSource = {
   resolveCardAttention: (update: CardAttentionUpdate) => Promise<DataSourceResult>;
   updateCardSource: (update: CardSourceUpdate) => Promise<DataSourceResult>;
   resolveEbayCopyLinkAttention: (listingId: string) => Promise<DataSourceResult>;
-  replaceRecordCards: (recordId: string, cards: CardContentsInput[], expectedRevision?: number) => Promise<DataSourceResult>;
+  replaceRecordCards: (recordId: string, cards: CardContentsInput[], expectedRevision?: number, purchaseUpdate?: PurchaseCardEditUpdate) => Promise<DataSourceResult>;
   replaceSaleCopies: (recordId: string, copyIds: string[], expectedRevision?: number) => Promise<DataSourceResult>;
   updateCardCopy: (copyId: string, update: CardCopyUpdate) => Promise<DataSourceResult>;
   removeCardCopy: (copyId: string) => Promise<DataSourceResult>;
-  updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate, expectedRevision?: number) => Promise<DataSourceResult>;
+  updateRecordLine: (recordId: string, lineId: string, update: RecordLineUpdate, expectedRevision?: number, recordUpdate?: RecordDetailsUpdate) => Promise<DataSourceResult>;
   deleteWishlistTarget: (targetId: string) => Promise<DataSourceResult>;
   voidRecord: (recordId: string, expectedRevision?: number) => Promise<DataSourceResult>;
   restoreRecord: (recordId: string, expectedRevision?: number) => Promise<DataSourceResult>;

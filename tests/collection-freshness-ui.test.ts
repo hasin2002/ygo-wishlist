@@ -97,6 +97,12 @@ test("saved Records surface refresh warnings without offering a duplicate submis
   assert.match(entry, /role="alert">\{warning\}/);
 });
 
+test("Record edits wait for a fresh authoritative revision before restoring a draft", () => {
+  const entry = source("src/components/records/record-entry-app.tsx");
+  assert.match(entry, /refetchOnMount: "always"/);
+  assert.match(entry, /editing && source\.mode === "live" && !editQuery\.isFetchedAfterMount/);
+});
+
 test("Purchase timeout recovery keeps one durable submission and explains ambiguous completion", () => {
   const form = source("src/components/records/purchase-opening-forms.tsx");
   const client = source("src/trpc/client.tsx");

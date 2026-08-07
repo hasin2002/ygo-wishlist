@@ -122,6 +122,10 @@ export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
     type: "all",
   }, {
     enabled: source.mode === "live" && Boolean(editRecordId),
+    // Persisted History data may render immediately with an older Record
+    // revision. Wait for this mount's authoritative response before creating
+    // an edit draft, otherwise a long edit can only fail with a 409 at save.
+    refetchOnMount: "always",
   });
   const editSnapshot = source.mode === "live"
     ? editQuery.data?.snapshot ?? null
@@ -133,7 +137,7 @@ export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
     ? { ...source, snapshot: mergeEditSnapshot(source.snapshot, editSnapshot) }
     : null, [editSnapshot, source]);
   const editing = Boolean(editRecordId);
-  const form = source.status === "loading" || (editing && source.mode === "live" && editQuery.isPending) ? (
+  const form = source.status === "loading" || (editing && source.mode === "live" && !editQuery.isFetchedAfterMount) ? (
     <div className="grid min-h-64 place-items-center rounded-lg border border-zinc-300 bg-white" role="status">
       <div className="text-center"><p className="font-bold">Preparing Records</p><p className="mt-1 text-sm font-medium text-zinc-500">Loading available copies and inventory…</p></div>
     </div>
