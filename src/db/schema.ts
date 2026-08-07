@@ -260,6 +260,7 @@ export const recordEntries = pgTable(
     ownerId: text("owner_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    submissionId: text("submission_id"),
     type: text("type", {
       enum: ["purchase", "pack-opening", "sale", "imported-acquisition"],
     }).notNull(),
@@ -280,6 +281,9 @@ export const recordEntries = pgTable(
   },
   (table) => [
     uniqueIndex("record_entries_owner_id_unique").on(table.ownerId, table.id),
+    uniqueIndex("record_entries_owner_submission_unique")
+      .on(table.ownerId, table.submissionId)
+      .where(sql`${table.submissionId} is not null`),
     index("record_entries_owner_date_idx").on(table.ownerId, table.occurredOn),
     index("record_entries_owner_type_idx").on(table.ownerId, table.type),
     check("record_entries_amount_nonnegative", sql`${table.amountPence} >= 0`),

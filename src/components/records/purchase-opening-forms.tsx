@@ -567,7 +567,7 @@ export function OpeningForm({ onSaved }: { onSaved: (recordId: string, warning?:
     sourceOption: "ebay",
     sourceOther: "",
     pulls: [blankCardContents()],
-  }), [requestedUnit, source.snapshot.records]);
+  }), [requestedUnit]);
   const launchIntent = useMemo(() => ({
     kind: requested ? "sealed-unit" as const : "none" as const,
     id: requested,

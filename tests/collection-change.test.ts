@@ -13,14 +13,17 @@ import {
   type CollectionStorage,
 } from "../src/lib/collection-change.ts";
 
-test("records and copy changes refresh every collection projection", () => {
-  for (const change of ["records", "copies"] as const) {
-    assert.deepEqual(collectionInvalidationMatrix[change], [
-      "records.snapshot", "records.listEbayListings", "library.binderList", "library.chaseQueue",
-      "library.list", "library.summary", "library.trackerPage", "binder.layout",
-      "spend.currentMonth", "spend.monthlyFavourites", "wheel.state",
-    ]);
-  }
+test("records and copy changes refresh every affected collection projection", () => {
+  assert.deepEqual(collectionInvalidationMatrix.records, [
+    "records.snapshot", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue",
+    "library.list", "library.summary", "library.trackerPage", "binder.layout",
+    "spend.currentMonth", "spend.monthlyFavourites", "wheel.state",
+  ]);
+  assert.deepEqual(collectionInvalidationMatrix.copies, [
+    "records.snapshot", "records.listEbayListings", "library.binderList", "library.chaseQueue",
+    "library.list", "library.summary", "library.trackerPage", "binder.layout",
+    "spend.currentMonth", "spend.monthlyFavourites", "wheel.state",
+  ]);
 });
 
 test("target, favourite, binder, wheel, listing, and photo changes have precise invalidations", () => {

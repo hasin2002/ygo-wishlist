@@ -290,16 +290,16 @@ test("retries with the same Purchase operation ID create exactly one Record and 
     records.createPurchase(input),
   ]);
 
-  assert.equal(first.id, `record-${operationId}`);
   assert.equal(retry.id, first.id);
   assert.equal(
     [first.warning, retry.warning].filter(Boolean).length,
     1,
     "exactly one concurrent request should report that it reused the saved Purchase",
   );
-  const matchingRecords = await db.select().from(recordEntries).where(eq(recordEntries.id, first.id));
+  const matchingRecords = await db.select().from(recordEntries).where(eq(recordEntries.submissionId, operationId));
   const matchingCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, first.id));
   assert.equal(matchingRecords.length, 1);
+  assert.equal(matchingRecords[0]?.id, first.id);
   assert.equal(matchingCopies.length, 1);
 });
 
@@ -1439,6 +1439,74 @@ test("tracked-Sale reconciliation and linked Sale lifecycle updates require sell
     nonSellerRecords.changeStatus({ expectedRevision: saleRecord.revision, recordId: saleRecord.id, status: "void" }),
     /seller permission/i,
   );
+});
+
+test("History pages on the server and returns only the requested Record context", async () => {
+  const createdAt = new Date("2026-08-07T12:00:00.000Z");
+  const historyRecords = Array.from({ length: 17 }, (_, index) => ({
+    amountKnown: true,
+    amountPence: index,
+    createdAt: new Date(createdAt.getTime() + index),
+    id: `history-page-record-${index}`,
+    notes: "isolated pagination coverage",
+    occurredOn: "2026-08-07",
+    ownerId,
+    source: "History pagination test",
+    status: "active" as const,
+    title: `History pagination ${index}`,
+    titleGenerated: false,
+    type: "imported-acquisition" as const,
+    updatedAt: new Date(createdAt.getTime() + index),
+  }));
+  await db.insert(recordEntries).values(historyRecords);
+  await db.insert(recordLines).values(historyRecords.map((record, index) => ({
+    allocationPence: index,
+    createdAt: record.createdAt,
+    detail: null,
+    id: `history-page-line-${index}`,
+    kind: "supply" as const,
+    name: `Only line match ${index}`,
+    ownerId,
+    position: 0,
+    quantity: 1,
+    recordId: record.id,
+    updatedAt: record.updatedAt,
+  })));
+
+  const firstPage = await records.history({
+    includeVoid: true,
+    page: 1,
+    query: "History pagination",
+    recordId: null,
+    type: "all",
+  });
+  const secondPage = await records.history({
+    includeVoid: true,
+    page: 2,
+    query: "History pagination",
+    recordId: null,
+    type: "all",
+  });
+  const lineSearch = await records.history({
+    includeVoid: true,
+    page: 1,
+    query: "Only line match 16",
+    recordId: null,
+    type: "all",
+  });
+
+  assert.equal(firstPage.total, 17);
+  assert.equal(firstPage.pageSize, 15);
+  assert.equal(firstPage.snapshot.records.length, 15);
+  assert.equal(secondPage.snapshot.records.length, 2);
+  assert.equal(lineSearch.total, 1);
+  assert.equal(lineSearch.snapshot.records[0]?.id, "history-page-record-16");
+  assert.equal(lineSearch.snapshot.records[0]?.lines[0]?.name, "Only line match 16");
+
+  const purchaseForm = await records.snapshot({ scope: "purchase-form" });
+  assert.equal(purchaseForm.records.length, 0);
+  assert.equal(purchaseForm.copies.length, 0);
+  assert.ok(purchaseForm.targets.length > 0);
 });
 
 test.after(async () => {

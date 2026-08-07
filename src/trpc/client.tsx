@@ -56,6 +56,16 @@ function timeoutForRequest(url: RequestInfo | URL) {
       };
 }
 
+export function shouldRetryQuery(failureCount: number, error: unknown) {
+  if (failureCount >= 1) return false;
+  const message = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : String(error).toLowerCase();
+  return !message.includes("abort")
+    && !message.includes("timeout")
+    && !message.includes("took too long")
+    && !message.includes("unauthorized")
+    && !message.includes("sign in");
+}
+
 export function TrpcProvider({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
     () =>
@@ -63,7 +73,7 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
         defaultOptions: {
           queries: {
             gcTime: queryCacheMaxAgeMs,
-            retry: 1,
+            retry: shouldRetryQuery,
             staleTime: 10_000,
           },
         },
@@ -92,7 +102,7 @@ export function TrpcProvider({ children }: { children: ReactNode }) {
 
             options?.signal?.addEventListener(
               "abort",
-              () => controller.abort(),
+              () => controller.abort(options.signal?.reason ?? new DOMException("The request was cancelled.", "AbortError")),
               { once: true },
             );
 

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSession } from "@/lib/auth-client";
+import { usePathname } from "next/navigation";
 import {
   applyOpening,
   applyPurchase,
@@ -278,10 +279,23 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
 
 function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNode; ownerScope: string }) {
   const clientReady = useClientReady();
+  const pathname = usePathname();
+  const routeOwnsSnapshot = pathname === "/records" || pathname === "/records/history" || pathname === "/records/actions";
+  const snapshotScope = pathname === "/records/inventory"
+    ? "inventory" as const
+    : pathname.startsWith("/records/listings")
+      ? "listings" as const
+      : pathname === "/records/new/purchase"
+        ? "purchase-form" as const
+        : pathname === "/records/new/opening"
+          ? "opening-form" as const
+          : pathname === "/records/new/sale"
+            ? "sale-form" as const
+            : "full" as const;
   const [drafts, setDrafts] = useState<RecordsDrafts>({});
   const [draftsHydrated, setDraftsHydrated] = useState(false);
-  const snapshotQuery = trpc.records.snapshot.useQuery(undefined, {
-    enabled: clientReady,
+  const snapshotQuery = trpc.records.snapshot.useQuery({ scope: snapshotScope }, {
+    enabled: clientReady && !routeOwnsSnapshot,
     staleTime: 30_000,
   });
   const collectionChanged = useCollectionChange();
@@ -342,8 +356,9 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
   function withRevision(
     recordId: string,
     action: (expectedRevision: number) => Promise<{ id: string }>,
+    suppliedRevision?: number,
   ): Promise<DataSourceResult> {
-    const expectedRevision = revisionFor(recordId);
+    const expectedRevision = suppliedRevision ?? revisionFor(recordId);
     return expectedRevision === null
       ? Promise.resolve({ ok: false, message: "This Record is no longer in the current snapshot. Refresh and try again." })
       : finish(action(expectedRevision));
@@ -351,41 +366,45 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
 
   const value: RecordsDataSource = {
     mode: "live",
-    status: !draftsHydrated || snapshotQuery.isPending ? "loading" : snapshotQuery.error ? "error" : "ready",
+    status: !draftsHydrated || (!routeOwnsSnapshot && snapshotQuery.isPending) ? "loading" : snapshotQuery.error ? "error" : "ready",
     errorMessage: snapshotQuery.error?.message ?? null,
     draftOwnerScope: ownerScope,
     draftsHydrated,
     draftRecoveryMessage: null,
     snapshot: snapshotQuery.data ?? emptySnapshot,
     drafts,
-    refresh: async () => { await snapshotQuery.refetch(); },
+    refresh: async () => { if (!routeOwnsSnapshot) await snapshotQuery.refetch(); },
     resolveTcgplayerProduct,
     searchLibraryCards: (query) => searchLibraryCards(snapshotQuery.data ?? emptySnapshot, query),
     createPurchase: (input) => finish(createPurchase.mutateAsync(input)),
     createOpening: (input) => finish(createOpening.mutateAsync(input)),
     createSale: (input) => finish(createSale.mutateAsync(input)),
-    updateRecordDetails: (recordId, update) => withRevision(
+    updateRecordDetails: (recordId, update, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => updateDetails.mutateAsync({ recordId, expectedRevision, update }),
+      expectedRevision,
     ),
     resolveCardAttention: (update) => finish(resolveAttention.mutateAsync(update)),
     updateCardSource: (update) => finish(updateCardSource.mutateAsync(update)),
     resolveEbayCopyLinkAttention: (listingId) => finish(
       resolveEbayCopyLinkAttention.mutateAsync({ listingId }),
     ),
-    replaceRecordCards: (recordId, cards) => withRevision(
+    replaceRecordCards: (recordId, cards, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => replaceCards.mutateAsync({ recordId, expectedRevision, cards }),
+      expectedRevision,
     ),
-    replaceSaleCopies: (recordId, copyIds) => withRevision(
+    replaceSaleCopies: (recordId, copyIds, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => replaceCopies.mutateAsync({ recordId, expectedRevision, copyIds }),
+      expectedRevision,
     ),
     updateCardCopy: (copyId, update) => finish(updateCopy.mutateAsync({ copyId, update }), "copies"),
     removeCardCopy: (copyId) => finish(removeCopy.mutateAsync({ copyId }), "copies"),
-    updateRecordLine: (recordId, lineId, update) => withRevision(
+    updateRecordLine: (recordId, lineId, update, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => updateLine.mutateAsync({ recordId, expectedRevision, lineId, update }),
+      expectedRevision,
     ),
     deleteWishlistTarget: (targetId) => finish(
       deleteWishlistTarget.mutateAsync({ id: targetId }).then((result) => ({
@@ -394,13 +413,15 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
       })),
       "target",
     ),
-    voidRecord: (recordId) => withRevision(
+    voidRecord: (recordId, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => changeStatus.mutateAsync({ recordId, expectedRevision, status: "void" }),
+      expectedRevision,
     ),
-    restoreRecord: (recordId) => withRevision(
+    restoreRecord: (recordId, expectedRevision) => withRevision(
       recordId,
       (expectedRevision) => changeStatus.mutateAsync({ recordId, expectedRevision, status: "active" }),
+      expectedRevision,
     ),
     setDraft: (key, nextDraft) => {
       setDrafts((current) => JSON.stringify(current[key]) === JSON.stringify(nextDraft)

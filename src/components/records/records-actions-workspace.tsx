@@ -174,7 +174,6 @@ function ActionCard({ action, live, snapshot }: { action: RecordsAction; live: b
   const refreshQueries = async () => {
     await Promise.all([
       utils.records.actions.invalidate(),
-      utils.records.urgentActionCount.invalidate(),
       utils.records.snapshot.invalidate(),
     ]);
   };
@@ -362,7 +361,7 @@ export function RecordsActionsWorkspace() {
       </div>
     );
   }
-  return <ActionsList actions={query.data ?? []} live snapshot={source.snapshot} />;
+  return <ActionsList actions={query.data?.actions ?? []} live snapshot={query.data?.snapshot ?? source.snapshot} />;
 }
 
 function ActionsList({ actions, live, snapshot }: { actions: RecordsAction[]; live: boolean; snapshot: RecordsSnapshot }) {

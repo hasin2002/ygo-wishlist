@@ -65,7 +65,7 @@ export async function settleCollectionPropagation(
 export const collectionInvalidationMatrix = {
   target: ["records.snapshot", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
   copies: ["records.snapshot", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
-  records: ["records.snapshot", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
+  records: ["records.snapshot", "records.history", "records.listEbayListings", "library.binderList", "library.chaseQueue", "library.list", "library.summary", "library.trackerPage", "binder.layout", "spend.currentMonth", "spend.monthlyFavourites", "wheel.state"],
   binder: ["binder.layout"],
   favourite: ["spend.monthlyFavourites"],
   wheel: ["wheel.state"],

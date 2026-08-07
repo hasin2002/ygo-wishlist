@@ -1,0 +1,2 @@
+ALTER TABLE "record_entries" ADD COLUMN "submission_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "record_entries_owner_submission_unique" ON "record_entries" USING btree ("owner_id","submission_id") WHERE "record_entries"."submission_id" is not null;

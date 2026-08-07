@@ -101,12 +101,35 @@ test("Purchase timeout recovery keeps one durable submission and explains ambigu
   const form = source("src/components/records/purchase-opening-forms.tsx");
   const client = source("src/trpc/client.tsx");
   const router = source("src/server/routers/records.ts");
+  const schema = source("src/db/schema.ts");
+  const migration = source("drizzle/0009_purchase_submission_idempotency.sql");
   assert.match(form, /submissionId: formSubmissionId/);
   assert.match(form, /operationId: draft\.submissionId \?\? formSubmissionId/);
   assert.match(client, /purchaseRequestTimeoutMs = 60_000/);
   assert.match(client, /may still have been saved\. Check Records History before retrying/);
   assert.match(client, /controller\.abort\(new DOMException\(requestTimeout\.message, "TimeoutError"\)\)/);
-  assert.match(router, /const recordId = `record-\$\{input\.operationId\}`/);
+  assert.match(router, /submissionId: input\.operationId/);
+  assert.match(router, /eq\(recordEntries\.submissionId, input\.operationId\)/);
   assert.match(router, /onConflictDoNothing\(\)\.returning/);
   assert.match(router, /This Purchase was already saved\. No duplicate was created/);
+  assert.match(schema, /record_entries_owner_submission_unique/);
+  assert.match(migration, /UNIQUE INDEX "record_entries_owner_submission_unique"/);
+});
+
+test("the protected navigation keeps prefetching but has no global Actions badge query", () => {
+  const shell = source("src/components/app-shell.tsx");
+  const router = source("src/server/routers/records.ts");
+  assert.match(shell, /prefetch/);
+  assert.doesNotMatch(shell, /urgentActionCount|urgentCount/);
+  assert.doesNotMatch(router, /urgentActionCount/);
+});
+
+test("History owns a bounded server page and workspace routes request scoped snapshots", () => {
+  const router = source("src/server/routers/records.ts");
+  const provider = source("src/components/records/records-preview-provider.tsx");
+  assert.match(router, /const pageSize = 15/);
+  assert.match(router, /history: authenticatedProcedure\.input\(historyPageSchema\)/);
+  assert.match(provider, /pathname === "\/records" \|\| pathname === "\/records\/history" \|\| pathname === "\/records\/actions"/);
+  assert.match(provider, /snapshotQuery = trpc\.records\.snapshot\.useQuery\(\{ scope: snapshotScope \}/);
+  assert.match(provider, /enabled: clientReady && !routeOwnsSnapshot/);
 });

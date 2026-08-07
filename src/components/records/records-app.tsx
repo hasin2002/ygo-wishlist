@@ -413,7 +413,7 @@ function RecordCardItemsEditor({
       setName: row.setName,
       setCode: row.setCode,
       metadataNeedsAttention: row.metadataNeedsAttention,
-    })));
+    })), record.revision);
     setSaving(false);
     if (result.ok) {
       setMessage(result.warning ?? "Card items saved.");
@@ -476,7 +476,7 @@ function SaleCopyItemsEditor({ record, source }: { record: RecordEntry; source: 
 
   async function saveCopies() {
     setSaving(true);
-    const result = await source.replaceSaleCopies(record.id, selectedIds);
+    const result = await source.replaceSaleCopies(record.id, selectedIds, record.revision);
     setSaving(false);
     setMessage(dataSourceMessage(result, "Sold Copies saved."));
   }
@@ -523,7 +523,7 @@ function NonCardLineEditor({ line, record, source }: { line: RecordLine; record:
 
   async function saveLine() {
     setSaving(true);
-    const result = await source.updateRecordLine(record.id, line.id, { name, quantity, detail, edition, category, totalQuantity });
+    const result = await source.updateRecordLine(record.id, line.id, { name, quantity, detail, edition, category, totalQuantity }, record.revision);
     setSaving(false);
     setMessage(dataSourceMessage(result, "Item saved."));
     if (result.ok && !result.warning) setExpanded(false);
@@ -564,8 +564,8 @@ function RecordStatusConfirmationDialog({
     setBusy(true);
     setError(null);
     const result = await (restoring
-      ? source.restoreRecord(record.id)
-      : source.voidRecord(record.id));
+      ? source.restoreRecord(record.id, record.revision)
+      : source.voidRecord(record.id, record.revision));
     setBusy(false);
     if (!result.ok) {
       setError(result.message);
@@ -689,7 +689,7 @@ function RecordEditorDialog({
       amountKnown: editsCashflow ? amountKnown : record.amountKnown !== false,
       notes,
       sealedAllocationOverrideConfirmed,
-    });
+    }, record.revision);
     setSaving(false);
     if (!result.ok) {
       setError(result.message);
@@ -944,13 +944,21 @@ function overviewActionSubject(action: RecordsAction, snapshot: RecordsSnapshot)
 
 function Overview() {
   const source = useRecordsDataSource();
-  const { snapshot } = source;
   const actionsQuery = trpc.records.actions.useQuery(undefined, {
     enabled: source.mode === "live" && source.status === "ready",
   });
+  const snapshot = source.mode === "live"
+    ? actionsQuery.data?.snapshot ?? source.snapshot
+    : source.snapshot;
   const [period, setPeriod] = useState<OverviewPeriod>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  if (source.mode === "live" && actionsQuery.isPending && !actionsQuery.data) {
+    return <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white font-bold" role="status">Loading Records…</div>;
+  }
+  if (source.mode === "live" && actionsQuery.isError) {
+    return <DataLoadError message={actionsQuery.error.message} onRetry={() => actionsQuery.refetch()} title="Records could not be loaded" />;
+  }
   const range = overviewDateRange(period, customFrom, customTo);
   const activeRecords = snapshot.records.filter((record) => (
     record.status === "active"
@@ -969,7 +977,7 @@ function Overview() {
   const availableCopies = snapshot.copies.filter((copy) => copy.status === "available").length;
   const actions = source.mode === "preview"
     ? deriveSnapshotRecordsActions(snapshot)
-    : actionsQuery.data ?? [];
+    : actionsQuery.data?.actions ?? [];
   const openActions = actions.filter((action) => action.status === "open").sort((left, right) => (
     (left.category === "required" ? 0 : 1) - (right.category === "required" ? 0 : 1)
     || ({ urgent: 0, warning: 1, info: 2 })[left.severity] - ({ urgent: 0, warning: 1, info: 2 })[right.severity]
@@ -1081,6 +1089,7 @@ function HistoryView() {
   const source = useRecordsDataSource();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [type, setType] = useState<"all" | RecordEntryType>("all");
   const [includeVoid, setIncludeVoid] = useState(true);
   const [page, setPage] = useState(1);
@@ -1092,18 +1101,38 @@ function HistoryView() {
   const requestedReviewValue = searchParams.get("record");
   const requestedReviewIntent = parseSaleReviewIntent(requestedReviewValue);
   const requestedReviewId = requestedReviewIntent?.recordId ?? null;
-  const records = source.snapshot.records.filter((record) => {
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedQuery(query), 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [query]);
+  const historyQuery = trpc.records.history.useQuery({
+    includeVoid,
+    page,
+    query: debouncedQuery,
+    recordId: requestedReviewId,
+    type,
+  }, {
+    enabled: source.mode === "live",
+    placeholderData: (previous) => previous,
+  });
+  const historySnapshot = source.mode === "live"
+    ? historyQuery.data?.snapshot ?? source.snapshot
+    : source.snapshot;
+  const previewRecords = source.snapshot.records.filter((record) => {
     if (type !== "all" && record.type !== type) return false;
     if (!includeVoid && record.status === "void") return false;
     const search = query.trim().toLowerCase();
     return !search || [record.title, record.source, record.notes, ...record.lines.map((line) => line.name)].join(" ").toLowerCase().includes(search);
   });
   const pageSize = 15;
-  const pageCount = Math.max(1, Math.ceil(records.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const visibleRecords = records.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const editingRecord = source.snapshot.records.find((record) => record.id === editingRecordId) ?? null;
-  const statusRecord = source.snapshot.records.find((record) => record.id === statusRecordId) ?? null;
+  const totalRecords = source.mode === "live" ? historyQuery.data?.total ?? 0 : previewRecords.length;
+  const pageCount = source.mode === "live" ? historyQuery.data?.pageCount ?? 1 : Math.max(1, Math.ceil(previewRecords.length / pageSize));
+  const currentPage = source.mode === "live" ? historyQuery.data?.page ?? page : Math.min(page, pageCount);
+  const visibleRecords = source.mode === "live"
+    ? historySnapshot.records.slice(0, pageSize)
+    : previewRecords.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const editingRecord = historySnapshot.records.find((record) => record.id === editingRecordId) ?? null;
+  const statusRecord = historySnapshot.records.find((record) => record.id === statusRecordId) ?? null;
 
   useEffect(() => {
     if (!requestedReviewValue || handledReviewId.current === requestedReviewValue) return;
@@ -1114,7 +1143,7 @@ function HistoryView() {
         setMessage("That Sale is no longer available in this collection.");
         return;
       }
-      const requestedRecord = source.snapshot.records.find((record) => record.id === requestedReviewId);
+      const requestedRecord = historySnapshot.records.find((record) => record.id === requestedReviewId);
       if (!requestedRecord || requestedRecord.type !== "sale") {
         setMessage("That Sale is no longer available in this collection.");
         return;
@@ -1122,15 +1151,20 @@ function HistoryView() {
 
       // A linked sale is authoritative over the transient History controls. It
       // may be outside the current page or excluded by an in-progress filter.
-      const recordIndex = source.snapshot.records.findIndex((record) => record.id === requestedRecord.id);
       setQuery("");
       setType("all");
       setIncludeVoid(true);
-      setPage(Math.floor(Math.max(recordIndex, 0) / 15) + 1);
       setEditingRecordId(requestedRecord.id);
     }, 0);
     return () => window.clearTimeout(timeoutId);
-  }, [requestedReviewId, requestedReviewValue, source.snapshot.records]);
+  }, [historySnapshot.records, requestedReviewId, requestedReviewValue]);
+
+  if (source.mode === "live" && historyQuery.isPending && !historyQuery.data) {
+    return <div className="grid min-h-72 place-items-center rounded-lg border border-zinc-300 bg-white font-bold" role="status">Loading History…</div>;
+  }
+  if (source.mode === "live" && historyQuery.isError) {
+    return <DataLoadError message={historyQuery.error.message} onRetry={() => historyQuery.refetch()} title="Records could not be loaded" />;
+  }
 
   return (
     <>
@@ -1175,7 +1209,7 @@ function HistoryView() {
             }
             key={record.id}
             record={record}
-            snapshot={source.snapshot}
+            snapshot={historySnapshot}
           />
         )) : (
           <div className="grid min-h-56 place-items-center px-4 text-center">
@@ -1183,8 +1217,8 @@ function HistoryView() {
           </div>
         )}
       </div>
-      {records.length > pageSize ? <nav aria-label="History pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50 p-3 text-sm font-bold text-zinc-600">
-        <span>Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, records.length)} of {records.length}</span>
+      {totalRecords > pageSize ? <nav aria-label="History pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50 p-3 text-sm font-bold text-zinc-600">
+        <span>Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, totalRecords)} of {totalRecords}</span>
         <div className="flex items-center gap-2"><button aria-label="Previous history page" className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white transition hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-40" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button"><ChevronLeft className="size-4" /></button><span>Page {currentPage} of {pageCount}</span><button aria-label="Next history page" className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white transition hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 disabled:opacity-40" disabled={currentPage === pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))} type="button"><ChevronRight className="size-4" /></button></div>
       </nav> : null}
     </section>
