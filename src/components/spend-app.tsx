@@ -3,7 +3,6 @@
 import type { inferRouterOutputs } from "@trpc/server";
 import {
   CalendarDays,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -1093,7 +1092,7 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
                   <span className="text-sm font-medium text-zinc-700">Year</span>
                   <div className="relative mt-1">
                     <select
-                      className="h-11 w-full appearance-none rounded-md border border-zinc-300 bg-zinc-50 px-3 pr-9 text-sm font-semibold outline-none transition focus:border-[#8a1f2d] focus:bg-white"
+                      className="h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm font-semibold outline-none transition focus:border-[#8a1f2d] focus:bg-white"
                       onChange={(event) =>
                         {
                           setSelectedYear(Number(event.target.value));
@@ -1108,7 +1107,6 @@ export function SpendApp({ initialCards }: { initialCards?: Card[] }) {
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
                   </div>
                 </label>
               ) : null}

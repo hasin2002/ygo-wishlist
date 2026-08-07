@@ -24,6 +24,7 @@ function conditionTitle(value: string) {
   if (value === "Lightly Played") return "LP";
   if (value === "Moderately Played") return "MP";
   if (value === "Heavily Played") return "HP";
+  if (value === "Damaged") return "DMG";
   return value;
 }
 

@@ -160,6 +160,7 @@ const supplyCategorySchema = z.enum(["sleeves", "binder", "storage", "playmat", 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const cardInputSchema = z.object({
   id: z.string().min(1),
+  condition: z.enum(cardConditions).default("Near Mint"),
   selectedTargetId: z.string().min(1).nullable().optional(),
   tcgplayerUrl: z.string().url().regex(/tcgplayer\.com\/product\/\d+/i),
   name: z.string().trim().min(1).max(160),
@@ -171,7 +172,7 @@ const cardInputSchema = z.object({
   metadataNeedsAttention: z.boolean(),
   quantity: z.number().int().positive().max(10_000),
 });
-const productInputSchema = cardInputSchema.omit({ id: true, quantity: true }).extend({
+const productInputSchema = cardInputSchema.omit({ condition: true, id: true, quantity: true }).extend({
   rarity: z.string().trim().max(80),
 });
 const sealedProductInputSchema = productInputSchema.extend({
@@ -1430,7 +1431,7 @@ export const recordsRouter = router({
         await tx.insert(cardCopies).values(copyIds.map((copyId) => ({
           id: copyId, ownerId, printingId: printing.id, acquiredRecordId: recordId,
           acquiredLineId: lineId, allocationPence: allocationByCopyId.get(copyId)!,
-          status: "available" as const, condition: "Near Mint" as const, createdAt: now, updatedAt: now,
+          status: "available" as const, condition: input.card.condition, createdAt: now, updatedAt: now,
         })));
       } else if (input.kind === "sealed") {
         const lineId = id("line");
@@ -1501,7 +1502,7 @@ export const recordsRouter = router({
           await tx.insert(cardCopies).values(allocations.map((allocationPence, offset) => ({
             id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: recordId,
             acquiredLineId: lineId, bulkLotId: lotId, allocationIndex: allocationIndex + offset,
-            allocationPence, status: "available" as const, condition: "Near Mint" as const, createdAt: now, updatedAt: now,
+            allocationPence, status: "available" as const, condition: card.condition, createdAt: now, updatedAt: now,
           })));
           allocationIndex += card.quantity;
         }
@@ -1587,7 +1588,7 @@ export const recordsRouter = router({
         });
         await tx.insert(cardCopies).values(Array.from({ length: pull.quantity }, () => ({
           id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: openingId,
-          acquiredLineId: lineId, status: "available" as const, condition: "Near Mint" as const,
+          acquiredLineId: lineId, status: "available" as const, condition: pull.condition,
           createdAt: now, updatedAt: now,
         })));
       }
@@ -2159,7 +2160,7 @@ export const recordsRouter = router({
             allocationPence: bulkLot && allocationIndex !== null && record.amountKnown
               ? allocatePenceAt(record.amountPence, bulkLot.totalQuantity, allocationIndex)
               : null,
-            status: "available" as const, condition: "Near Mint" as const, createdAt: now, updatedAt: now,
+            status: "available" as const, condition: plan.input.condition, createdAt: now, updatedAt: now,
           };
         });
         const resultingCopies = [

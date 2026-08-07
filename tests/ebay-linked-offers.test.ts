@@ -34,6 +34,7 @@ test("generated titles keep the offer difference and descriptions stay buyer-fac
   assert.doesNotMatch(setTitle, /\s1 - 3-Card Set$/);
   const blueEyesSetTitle = linkedOfferTitle("x2", { ...identity, name: "Blue-Eyes White Dragon", setCode: "MP24" });
   assert.equal(blueEyesSetTitle, "Yu-Gi-Oh! 2-Card Set - Blue-Eyes White Dragon MP24 Quarter Century Secret Rare");
+  assert.match(linkedOfferTitle("individual", { ...identity, condition: "Damaged", name: "Dark Magician", rarity: "Ultra Rare" }), /DMG$/);
   const individual = linkedOfferDescription("individual", identity);
   const set = linkedOfferDescription("x3", identity);
   for (const description of [individual, set]) {

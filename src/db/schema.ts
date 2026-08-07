@@ -474,7 +474,7 @@ export const cardCopies = pgTable(
       .notNull()
       .default("available"),
     condition: text("condition", {
-      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played"],
+      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played", "Damaged"],
     }).notNull().default("Near Mint"),
     location: text("location"),
     stickerNumber: text("sticker_number"),
@@ -539,7 +539,7 @@ export const cardListingPhotoImages = pgTable(
     printingId: text("printing_id").notNull().references(() => cardPrintings.id, { onDelete: "restrict" }),
     edition: text("edition").notNull(),
     condition: text("condition", {
-      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played"],
+      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played", "Damaged"],
     }).notNull(),
     kind: text("kind", { enum: ["individual", "x2", "x3"] }).notNull(),
     objectKey: text("object_key").notNull(),

@@ -354,9 +354,11 @@ function cardDraftsForRecord(record: RecordEntry, snapshot: RecordsSnapshot): Ca
         ? "Limited Edition"
         : "1st Edition";
     const resolved = /tcgplayer\.com\/product\/\d+/i.test(productUrl);
+    const condition = copy && isCardCondition(copy.condition) ? copy.condition : "Near Mint";
     return {
       id: line.id,
       selectedTargetId: target?.id ?? null,
+      condition,
       quantity: line.quantity,
       tcgplayerUrl: productUrl,
       name: target?.name || line.name,
@@ -401,6 +403,7 @@ function RecordCardItemsEditor({
     const result = await source.replaceRecordCards(record.id, rows.map((row) => ({
       id: row.id,
       selectedTargetId: row.selectedTargetId,
+      condition: row.condition ?? "Near Mint",
       quantity: row.quantity,
       tcgplayerUrl: row.tcgplayerUrl,
       name: row.name,
@@ -444,9 +447,9 @@ function RecordCardItemsEditor({
           </div>
         </div>
       ) : null}
-      <div><h3 className="font-bold">{record.type === "pack-opening" ? "Pulled cards" : "Card items"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Edit a card, change its quantity, remove it, or add another where this Record supports multiple cards.</p></div>
+      <div><h3 className="font-bold">{record.type === "pack-opening" ? "Pulled cards" : "Card items"}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Edit a card, change its quantity, remove it, or add another where this Record supports multiple cards. Manage condition on each exact Copy in Inventory.</p></div>
       {message ? <p className={`rounded-md border px-3 py-2 text-sm font-bold ${message === "Card items saved." ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-300 bg-rose-50 text-rose-900"}`} role={message === "Card items saved." ? "status" : "alert"}>{message}</p> : null}
-      <CardContentsEditor allowAdd={isMultiCardRecord} allowExistingIncomplete allowRemoveLast={hasBulkContainer} initialActiveId={initialCardLineId} noun={record.type === "pack-opening" ? "pulled card" : "card"} onChange={setRows} rows={rows} />
+      <CardContentsEditor allowAdd={isMultiCardRecord} allowExistingIncomplete allowRemoveLast={hasBulkContainer} initialActiveId={initialCardLineId} noun={record.type === "pack-opening" ? "pulled card" : "card"} onChange={setRows} rows={rows} showCondition={false} />
       <button className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60 sm:justify-self-start" disabled={saving} onClick={saveCards} type="button">{saving ? "Saving…" : "Save card changes"}</button>
     </section>
   );

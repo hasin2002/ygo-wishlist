@@ -2,7 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
@@ -71,11 +71,15 @@ function FieldOrigin({ edited, fetched }: { edited: boolean; fetched: boolean })
 }
 
 export function ProductIdentityEditor({
+  cardNameFields,
+  compact = false,
   hideSealedEdition = false,
   kind,
   onChange,
   value,
 }: {
+  cardNameFields?: ReactNode;
+  compact?: boolean;
   hideSealedEdition?: boolean;
   kind: "card" | "sealed";
   onChange: (value: ProductIdentityDraft) => void;
@@ -271,9 +275,9 @@ export function ProductIdentityEditor({
   }
 
   return (
-    <div className="grid gap-4">
+    <div className={`grid ${compact ? "gap-3" : "gap-4"}`}>
       <DestructiveToast message={fetchError} onDismiss={() => setFetchError(null)} />
-      <div>
+      <div className={compact ? "grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" : undefined}>
         <label className="block">
           <span className="text-sm font-bold text-zinc-700">TCGplayer product link <span className="text-rose-700">*</span></span>
           <input
@@ -295,7 +299,7 @@ export function ProductIdentityEditor({
           />
         </label>
         <button
-          className="mt-2 inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
+          className={`${compact ? "sm:mt-0" : ""} mt-2 inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto`}
           disabled={value.fetchStatus === "fetching" || !value.tcgplayerUrl.trim()}
           onClick={() => void fetchDetails()}
           type="button"
@@ -312,7 +316,7 @@ export function ProductIdentityEditor({
             <span className="space-y-2"><span className="block h-4 w-2/3 rounded bg-zinc-200" /><span className="block h-3 w-1/2 rounded bg-zinc-200" /></span>
           </div>
         ) : value.fetchAttempted ? (
-          <div className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm font-medium ${value.fetchStatus === "resolved" ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+          <div className={`flex items-start gap-3 rounded-lg border px-3 ${compact ? "py-2" : "py-3"} text-sm font-medium ${value.fetchStatus === "resolved" ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
             {value.fetchStatus === "resolved" ? <CheckCircle2 className="mt-0.5 size-5 shrink-0" /> : <AlertTriangle className="mt-0.5 size-5 shrink-0" />}
             <p>{value.fetchMessage}</p>
           </div>
@@ -330,14 +334,14 @@ export function ProductIdentityEditor({
       ) : null}
 
       {value.imageUrl ? (
-        <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+        <div className={`flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 ${compact ? "p-2" : "p-3"}`}>
           <Image
             alt={value.name ? `${value.name} product` : "Fetched TCGplayer product"}
-            className="size-24 rounded-md object-contain"
-            height={96}
+            className={`${compact ? "size-16" : "size-24"} rounded-md object-contain`}
+            height={compact ? 64 : 96}
             src={`/api/image-proxy?url=${encodeURIComponent(value.imageUrl)}`}
             unoptimized
-            width={96}
+            width={compact ? 64 : 96}
           />
           <div className="min-w-0">
             <p className="font-bold text-zinc-950">{value.name || "Product details"}</p>
@@ -346,67 +350,70 @@ export function ProductIdentityEditor({
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="relative sm:col-span-2">
-          <span className="text-sm font-bold text-zinc-700">{kind === "card" ? "Card name" : "Product name"} <span className="text-rose-700">*</span><FieldOrigin edited={value.editedFields.includes("name")} fetched={fetched && Boolean(value.name)} /></span>
-          <input
-            autoComplete="off"
-            aria-activedescendant={suggestionsOpen && suggestions.length ? `library-card-suggestion-${activeSuggestionIndex}` : undefined}
-            aria-autocomplete={kind === "card" ? "list" : undefined}
-            aria-controls={kind === "card" ? "library-card-suggestions" : undefined}
-            aria-expanded={kind === "card" && suggestionsOpen && suggestions.length > 0}
-            className={fieldClass}
-            onBlur={() => {
-              closeSuggestionsTimeout.current = window.setTimeout(() => setSuggestionsOpen(false), 120);
-            }}
-            onChange={(event) => {
-              const nextName = event.target.value;
-              const editedFields = value.editedFields.includes("name")
-                ? value.editedFields
-                : [...value.editedFields, "name"];
-              onChange({
-                ...value,
-                name: nextName,
-                selectedTargetId: nextName === value.name ? value.selectedTargetId : null,
-                editedFields,
-              });
-              setActiveSuggestionIndex(0);
-              setSuggestionsOpen(true);
-            }}
-            onFocus={() => {
-              if (kind === "card" && suggestions.length) setSuggestionsOpen(true);
-            }}
-            onKeyDown={kind === "card" ? handleSuggestionKeys : undefined}
-            required
-            role={kind === "card" ? "combobox" : undefined}
-            value={value.name}
-          />
-          {kind === "card" && suggestionsOpen && suggestions.length ? (
-            <div
-              className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
-              id="library-card-suggestions"
-              role="listbox"
-            >
-              <p className="px-3 pb-1 pt-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Matches from your Wishlist</p>
-              {suggestions.map((suggestion, index) => (
-                <button
-                  aria-selected={index === activeSuggestionIndex}
-                  className={`flex min-h-11 w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm transition ${index === activeSuggestionIndex ? "bg-rose-50 text-rose-950" : "hover:bg-zinc-50"}`}
-                  id={`library-card-suggestion-${index}`}
-                  key={`${suggestion.targetId}-${suggestion.printingId ?? "target"}`}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActiveSuggestionIndex(index)}
-                  onClick={() => applyLibrarySuggestion(suggestion)}
-                  role="option"
-                  type="button"
-                >
-                  <span className="truncate font-semibold">{suggestion.name}</span>
-                  <span className="truncate text-zinc-500">&nbsp;· {suggestion.rarity || "Unknown rarity"} · {suggestion.edition || "Unknown edition"} · {suggestion.setName || "Unknown set"}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </label>
+      <div className={`grid ${compact ? "gap-3" : "gap-4"} sm:grid-cols-2`}>
+        <div className={`grid gap-3 sm:col-span-2 ${kind === "card" && cardNameFields ? "sm:grid-cols-[minmax(0,1.65fr)_minmax(20rem,1fr)] sm:items-start" : ""}`}>
+          <label className="relative">
+            <span className="text-sm font-bold text-zinc-700">{kind === "card" ? "Card name" : "Product name"} <span className="text-rose-700">*</span><FieldOrigin edited={value.editedFields.includes("name")} fetched={fetched && Boolean(value.name)} /></span>
+            <input
+              autoComplete="off"
+              aria-activedescendant={suggestionsOpen && suggestions.length ? `library-card-suggestion-${activeSuggestionIndex}` : undefined}
+              aria-autocomplete={kind === "card" ? "list" : undefined}
+              aria-controls={kind === "card" ? "library-card-suggestions" : undefined}
+              aria-expanded={kind === "card" && suggestionsOpen && suggestions.length > 0}
+              className={fieldClass}
+              onBlur={() => {
+                closeSuggestionsTimeout.current = window.setTimeout(() => setSuggestionsOpen(false), 120);
+              }}
+              onChange={(event) => {
+                const nextName = event.target.value;
+                const editedFields = value.editedFields.includes("name")
+                  ? value.editedFields
+                  : [...value.editedFields, "name"];
+                onChange({
+                  ...value,
+                  name: nextName,
+                  selectedTargetId: nextName === value.name ? value.selectedTargetId : null,
+                  editedFields,
+                });
+                setActiveSuggestionIndex(0);
+                setSuggestionsOpen(true);
+              }}
+              onFocus={() => {
+                if (kind === "card" && suggestions.length) setSuggestionsOpen(true);
+              }}
+              onKeyDown={kind === "card" ? handleSuggestionKeys : undefined}
+              required
+              role={kind === "card" ? "combobox" : undefined}
+              value={value.name}
+            />
+            {kind === "card" && suggestionsOpen && suggestions.length ? (
+              <div
+                className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
+                id="library-card-suggestions"
+                role="listbox"
+              >
+                <p className="px-3 pb-1 pt-2 text-xs font-bold uppercase tracking-wide text-zinc-500">Matches from your Wishlist</p>
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    aria-selected={index === activeSuggestionIndex}
+                    className={`flex min-h-11 w-full cursor-pointer items-center rounded-md px-3 py-2 text-left text-sm transition ${index === activeSuggestionIndex ? "bg-rose-50 text-rose-950" : "hover:bg-zinc-50"}`}
+                    id={`library-card-suggestion-${index}`}
+                    key={`${suggestion.targetId}-${suggestion.printingId ?? "target"}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveSuggestionIndex(index)}
+                    onClick={() => applyLibrarySuggestion(suggestion)}
+                    role="option"
+                    type="button"
+                  >
+                    <span className="truncate font-semibold">{suggestion.name}</span>
+                    <span className="truncate text-zinc-500">&nbsp;· {suggestion.rarity || "Unknown rarity"} · {suggestion.edition || "Unknown edition"} · {suggestion.setName || "Unknown set"}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </label>
+          {kind === "card" ? cardNameFields : null}
+        </div>
         {kind === "card" ? (
           <RarityCombobox
             labelSuffix={

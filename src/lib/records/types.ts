@@ -16,21 +16,37 @@ export const cardConditions = [
   "Lightly Played",
   "Moderately Played",
   "Heavily Played",
+  "Damaged",
 ] as const;
 export type CardCondition = (typeof cardConditions)[number];
+export type EbayCardConditionDescriptorValueId = "400010" | "400015" | "400016" | "400017";
 export function isCardCondition(value: string): value is CardCondition {
   return cardConditions.some((condition) => condition === value);
 }
 export const cardConditionOptions: ReadonlyArray<{
-  ebayDescriptorValueId: "400010" | "400015" | "400016" | "400017";
+  abbreviation: "NM" | "LP" | "MP" | "HP" | "DMG";
+  ebayDescriptorValueId: EbayCardConditionDescriptorValueId;
   label: string;
   value: CardCondition;
 }> = [
-  { value: "Near Mint", label: "Near mint or better", ebayDescriptorValueId: "400010" },
-  { value: "Lightly Played", label: "Lightly played (Excellent)", ebayDescriptorValueId: "400015" },
-  { value: "Moderately Played", label: "Moderately played (Very good)", ebayDescriptorValueId: "400016" },
-  { value: "Heavily Played", label: "Heavily played (Poor)", ebayDescriptorValueId: "400017" },
+  { value: "Near Mint", abbreviation: "NM", label: "Near Mint (NM)", ebayDescriptorValueId: "400010" },
+  { value: "Lightly Played", abbreviation: "LP", label: "Lightly Played (LP)", ebayDescriptorValueId: "400015" },
+  { value: "Moderately Played", abbreviation: "MP", label: "Moderately Played (MP)", ebayDescriptorValueId: "400016" },
+  { value: "Heavily Played", abbreviation: "HP", label: "Heavily Played (HP)", ebayDescriptorValueId: "400017" },
+  { value: "Damaged", abbreviation: "DMG", label: "Damaged (DMG)", ebayDescriptorValueId: "400017" },
 ];
+export const ebayCardConditionDescriptorOptions: ReadonlyArray<{
+  label: string;
+  value: EbayCardConditionDescriptorValueId;
+}> = [
+  { value: "400010", label: "Near mint or better" },
+  { value: "400015", label: "Lightly played (Excellent)" },
+  { value: "400016", label: "Moderately played (Very good)" },
+  { value: "400017", label: "Heavily played (Poor)" },
+];
+export function ebayConditionDescriptorValueId(condition: CardCondition): EbayCardConditionDescriptorValueId {
+  return cardConditionOptions.find((option) => option.value === condition)?.ebayDescriptorValueId ?? "400010";
+}
 export type SupplyCategory =
   | "sleeves"
   | "binder"
@@ -260,6 +276,8 @@ export type ProductIdentityInput = {
 };
 
 export type CardContentsInput = ProductIdentityInput & {
+  /** Missing only on older saved form drafts; new entries always submit it. */
+  condition?: CardCondition;
   id: string;
   quantity: number;
 };

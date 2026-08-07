@@ -13,10 +13,16 @@ import {
   ProductIdentityEditor,
   type ProductIdentityDraft,
 } from "@/components/records/product-identity-editor";
+import {
+  cardConditionOptions,
+  isCardCondition,
+  type CardCondition,
+} from "@/lib/records/types";
 
 const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-base outline-none transition focus:border-[#8a1f2d] focus:bg-white focus:ring-2 focus:ring-[#8a1f2d]/10 sm:text-sm";
 
 export type CardContentsDraft = ProductIdentityDraft & {
+  condition?: CardCondition;
   id: string;
   quantity: number;
 };
@@ -24,6 +30,7 @@ export type CardContentsDraft = ProductIdentityDraft & {
 export function blankCardContents(name = ""): CardContentsDraft {
   return {
     id: `card-${crypto.randomUUID()}`,
+    condition: "Near Mint",
     quantity: 1,
     ...blankProductIdentity(name, "1st Edition"),
   };
@@ -35,6 +42,7 @@ export function blankCardContents(name = ""): CardContentsDraft {
 export function isUntouchedNewCardContents(row: CardContentsDraft) {
   return row.id.startsWith("card-")
     && row.quantity === 1
+    && (row.condition ?? "Near Mint") === "Near Mint"
     && row.selectedTargetId === null
     && !row.tcgplayerUrl
     && !row.name
@@ -59,6 +67,7 @@ export function cardContentsError(row: CardContentsDraft) {
   if (!row.name.trim()) return "Add the card name.";
   if (!row.edition) return "Choose the card edition.";
   if (!row.rarity.trim()) return "Choose the card rarity.";
+  if (row.condition !== undefined && !isCardCondition(row.condition)) return "Choose a supported card condition.";
   if (!Number.isInteger(row.quantity) || row.quantity < 1) return "Quantity must be at least one.";
   return null;
 }
@@ -71,6 +80,7 @@ export function CardContentsEditor({
   noun = "card",
   onChange,
   rows,
+  showCondition = true,
 }: {
   allowAdd?: boolean;
   allowExistingIncomplete?: boolean;
@@ -79,6 +89,7 @@ export function CardContentsEditor({
   noun?: "card" | "pulled card";
   onChange: (rows: CardContentsDraft[]) => void;
   rows: CardContentsDraft[];
+  showCondition?: boolean;
 }) {
   const [activeId, setActiveId] = useState<string | null>(() => (
     rows.some((row) => row.id === initialActiveId)
@@ -136,9 +147,9 @@ export function CardContentsEditor({
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-2.5">
       <DestructiveToast message={error} onDismiss={() => setError(null)} />
-      <div className="flex flex-col gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
         <strong>{rows.length} {rows.length === 1 ? "card type" : "card types"}</strong>
         <span className="text-sm font-medium text-zinc-500">{copyCount} physical {copyCount === 1 ? "copy" : "copies"}</span>
       </div>
@@ -149,10 +160,10 @@ export function CardContentsEditor({
 
       {rows.map((row, index) => row.id === activeId ? (
         <article className="records-step-enter rounded-lg border border-[#8a1f2d]/40 bg-white shadow-sm" key={row.id}>
-          <div className="sticky top-2 z-10 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-t-lg border-b border-zinc-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur-sm">
-            <div><p className="text-xs font-black uppercase tracking-[0.12em] text-[#8a1f2d]">{noun} {index + 1}</p><p className="mt-1 text-sm font-medium text-zinc-500">Fetch, check, then collapse this card.</p></div>
+          <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b border-zinc-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-sm">
+            <div><p className="text-xs font-black uppercase tracking-[0.12em] text-[#8a1f2d]">{noun} {index + 1}</p><p className="text-xs font-medium text-zinc-500">Fetch, check, then finish.</p></div>
             <div className="flex flex-wrap items-center gap-2">
-              <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={finishAndAddCard} type="button"><Check className="size-4" /> Done with this card</button>
+              <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={finishAndAddCard} type="button"><Check className="size-4" /> Done &amp; add next</button>
               {rows.length > 1 || allowRemoveLast ? (
               <button
                 aria-label={`Remove ${noun} ${index + 1}`}
@@ -169,21 +180,36 @@ export function CardContentsEditor({
               ) : null}
             </div>
           </div>
-          <div className="px-4 pb-4">
-            <ProductIdentityEditor kind="card" onChange={(identity) => update(row.id, identity)} value={row} />
-            <label className="mt-4 block sm:max-w-52">
-              <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
-              <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} onFocus={selectNumberOnFocus} required type="number" value={row.quantity} />
-            </label>
+          <div className="px-3 pb-3">
+            <ProductIdentityEditor
+              cardNameFields={(
+                <div className={`grid gap-3 ${showCondition ? "grid-cols-[minmax(0,1.4fr)_minmax(7rem,0.6fr)]" : "sm:ml-auto sm:w-32"}`}>
+                  {showCondition ? <label>
+                    <span className="text-sm font-bold text-zinc-700">Condition <span className="text-rose-700">*</span></span>
+                    <select className={fieldClass} onChange={(event) => update(row.id, { condition: event.target.value as CardCondition })} required value={row.condition ?? "Near Mint"}>
+                      {cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label> : null}
+                  <label>
+                    <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
+                    <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} onFocus={selectNumberOnFocus} required type="number" value={row.quantity} />
+                  </label>
+                </div>
+              )}
+              compact
+              kind="card"
+              onChange={(identity) => update(row.id, identity)}
+              value={row}
+            />
           </div>
         </article>
       ) : (
-        <article className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between" key={row.id}>
+        <article className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-2.5 sm:flex-row sm:items-center sm:justify-between" key={row.id}>
           <div className="flex min-w-0 items-center gap-3">
             {row.imageUrl ? (
-              <Image alt="" className="size-14 shrink-0 rounded-md object-contain" height={56} src={`/api/image-proxy?url=${encodeURIComponent(row.imageUrl)}`} unoptimized width={56} />
-            ) : <span className="grid size-14 shrink-0 place-items-center rounded-md bg-zinc-100 text-xs font-bold text-zinc-400">CARD</span>}
-            <div className="min-w-0"><p className="font-bold text-zinc-950">{row.name || `Unnamed ${noun}`}</p><p className="mt-1 text-sm font-medium text-zinc-500">{row.edition || "Edition missing"} · {row.rarity || "Rarity missing"} · Quantity {row.quantity}</p></div>
+              <Image alt="" className="size-12 shrink-0 rounded-md object-contain" height={48} src={`/api/image-proxy?url=${encodeURIComponent(row.imageUrl)}`} unoptimized width={48} />
+            ) : <span className="grid size-12 shrink-0 place-items-center rounded-md bg-zinc-100 text-[10px] font-bold text-zinc-400">CARD</span>}
+            <div className="min-w-0"><p className="font-bold leading-5 text-zinc-950">{row.name || `Unnamed ${noun}`}</p><p className="mt-0.5 text-sm font-medium leading-5 text-zinc-500">{row.setCode || row.edition || "Printing missing"} · {row.rarity || "Rarity missing"}{showCondition ? ` · ${row.condition ?? "Near Mint"}` : ""} · Qty {row.quantity}</p></div>
           </div>
           <div className="flex gap-2">
             <button className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 sm:flex-none" onClick={() => { setActiveId(row.id); setError(null); }} type="button"><Pencil className="size-4" /> Edit</button>

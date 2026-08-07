@@ -246,7 +246,7 @@ test("authenticated purchase commits exact Copies and projects the same money in
     listingUrl: "",
     notes: "transaction coverage",
     totalPence: 101,
-    card: card(2),
+    card: { ...card(2), condition: "Lightly Played" },
   });
 
   const snapshot = await records.snapshot();
@@ -256,6 +256,7 @@ test("authenticated purchase commits exact Copies and projects the same money in
   assert.equal(purchase.amountKnown, true);
   const copies = snapshot.copies.filter((copy) => copy.acquiredRecordId === result.id);
   assert.equal(copies.length, 2);
+  assert.deepEqual(copies.map((copy) => copy.condition), ["Lightly Played", "Lightly Played"]);
   assert.equal(new Set(copies.map((copy) => copy.id)).size, 2, "every allocation retains an exact Copy id");
   const allocations = copies.map((copy) => {
     if (copy.allocationPence === null) throw new Error("Card Purchase Copy allocation must be known.");
@@ -292,12 +293,15 @@ test("recorded pack pulls create owned Library cards without adding Wishlist dem
     },
     pulls: [{
       ...card(),
+      condition: "Moderately Played",
       id: "wishlist-free-pack-pull",
       name: "Wishlist-free Pack Pull",
       tcgplayerUrl: "https://www.tcgplayer.com/product/990002/wishlist-free-pack-pull",
     }],
   });
   assert.ok(opening.id);
+  const [pullCopy] = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, opening.id));
+  assert.equal(pullCopy?.condition, "Moderately Played");
 
   const cards = await library.list({ query: "Wishlist-free Pack Pull", status: "all" });
   assert.equal(cards.length, 1);

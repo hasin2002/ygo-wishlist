@@ -889,6 +889,7 @@ function findOrCreatePrinting(
 function addCopies(
   snapshot: RecordsSnapshot,
   input: {
+    condition?: CardContentsInput["condition"];
     name: string;
     selectedTargetId?: string | null;
     edition?: string;
@@ -921,7 +922,7 @@ function addCopies(
       allocationIndex: allocation?.indexes[index] ?? null,
       allocationPence: allocation?.values[index] ?? null,
       status: "available",
-      condition: "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: nowIso(),
+      condition: input.condition ?? "Near Mint", location: null, stickerNumber: null, privateNote: "", createdAt: nowIso(),
     });
   }
 
