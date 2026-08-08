@@ -41,16 +41,19 @@ export function useCardPricing(
         : `Checking UK eBay; keeping ${pounds(card.pricing.estimatedPricePence)} meanwhile…`,
       sampleSize: card.pricing?.sampleSize ?? 0,
       status: "checking",
+      usedConditionFallback: card.pricing?.usedConditionFallback ?? false,
     });
 
     let request = requests.current.get(localKey);
     if (!request) {
       setPendingCount((count) => count + 1);
       request = estimatePricing.mutateAsync({
+        condition: card.condition ?? "Near Mint",
         edition: card.edition as "1st Edition" | "Unlimited Edition" | "Limited Edition",
         name: card.name,
         rarity: card.rarity,
         selectedTargetId: card.selectedTargetId,
+        setCode: card.setCode,
       }).then((result): CardPricingDraft => {
         const pricing: CardPricingDraft = {
           ebaySearchUrl: result.ebaySearchUrl,
@@ -63,6 +66,7 @@ export function useCardPricing(
               : `No newer match found; keeping the existing ${pounds(result.estimatedPricePence)} estimate.`,
           sampleSize: result.sampleSize,
           status: result.estimatedPricePence === null ? "no-match" : "estimated",
+          usedConditionFallback: result.usedConditionFallback,
         };
         completed.current.set(localKey, pricing);
         completed.current.set(result.identityKey, pricing);
@@ -86,6 +90,7 @@ export function useCardPricing(
           : "Estimate unavailable. You can retry by editing and finishing this card again.",
         sampleSize: card.pricing?.sampleSize ?? 0,
         status: "failed",
+        usedConditionFallback: card.pricing?.usedConditionFallback ?? false,
       });
     });
   }, [estimatePricing, updateCardPricing]);

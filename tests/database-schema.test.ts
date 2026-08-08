@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import {
+  cardPricingEstimates,
   cardPrintings,
   cardListingPhotoImages,
   ebayConnections,
@@ -106,6 +107,21 @@ test("exact Printing identities are database-enforced while placeholders remain 
     fs.readFileSync("drizzle/0001_enforce_card_printing_identity.sql", "utf8"),
     /nullif\(btrim\("card_printings"\."canonical_tcgplayer_url"\), ''\) is not null/,
   );
+});
+
+test("Records pricing estimates are isolated by exact Printing and condition", () => {
+  const config = getTableConfig(cardPricingEstimates);
+  const index = config.indexes.find(
+    (candidate) => candidate.config.name === "card_pricing_estimates_owner_variant_unique",
+  );
+  assert.equal(index?.config.unique, true);
+  assert.deepEqual(configuredColumnNames(index?.config.columns ?? []), [
+    "owner_id",
+    "printing_id",
+    "condition",
+  ]);
+  assert.ok(config.checks.some((candidate) => candidate.name === "card_pricing_estimates_price_nonnegative"));
+  assert.ok(config.checks.some((candidate) => candidate.name === "card_pricing_estimates_sample_nonnegative"));
 });
 
 test("one eBay seller and complete encrypted Trading credentials are database-enforced", () => {

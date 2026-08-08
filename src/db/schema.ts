@@ -413,6 +413,43 @@ export const cardPrintings = pgTable(
   ],
 );
 
+/** One Records market estimate for an exact Printing in one physical condition. */
+export const cardPricingEstimates = pgTable(
+  "card_pricing_estimates",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    printingId: text("printing_id")
+      .notNull()
+      .references(() => cardPrintings.id, { onDelete: "cascade" }),
+    condition: text("condition", {
+      enum: ["Near Mint", "Lightly Played", "Moderately Played", "Heavily Played", "Damaged"],
+    }).notNull(),
+    estimatedPricePence: integer("estimated_price_pence"),
+    ebaySearchUrl: text("ebay_search_url").notNull(),
+    sampleSize: integer("sample_size").notNull().default(0),
+    usedConditionFallback: boolean("used_condition_fallback").notNull().default(false),
+    refreshedAt: timestamp("refreshed_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("card_pricing_estimates_owner_variant_unique").on(
+      table.ownerId,
+      table.printingId,
+      table.condition,
+    ),
+    index("card_pricing_estimates_owner_printing_idx").on(table.ownerId, table.printingId),
+    check(
+      "card_pricing_estimates_price_nonnegative",
+      sql`${table.estimatedPricePence} is null or ${table.estimatedPricePence} >= 0`,
+    ),
+    check("card_pricing_estimates_sample_nonnegative", sql`${table.sampleSize} >= 0`),
+  ],
+);
+
 export const bulkLots = pgTable(
   "bulk_lots",
   {

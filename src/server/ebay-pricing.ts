@@ -1,6 +1,12 @@
 import { db } from "@/db";
 import { cards } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import {
+  ebayPricingSearchTerms,
+  ebayTitleMatchesSetCode,
+  searchablePricingCardName,
+  type EbayPricingSearchCard,
+} from "@/lib/records/ebay-pricing-search";
 
 const excludedTitleTerms = [
   "unlimited",
@@ -54,6 +60,9 @@ const ebayCardCategoryId = "183454";
 const retryBaseDelayMs = 300;
 const retryMaxDelayMs = 8_000;
 const maxRetries = 4;
+const minimumConditionSampleSize = 3;
+
+type EbayPricingCard = EbayPricingSearchCard;
 
 class EbayHttpError extends Error {
   status: number;
@@ -75,16 +84,6 @@ function normalizeText(value: string | null | undefined) {
     .trim();
 }
 
-function searchableCardName(name: string) {
-  return name
-    .replace(
-      /\s*\((?:new art|alternate art|\d+(?:st|nd|rd|th) art|quarter century secret rare|[a-z])\)/gi,
-      "",
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function shouldExclude(title: string) {
   const normalized = normalizeText(title);
   return (
@@ -95,7 +94,7 @@ function shouldExclude(title: string) {
 
 function titleMatchesName(title: string, name: string) {
   const normalizedTitle = normalizeText(title);
-  const tokens = normalizeText(searchableCardName(name))
+  const tokens = normalizeText(searchablePricingCardName(name))
     .split(" ")
     .filter((token) => token.length > 2);
 
@@ -144,6 +143,25 @@ function titleMatchesRarity(title: string, rarity: string | null) {
   }
 
   return normalizedTitle.includes(normalizedRarity);
+}
+
+const conditionAliases: Record<string, RegExp[]> = {
+  "near mint": [/\bnear mint\b/i, /\bnm\b/i],
+  "lightly played": [/\blightly played\b/i, /\blp\b/i, /\bexcellent\b/i],
+  "moderately played": [/\bmoderately played\b/i, /\bmp\b/i, /\bvery good\b/i],
+  "heavily played": [/\bheavily played\b/i, /\bhp\b/i, /\bpoor\b/i],
+  damaged: [/\bdamaged\b/i, /\bdmg\b/i],
+};
+
+function titleMatchesCondition(title: string, condition: string | null | undefined) {
+  if (!condition) return true;
+  const requested = normalizeText(condition);
+  const matchingKey = Object.keys(conditionAliases).find((key) => key === requested);
+  if (!matchingKey) return true;
+  if (conditionAliases[matchingKey]!.some((pattern) => pattern.test(title))) return true;
+  return !Object.entries(conditionAliases).some(([key, patterns]) => (
+    key !== matchingKey && patterns.some((pattern) => pattern.test(title))
+  ));
 }
 
 function priceValue(item: { price?: { value?: string } }) {
@@ -227,11 +245,9 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-export function buildEbaySearchUrl(card: { name: string; rarity: string | null }) {
+export function buildEbaySearchUrl(card: EbayPricingCard, includeCondition = Boolean(card.condition)) {
   const params = new URLSearchParams({
-    _nkw: [searchableCardName(card.name), card.rarity, "english"]
-      .filter(Boolean)
-      .join(" "),
+    _nkw: ebayPricingSearchTerms(card, includeCondition),
     _sacat: ebayCardCategoryId,
     LH_BIN: "1",
   });
@@ -280,11 +296,9 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function searchEbay(card: { name: string; rarity: string | null }) {
+async function searchEbay(card: EbayPricingCard, includeCondition: boolean) {
   const token = await getAccessToken();
-  const query = [searchableCardName(card.name), card.rarity, "english"]
-    .filter(Boolean)
-    .join(" ");
+  const query = ebayPricingSearchTerms(card, includeCondition);
   const params = new URLSearchParams({
     q: query,
     category_ids: ebayCardCategoryId,
@@ -312,10 +326,10 @@ async function searchEbay(card: { name: string; rarity: string | null }) {
   return data.itemSummaries ?? [];
 }
 
-async function searchEbayWithRetry(card: { name: string; rarity: string | null }) {
+async function searchEbayWithRetry(card: EbayPricingCard, includeCondition: boolean) {
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      return await searchEbay(card);
+      return await searchEbay(card, includeCondition);
     } catch (error) {
       const retryable = error instanceof EbayHttpError
         && (error.status === 429 || (error.status >= 500 && error.status <= 599));
@@ -327,25 +341,48 @@ async function searchEbayWithRetry(card: { name: string; rarity: string | null }
   return [];
 }
 
-export async function fetchEbayPricing(card: { name: string; rarity: string | null }) {
-  const prices = (await searchEbayWithRetry(card))
+function usablePrices(
+  items: { title?: string; price?: { value?: string } }[],
+  card: EbayPricingCard,
+  includeCondition: boolean,
+) {
+  return items
     .filter((item) => item.title)
     .filter((item) => !shouldExclude(item.title ?? ""))
     .filter((item) => titleMatchesName(item.title ?? "", card.name))
-    .filter((item) => titleMatchesRarity(item.title ?? "", card.rarity))
+    .filter((item) => card.setCode
+      ? ebayTitleMatchesSetCode(item.title ?? "", card.setCode)
+      : titleMatchesRarity(item.title ?? "", card.rarity ?? null))
+    .filter((item) => !includeCondition || titleMatchesCondition(item.title ?? "", card.condition))
     .map(priceValue)
     .filter((value): value is number => value !== null);
+}
+
+export async function fetchEbayPricing(card: EbayPricingCard) {
+  let includeCondition = Boolean(card.setCode && card.condition);
+  let prices = usablePrices(
+    await searchEbayWithRetry(card, includeCondition),
+    card,
+    includeCondition,
+  );
+  let usedConditionFallback = false;
+  if (includeCondition && prices.length < minimumConditionSampleSize) {
+    includeCondition = false;
+    usedConditionFallback = true;
+    prices = usablePrices(await searchEbayWithRetry(card, false), card, false);
+  }
   const sample = outlierResistantSample(prices);
-  const ebaySearchUrl = buildEbaySearchUrl(card);
+  const ebaySearchUrl = buildEbaySearchUrl(card, includeCondition);
 
   if (!sample.length) {
-    return { ebaySearchUrl, estimatedPricePence: null, sampleSize: 0 };
+    return { ebaySearchUrl, estimatedPricePence: null, sampleSize: 0, usedConditionFallback };
   }
 
   return {
     ebaySearchUrl,
     estimatedPricePence: Math.round(average(sample) * 100),
     sampleSize: sample.length,
+    usedConditionFallback,
   };
 }
 

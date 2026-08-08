@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   cardCopies,
+  cardPricingEstimates,
   cardPrintings,
   cardTargets,
   pricingRefreshStates,
@@ -11,9 +12,15 @@ import {
   targetWheelEntries,
 } from "@/db/schema";
 import { getLibraryCardStatus } from "@/lib/records/library-status";
+import { cardPricingIdentityKey } from "@/lib/records/card-pricing";
+import { cardConditions } from "@/lib/records/types";
 import { fetchEbayPricing } from "@/server/ebay-pricing";
 import { fetchLinkMetadata, normalizeUrl, ygoCardDetailsByName } from "@/server/metadata";
 import { recordPricingRefresh } from "@/server/pricing-refresh-state";
+import {
+  listRecordPricingCandidates,
+  refreshRecordPricingEstimate,
+} from "@/server/records/card-pricing";
 import { authenticatedProcedure, publicProcedure, router } from "@/server/trpc";
 
 const statusSchema = z.enum(["wishlist", "owned"]);
@@ -47,10 +54,16 @@ const targetInputSchema = z.object({
 });
 const updateTargetSchema = targetInputSchema.extend({ id: z.string().min(1) });
 const estimatePricingSchema = z.object({
+  condition: z.enum(cardConditions),
   selectedTargetId: z.string().min(1).nullable().optional(),
   name: z.string().trim().min(1).max(160),
   rarity: z.string().trim().min(1).max(80),
   edition: editionSchema,
+  setCode: z.string().trim().min(1).max(80),
+});
+const recordPricingVariantSchema = z.object({
+  condition: z.enum(cardConditions),
+  printingId: z.string().min(1),
 });
 const trackerPageSchema = z.object({
   chaseFilters: z.array(trackerChaseFilterSchema).default([]),
@@ -522,15 +535,41 @@ export const libraryRouter = router({
           eq(cardTargets.normalizedRarity, normalizedRarity),
           eq(cardTargets.normalizedEdition, normalizedEditionValue),
         )).limit(1);
-    const pricing = await fetchEbayPricing({ name: input.name, rarity: input.rarity });
-    const estimatedPricePence = pricing.estimatedPricePence ?? existing?.estimatedPricePence ?? null;
+    const [printing] = existing
+      ? await db.select({ id: cardPrintings.id }).from(cardPrintings).where(and(
+          eq(cardPrintings.ownerId, ctx.collectionOwnerId),
+          eq(cardPrintings.targetId, existing.id),
+          eq(cardPrintings.normalizedSetCode, normalize(input.setCode)),
+        )).limit(1)
+      : [];
+    const [existingPricing] = printing
+      ? await db.select().from(cardPricingEstimates).where(and(
+          eq(cardPricingEstimates.ownerId, ctx.collectionOwnerId),
+          eq(cardPricingEstimates.printingId, printing.id),
+          eq(cardPricingEstimates.condition, input.condition),
+        )).limit(1)
+      : [];
+    const pricing = await fetchEbayPricing({
+      condition: input.condition,
+      name: input.name,
+      rarity: input.rarity,
+      setCode: input.setCode,
+    });
+    const estimatedPricePence = pricing.estimatedPricePence
+      ?? existingPricing?.estimatedPricePence
+      ?? null;
     return {
       ebaySearchUrl: pricing.ebaySearchUrl,
       estimatedPricePence,
       foundNewEstimate: pricing.estimatedPricePence !== null,
-      identityKey: existing?.id ?? [normalizedName, normalizedRarity, normalizedEditionValue].join("::"),
-      previousEstimatedPricePence: existing?.estimatedPricePence ?? null,
+      identityKey: cardPricingIdentityKey({
+        condition: input.condition,
+        name: input.name,
+        setCode: input.setCode,
+      }),
+      previousEstimatedPricePence: existingPricing?.estimatedPricePence ?? null,
       sampleSize: pricing.sampleSize,
+      usedConditionFallback: pricing.usedConditionFallback,
     };
   }),
 
@@ -540,6 +579,16 @@ export const libraryRouter = router({
       .where(eq(cardTargets.ownerId, ctx.collectionOwnerId))
       .orderBy(asc(cardTargets.name))
   )),
+
+  recordPricingCandidates: authenticatedProcedure.query(async ({ ctx }) => (
+    listRecordPricingCandidates(ctx.collectionOwnerId)
+  )),
+
+  refreshRecordPricing: authenticatedProcedure.input(recordPricingVariantSchema).mutation(async ({ ctx, input }) => {
+    const pricing = await refreshRecordPricingEstimate(ctx.collectionOwnerId, input);
+    if (!pricing) throw new TRPCError({ code: "NOT_FOUND", message: "That Printing and condition are no longer in Records." });
+    return pricing;
+  }),
 
   lastPricingRefresh: authenticatedProcedure.query(async ({ ctx }) => {
     const [state] = await db

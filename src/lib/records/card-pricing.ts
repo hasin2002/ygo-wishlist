@@ -2,13 +2,15 @@ function normalize(value: string) {
   return value.trim().toLocaleLowerCase("en-GB").replace(/\s+/g, " ");
 }
 
-/** One eBay estimate per shared Target identity, never per physical Copy. */
+/** One Records estimate per exact Printing and physical condition. */
 export function cardPricingIdentityKey(card: {
-  edition: string;
+  condition?: string | null;
   name: string;
-  rarity: string;
-  selectedTargetId?: string | null;
+  printingId?: string | null;
+  setCode: string;
 }) {
-  return card.selectedTargetId
-    ?? [normalize(card.name), normalize(card.rarity), normalize(card.edition)].join("::");
+  const condition = normalize(card.condition || "Near Mint");
+  return card.printingId
+    ? `${card.printingId}::${condition}`
+    : [normalize(card.name), normalize(card.setCode), condition].join("::");
 }

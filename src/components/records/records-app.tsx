@@ -47,7 +47,11 @@ import {
   physicalCopyStateLabel,
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
-import { parsePoundsToPence } from "@/components/records/entry-form-ui";
+import {
+  DestructiveToast,
+  parsePoundsToPence,
+  SuccessToast,
+} from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
 import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
@@ -67,6 +71,7 @@ import { cardConditionOptions, isCardCondition } from "@/lib/records/types";
 import type {
   CardAttentionUpdate,
   CardCopy,
+  CardCondition,
   CardPrinting,
   DataSourceResult,
   EbayOfferExposure,
@@ -288,18 +293,27 @@ function RecordImageStack({ previews, type }: { previews: RecordImagePreview[]; 
 
 function RecordRow({
   actions,
+  href,
   record,
   snapshot,
 }: {
   actions?: ReactNode;
+  href?: string;
   record: RecordEntry;
   snapshot: RecordsSnapshot;
 }) {
   const imagePreviews = recordImagePreviewsFor(record, snapshot);
 
   return (
-    <article className={`p-4 ${record.status === "void" ? "bg-zinc-50 opacity-70" : "bg-white"}`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <article className={`group relative p-4 transition-colors ${record.status === "void" ? "bg-zinc-50 opacity-70" : href ? "bg-white hover:bg-rose-50/40" : "bg-white"}`}>
+      {href ? (
+        <Link
+          aria-label={`View cards from ${record.title}`}
+          className="absolute inset-0 z-0 cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8a1f2d]"
+          href={href}
+        />
+      ) : null}
+      <div className={`relative z-10 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between ${href ? "pointer-events-none" : ""}`}>
         <div className="flex min-w-0 gap-3">
           <RecordImageStack previews={imagePreviews} type={record.type} />
           <div className="min-w-0">
@@ -339,74 +353,94 @@ function RecordRow({
               {recordAmount(record)}
             </p>
           </div>
-          {actions}
+          {actions ? <div className={href ? "pointer-events-auto relative z-20" : ""}>{actions}</div> : null}
         </div>
       </div>
     </article>
   );
 }
 
-function recordPricingTargetIds(record: RecordEntry, snapshot: RecordsSnapshot) {
+function recordPricingVariants(record: RecordEntry, snapshot: RecordsSnapshot) {
   const copyById = new Map(snapshot.copies.map((copy) => [copy.id, copy]));
-  const printingById = new Map(snapshot.printings.map((printing) => [printing.id, printing]));
-  const targetIds = new Set<string>();
+  const variants = new Map<string, { condition: CardCondition; printingId: string }>();
   for (const copyId of record.lines.flatMap((line) => line.entityIds)) {
     const copy = copyById.get(copyId);
-    const printing = copy ? printingById.get(copy.printingId) : null;
-    if (printing) targetIds.add(printing.targetId);
+    if (!copy || !isCardCondition(copy.condition)) continue;
+    variants.set(`${copy.printingId}::${copy.condition}`, {
+      condition: copy.condition,
+      printingId: copy.printingId,
+    });
   }
-  return [...targetIds];
+  return [...variants.values()];
 }
 
-function RecordPricingRefreshButton({ record, snapshot }: { record: RecordEntry; snapshot: RecordsSnapshot }) {
-  const targetIds = recordPricingTargetIds(record, snapshot);
-  const refreshPricing = trpc.library.refreshPricing.useMutation();
+type PricingRefreshFeedback = {
+  message: string;
+  tone: "error" | "success";
+};
+
+function RecordPricingRefreshButton({
+  onFeedback,
+  record,
+  snapshot,
+}: {
+  onFeedback: (feedback: PricingRefreshFeedback) => void;
+  record: RecordEntry;
+  snapshot: RecordsSnapshot;
+}) {
+  const variants = recordPricingVariants(record, snapshot);
+  const refreshPricing = trpc.library.refreshRecordPricing.useMutation();
   const collectionChanged = useCollectionChange();
   const [progress, setProgress] = useState<{ completed: number; failed: number; total: number } | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
-  if (!targetIds.length) return null;
+  if (!variants.length) return null;
 
   async function refreshRecordPricing() {
     if (progress && progress.completed < progress.total) return;
-    setMessage(null);
-    setProgress({ completed: 0, failed: 0, total: targetIds.length });
+    setProgress({ completed: 0, failed: 0, total: variants.length });
     let completed = 0;
     let failed = 0;
-    for (let index = 0; index < targetIds.length; index += 2) {
+    for (let index = 0; index < variants.length; index += 2) {
       const results = await Promise.allSettled(
-        targetIds.slice(index, index + 2).map((id) => refreshPricing.mutateAsync({ id })),
+        variants.slice(index, index + 2).map((variant) => refreshPricing.mutateAsync(variant)),
       );
       completed += results.length;
       failed += results.filter((result) => result.status === "rejected").length;
-      setProgress({ completed, failed, total: targetIds.length });
+      setProgress({ completed, failed, total: variants.length });
     }
     try {
       await collectionChanged("target");
     } catch {
-      setMessage("Estimates were checked, but another open screen may need a manual refresh.");
+      onFeedback({
+        message: "Estimates were checked, but another open screen may need a manual refresh.",
+        tone: "error",
+      });
       return;
     }
-    setMessage(failed
-      ? `${targetIds.length - failed} estimate${targetIds.length - failed === 1 ? "" : "s"} refreshed; ${failed} failed.`
-      : `${targetIds.length} card estimate${targetIds.length === 1 ? "" : "s"} refreshed.`);
+    onFeedback(failed
+      ? {
+          message: `${variants.length - failed} estimate${variants.length - failed === 1 ? "" : "s"} refreshed; ${failed} failed. Try the refresh again.`,
+          tone: "error",
+        }
+      : {
+          message: `${variants.length} Printing and condition estimate${variants.length === 1 ? "" : "s"} refreshed.`,
+          tone: "success",
+        });
   }
 
   const running = progress !== null && progress.completed < progress.total;
   return (
-    <div className="grid justify-items-end gap-1">
-      <button
-        aria-label={`Refresh UK eBay estimates for ${record.title}`}
-        className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
-        disabled={running}
-        onClick={() => void refreshRecordPricing()}
-        type="button"
-      >
-        <RefreshCcw aria-hidden="true" className={`size-3.5 ${running ? "animate-spin motion-reduce:animate-none" : ""}`} />
-        {running ? `${progress.completed}/${progress.total}` : `Refresh estimates (${targetIds.length})`}
-      </button>
-      {message ? <span className="max-w-64 text-right text-xs font-semibold text-zinc-500" role="status">{message}</span> : null}
-    </div>
+    <button
+      aria-label={`Refresh UK eBay estimates for ${record.title}`}
+      className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
+      disabled={running}
+      onClick={() => void refreshRecordPricing()}
+      type="button"
+    >
+      <RefreshCcw aria-hidden="true" className={`size-3.5 ${running ? "animate-spin motion-reduce:animate-none" : ""}`} />
+      Refresh estimates ({variants.length})
+      {running ? <span className="sr-only">{progress.completed} of {progress.total} estimates checked.</span> : null}
+    </button>
   );
 }
 
@@ -1185,10 +1219,12 @@ function HistoryView() {
   const [includeVoid, setIncludeVoid] = useState(true);
   const [page, setPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
+  const [pricingFeedback, setPricingFeedback] = useState<PricingRefreshFeedback | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [statusRecordId, setStatusRecordId] = useState<string | null>(null);
   const statusButtonRef = useRef<HTMLButtonElement>(null);
   const handledReviewId = useRef<string | null>(null);
+  const dismissPricingFeedback = useCallback(() => setPricingFeedback(null), []);
   const requestedReviewValue = searchParams.get("record");
   const requestedReviewIntent = parseSaleReviewIntent(requestedReviewValue);
   const requestedReviewId = requestedReviewIntent?.recordId ?? null;
@@ -1303,7 +1339,7 @@ function HistoryView() {
           <RecordRow
             actions={
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {source.mode === "live" ? <RecordPricingRefreshButton record={record} snapshot={historySnapshot} /> : null}
+                {source.mode === "live" ? <RecordPricingRefreshButton onFeedback={setPricingFeedback} record={record} snapshot={historySnapshot} /> : null}
                 <Link aria-label={`Edit ${record.title}`} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={recordEditHref(record)}><Pencil className="size-3.5" /> Edit</Link>
                 <button
                   className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
@@ -1319,6 +1355,9 @@ function HistoryView() {
               </div>
             }
             key={record.id}
+            href={record.type === "purchase" || record.type === "pack-opening"
+              ? `/viewdbentries?record=${encodeURIComponent(record.id)}`
+              : undefined}
             record={record}
             snapshot={historySnapshot}
           />
@@ -1337,6 +1376,8 @@ function HistoryView() {
     {editingRecord?.type === "sale" && saleEditorSnapshotQuery.isPending ? <p className="fixed bottom-4 right-4 z-[80] rounded-md bg-zinc-950 px-4 py-3 text-sm font-bold text-white shadow-xl" role="status">Preparing the Sale editor…</p> : null}
     {editingRecord?.type === "sale" && saleEditorSnapshotQuery.isError ? <div className="mt-4"><DataLoadError message={saleEditorSnapshotQuery.error.message} onRetry={() => saleEditorSnapshotQuery.refetch()} title="Sale editor data could not be loaded" /></div> : null}
     {statusRecord ? <RecordStatusConfirmationDialog onClose={() => setStatusRecordId(null)} onSuccess={(statusMessage) => { setStatusRecordId(null); setMessage(statusMessage); }} record={statusRecord} source={source} triggerRef={statusButtonRef} /> : null}
+    <SuccessToast message={pricingFeedback?.tone === "success" ? pricingFeedback.message : null} onDismiss={dismissPricingFeedback} title="Pricing refreshed" />
+    <DestructiveToast message={pricingFeedback?.tone === "error" ? pricingFeedback.message : null} onDismiss={dismissPricingFeedback} title="Pricing refresh incomplete" />
     </>
   );
 }
