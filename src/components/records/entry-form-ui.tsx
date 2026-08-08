@@ -129,6 +129,52 @@ export function DestructiveToast({
   );
 }
 
+export function SuccessToast({
+  message,
+  onDismiss,
+  title = "Done",
+}: {
+  message: string | null;
+  onDismiss: () => void;
+  title?: string;
+}) {
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+
+    const timeout = window.setTimeout(onDismiss, 5000);
+    return () => window.clearTimeout(timeout);
+  }, [message, onDismiss]);
+
+  if (!message || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      aria-live="polite"
+      className="fixed inset-x-4 top-[max(1rem,env(safe-area-inset-top))] z-[100] mx-auto flex max-w-md items-start gap-3 rounded-lg border border-emerald-300 bg-emerald-700 px-4 py-3 text-sm text-white shadow-xl sm:inset-x-auto sm:right-4 sm:mx-0"
+      role="status"
+    >
+      <Check className="mt-0.5 size-5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <strong className="block font-black">{title}</strong>
+        <p className="mt-0.5 font-medium leading-5">{message}</p>
+      </div>
+      <button
+        aria-label="Dismiss success message"
+        className="grid size-11 shrink-0 place-items-center rounded-md text-white transition hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white"
+        onClick={onDismiss}
+        type="button"
+      >
+        <X className="size-4" />
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
 export function WizardProgress({ labels, step }: { labels: string[]; step: number }) {
   return (
     <nav aria-label="Form progress" className="rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">

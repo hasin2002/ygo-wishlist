@@ -7,6 +7,7 @@ import {
   bulkLots,
   cardCopies,
   cardCopyImages,
+  cardPricingEstimates,
   cardPrintings,
   cardTargets,
   ebayListings,
@@ -174,6 +175,8 @@ const cardInputSchema = z.object({
   pricing: z.object({
     estimatedPricePence: z.number().int().nonnegative().nullable(),
     ebaySearchUrl: z.string().url(),
+    sampleSize: z.number().int().nonnegative().optional(),
+    usedConditionFallback: z.boolean().optional(),
   }).optional(),
 });
 const productInputSchema = cardInputSchema.omit({ condition: true, id: true, quantity: true }).extend({
@@ -526,14 +529,6 @@ async function findOrCreatePrinting(
   const normalizedName = normalize(input.name);
   const normalizedRarity = normalize(input.rarity);
   const normalizedEditionValue = normalizeEdition(input.edition);
-  const pricingValues = input.pricing
-    ? {
-        ebaySearchUrl: input.pricing.ebaySearchUrl,
-        ...(input.pricing.estimatedPricePence === null
-          ? {}
-          : { estimatedPricePence: input.pricing.estimatedPricePence }),
-      }
-    : {};
   let target = input.selectedTargetId
     ? (await tx.select().from(cardTargets).where(and(
         eq(cardTargets.id, input.selectedTargetId),
@@ -571,7 +566,6 @@ async function findOrCreatePrinting(
       desiredQuantity: 0,
       imageUrl: input.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl,
-      ...pricingValues,
       createdAt: now,
       updatedAt: now,
     }).returning();
@@ -599,7 +593,6 @@ async function findOrCreatePrinting(
       normalizedEdition: normalizedEditionValue,
       imageUrl: input.imageUrl || target.imageUrl,
       tcgplayerUrl: input.tcgplayerUrl || target.tcgplayerUrl,
-      ...pricingValues,
       updatedAt: now,
     }).where(and(
       eq(cardTargets.id, target.id),
@@ -609,7 +602,6 @@ async function findOrCreatePrinting(
     const updates = {
       imageUrl: target.imageUrl || input.imageUrl,
       tcgplayerUrl: target.tcgplayerUrl || input.tcgplayerUrl,
-      ...pricingValues,
       updatedAt: now,
     };
     [target] = await tx.update(cardTargets).set(updates).where(and(
@@ -657,6 +649,48 @@ async function findOrCreatePrinting(
       }
       [printing] = survivors;
     }
+  }
+
+  if (input.pricing) {
+    const [existingPricing] = await tx
+      .select({ estimatedPricePence: cardPricingEstimates.estimatedPricePence })
+      .from(cardPricingEstimates)
+      .where(and(
+        eq(cardPricingEstimates.ownerId, ownerId),
+        eq(cardPricingEstimates.printingId, printing.id),
+        eq(cardPricingEstimates.condition, input.condition),
+      ))
+      .limit(1);
+    const estimatedPricePence = input.pricing.estimatedPricePence
+      ?? existingPricing?.estimatedPricePence
+      ?? null;
+    await tx.insert(cardPricingEstimates).values({
+      id: id("pricing"),
+      ownerId,
+      printingId: printing.id,
+      condition: input.condition,
+      estimatedPricePence,
+      ebaySearchUrl: input.pricing.ebaySearchUrl,
+      sampleSize: input.pricing.sampleSize ?? 0,
+      usedConditionFallback: input.pricing.usedConditionFallback ?? false,
+      refreshedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [
+        cardPricingEstimates.ownerId,
+        cardPricingEstimates.printingId,
+        cardPricingEstimates.condition,
+      ],
+      set: {
+        estimatedPricePence,
+        ebaySearchUrl: input.pricing.ebaySearchUrl,
+        sampleSize: input.pricing.sampleSize ?? 0,
+        usedConditionFallback: input.pricing.usedConditionFallback ?? false,
+        refreshedAt: now,
+        updatedAt: now,
+      },
+    });
   }
 
   return { printing, target };
@@ -750,6 +784,12 @@ export async function loadRecordsSnapshot(
       ? await db.select().from(cardTargets).where(and(eq(cardTargets.ownerId, ownerId), inArray(cardTargets.id, targetIds))).orderBy(asc(cardTargets.name))
       : []
     : includeCardCatalog ? await db.select().from(cardTargets).where(eq(cardTargets.ownerId, ownerId)).orderBy(asc(cardTargets.name)) : [];
+  const pricingEstimates = printingIds.length
+    ? await db.select().from(cardPricingEstimates).where(and(
+        eq(cardPricingEstimates.ownerId, ownerId),
+        inArray(cardPricingEstimates.printingId, printingIds),
+      ))
+    : [];
 
   const entityIdsByLine = new Map<string, string[]>();
   const addEntity = (lineId: string | null, entityId: string) => {
@@ -981,6 +1021,15 @@ export async function loadRecordsSnapshot(
       setCode: printing.setCode,
       tcgplayerUrl: printing.tcgplayerUrl,
       imageUrl: printing.imageUrl,
+    })),
+    pricingEstimates: pricingEstimates.map((pricing) => ({
+      printingId: pricing.printingId,
+      condition: pricing.condition,
+      estimatedPricePence: pricing.estimatedPricePence,
+      ebaySearchUrl: pricing.ebaySearchUrl,
+      sampleSize: pricing.sampleSize,
+      usedConditionFallback: pricing.usedConditionFallback,
+      refreshedAt: pricing.refreshedAt.toISOString(),
     })),
     copies: copies.map((copy) => ({
       id: copy.id,

@@ -76,6 +76,16 @@ export type CardPrinting = {
   imageUrl: string | null;
 };
 
+export type CardPricingEstimate = {
+  printingId: string;
+  condition: CardCondition;
+  estimatedPricePence: number | null;
+  ebaySearchUrl: string;
+  sampleSize: number;
+  usedConditionFallback: boolean;
+  refreshedAt: string;
+};
+
 export type CardCopy = {
   id: string;
   printingId: string;
@@ -244,6 +254,7 @@ export type RecordsSnapshot = {
   records: RecordEntry[];
   targets: WishlistTarget[];
   printings: CardPrinting[];
+  pricingEstimates?: CardPricingEstimate[];
   copies: CardCopy[];
   copyEbayExposures: CopyEbayExposureState[];
   sealedUnits: SealedUnit[];
@@ -276,6 +287,8 @@ export type ProductIdentityInput = {
   pricing?: {
     estimatedPricePence: number | null;
     ebaySearchUrl: string;
+    sampleSize?: number;
+    usedConditionFallback?: boolean;
   };
 };
 

@@ -1831,6 +1831,7 @@ export function WishlistApp() {
     staleTime: 30_000,
   });
   const refreshPricing = trpc.library.refreshPricing.useMutation();
+  const refreshRecordPricing = trpc.library.refreshRecordPricing.useMutation();
   const recordPricingRefresh = trpc.library.recordPricingRefresh.useMutation({
     onSuccess: () => {
       void utils.library.lastPricingRefresh.invalidate();
@@ -1904,7 +1905,14 @@ export function WishlistApp() {
     if (pricingRun?.running) return;
     setPricingError(null);
     try {
-      const candidates = await utils.library.pricingCandidates.fetch();
+      const [targetCandidates, recordCandidates] = await Promise.all([
+        utils.library.pricingCandidates.fetch(),
+        utils.library.recordPricingCandidates.fetch(),
+      ]);
+      const candidates = [
+        ...targetCandidates.map((candidate) => ({ kind: "target" as const, ...candidate })),
+        ...recordCandidates.map((candidate) => ({ kind: "record" as const, ...candidate })),
+      ];
       const initial: PricingRun = {
         completed: 0,
         estimated: 0,
@@ -1924,7 +1932,12 @@ export function WishlistApp() {
       for (let index = 0; index < candidates.length; index += 2) {
         const batch = await Promise.allSettled(
           candidates.slice(index, index + 2).map((candidate) => (
-            refreshPricing.mutateAsync({ id: candidate.id })
+            candidate.kind === "target"
+              ? refreshPricing.mutateAsync({ id: candidate.id })
+              : refreshRecordPricing.mutateAsync({
+                  condition: candidate.condition,
+                  printingId: candidate.printingId,
+                })
           )),
         );
         for (const result of batch) {
@@ -1967,8 +1980,11 @@ export function WishlistApp() {
     if (pricingRun?.running) return;
     setPricingCandidateCount(null);
     setPricingRefreshDialogOpen(true);
-    void utils.library.pricingCandidates.fetch()
-      .then((candidates) => setPricingCandidateCount(candidates.length))
+    void Promise.all([
+      utils.library.pricingCandidates.fetch(),
+      utils.library.recordPricingCandidates.fetch(),
+    ])
+      .then(([targets, records]) => setPricingCandidateCount(targets.length + records.length))
       .catch(() => setPricingCandidateCount(-1));
   }
 

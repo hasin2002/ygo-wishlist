@@ -260,6 +260,8 @@ function cardInput(value: CardContentsDraft): CardContentsInput {
     ? {
         estimatedPricePence: value.pricing.estimatedPricePence,
         ebaySearchUrl: value.pricing.ebaySearchUrl,
+        sampleSize: value.pricing.sampleSize,
+        usedConditionFallback: value.pricing.usedConditionFallback,
       }
     : undefined;
   return {

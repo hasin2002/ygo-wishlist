@@ -35,6 +35,7 @@ export type CardPricingDraft = {
   message: string;
   sampleSize: number;
   status: "checking" | "estimated" | "no-match" | "failed";
+  usedConditionFallback: boolean;
 };
 
 export function blankCardContents(name = ""): CardContentsDraft {
