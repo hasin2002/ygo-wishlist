@@ -71,6 +71,13 @@
       "when": 1786124383382,
       "tag": "0009_purchase_submission_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786244072830,
+      "tag": "0010_create_card_pricing_estimates",
+      "breakpoints": true
     }
   ]
 }

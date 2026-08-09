@@ -215,6 +215,11 @@ integration is disabled for `main` in `vercel.json` so it cannot deploy a new
 revision before its database migration. Preview branches remain on Vercel's
 normal Git deployment flow.
 
+The release also runs `npm run db:migrate:check`. This generates against a
+temporary copy of the committed Drizzle history and blocks deployment when
+`src/db/schema.ts` contains a database change without its migration and
+metadata. It never connects to or changes a database.
+
 The workflow's first merge is the transition to this release process: it does
 not introduce a new application schema dependency, and the committed
 `vercel.json` disables later automatic Git deployments from `main`. Before that

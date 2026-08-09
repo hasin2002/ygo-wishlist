@@ -111,6 +111,7 @@ test("exact Printing identities are database-enforced while placeholders remain 
 
 test("Records pricing estimates are isolated by exact Printing and condition", () => {
   const config = getTableConfig(cardPricingEstimates);
+  const migration = fs.readFileSync("drizzle/0010_create_card_pricing_estimates.sql", "utf8");
   const index = config.indexes.find(
     (candidate) => candidate.config.name === "card_pricing_estimates_owner_variant_unique",
   );
@@ -122,6 +123,9 @@ test("Records pricing estimates are isolated by exact Printing and condition", (
   ]);
   assert.ok(config.checks.some((candidate) => candidate.name === "card_pricing_estimates_price_nonnegative"));
   assert.ok(config.checks.some((candidate) => candidate.name === "card_pricing_estimates_sample_nonnegative"));
+  assert.match(migration, /CREATE TABLE "card_pricing_estimates"/);
+  assert.match(migration, /card_pricing_estimates_owner_variant_unique/);
+  assert.doesNotMatch(migration, /DROP\s+(?:TABLE|COLUMN)|ALTER TABLE "card_printings"/i);
 });
 
 test("one eBay seller and complete encrypted Trading credentials are database-enforced", () => {
