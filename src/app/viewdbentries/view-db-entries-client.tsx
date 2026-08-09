@@ -90,6 +90,10 @@ function formatDate(value: string) {
   }).format(new Date(`${value}T12:00:00`));
 }
 
+function setCodePrefix(setCode: string) {
+  return setCode.split("-", 1)[0]?.trim() || setCode;
+}
+
 function uniqueOffers(offers: EbayOfferExposure[]) {
   return [...new Map(offers.map((offer) => [offer.listingId, offer])).values()];
 }
@@ -214,6 +218,7 @@ function RecordCardFiltersModal({
   conditionFilter,
   editionFilter,
   listingFilter,
+  listingOpportunityCount,
   maxPrice,
   minPrice,
   onClear,
@@ -238,6 +243,7 @@ function RecordCardFiltersModal({
   conditionFilter: string;
   editionFilter: string;
   listingFilter: ListingFilter;
+  listingOpportunityCount: number;
   maxPrice: string;
   minPrice: string;
   onClear: () => void;
@@ -279,6 +285,19 @@ function RecordCardFiltersModal({
         </header>
 
         <div className="grid gap-4 overflow-y-auto bg-zinc-50/60 p-4 sm:grid-cols-2 sm:p-5">
+          <button
+            aria-pressed={listingFilter === "opportunity"}
+            className={`flex min-h-20 items-center gap-3 rounded-lg border p-3 text-left transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 sm:col-span-2 ${listingFilter === "opportunity" ? "border-[#8a1f2d] bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-800 hover:border-[#8a1f2d]/60 hover:bg-rose-50/50"}`}
+            onClick={() => setListingFilter(listingFilter === "opportunity" ? "all" : "opportunity")}
+            type="button"
+          >
+            <span className={`grid size-11 shrink-0 place-items-center rounded-md ${listingFilter === "opportunity" ? "bg-[#8a1f2d] text-white" : "bg-rose-50 text-[#8a1f2d]"}`}><CircleDollarSign aria-hidden className="size-5" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-black">Suggested to list</span>
+              <span className="mt-0.5 block text-xs font-semibold leading-5 text-zinc-600">Show listable cards valued over £5 without a current listing.</span>
+            </span>
+            <span className="grid min-w-9 place-items-center rounded-full bg-zinc-950 px-2 py-1 text-xs font-black tabular-nums text-white" aria-label={`${listingOpportunityCount} suggested to list`}>{listingOpportunityCount}</span>
+          </button>
           <FilterSelect label="Set name" onChange={setSetNameFilter} options={options.setNames} value={setNameFilter} />
           <FilterSelect label="Set code" onChange={setSetCodeFilter} options={options.setCodes} value={setCodeFilter} />
           <FilterSelect label="Rarity" onChange={setRarityFilter} options={options.rarities} value={rarityFilter} />
@@ -360,7 +379,7 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
     conditions: [...new Set(entries.map((entry) => entry.condition))].sort(),
     editions: [...new Set(entries.map((entry) => entry.edition))].sort(),
     rarities: [...new Set(entries.map((entry) => entry.rarity))].sort(),
-    setCodes: [...new Set(entries.map((entry) => entry.setCode))].sort(),
+    setCodes: [...new Set(entries.map((entry) => setCodePrefix(entry.setCode)))].sort(),
     setNames: [...new Set(entries.map((entry) => entry.setName))].sort(),
   }), [entries]);
 
@@ -381,7 +400,7 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
         ...entry.copyIds,
       ].join(" ").toLocaleLowerCase("en-GB").includes(normalizedQuery)) return false;
       if (setNameFilter && entry.setName !== setNameFilter) return false;
-      if (setCodeFilter && entry.setCode !== setCodeFilter) return false;
+      if (setCodeFilter && setCodePrefix(entry.setCode) !== setCodeFilter) return false;
       if (rarityFilter && entry.rarity !== rarityFilter) return false;
       if (editionFilter && entry.edition !== editionFilter) return false;
       if (conditionFilter && entry.condition !== conditionFilter) return false;
@@ -398,24 +417,27 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
     });
   }, [conditionFilter, editionFilter, entries, listingFilter, maxPrice, minPrice, rarityFilter, search, setCodeFilter, setNameFilter, targetFilter]);
 
-  const activeFilters = [
-    search && `Search: ${search}`,
-    setNameFilter && `Set: ${setNameFilter}`,
-    setCodeFilter && `Code: ${setCodeFilter}`,
-    rarityFilter && `Rarity: ${rarityFilter}`,
-    editionFilter && `Edition: ${editionFilter}`,
-    conditionFilter && `Condition: ${conditionFilter}`,
-    targetFilter !== "all" && (targetFilter === "with-target" ? "With target" : "Without target"),
-    listingFilter !== "all" && ({
+  const activeFilters: { id: string; label: string; onRemove: () => void }[] = [];
+  if (search) activeFilters.push({ id: "search", label: `Search: ${search}`, onRemove: () => setSearch("") });
+  if (setNameFilter) activeFilters.push({ id: "set-name", label: `Set: ${setNameFilter}`, onRemove: () => setSetNameFilter("") });
+  if (setCodeFilter) activeFilters.push({ id: "set-code", label: `Code: ${setCodeFilter}`, onRemove: () => setSetCodeFilter("") });
+  if (rarityFilter) activeFilters.push({ id: "rarity", label: `Rarity: ${rarityFilter}`, onRemove: () => setRarityFilter("") });
+  if (editionFilter) activeFilters.push({ id: "edition", label: `Edition: ${editionFilter}`, onRemove: () => setEditionFilter("") });
+  if (conditionFilter) activeFilters.push({ id: "condition", label: `Condition: ${conditionFilter}`, onRemove: () => setConditionFilter("") });
+  if (targetFilter !== "all") activeFilters.push({ id: "target", label: targetFilter === "with-target" ? "With target" : "Without target", onRemove: () => setTargetFilter("all") });
+  if (listingFilter !== "all") activeFilters.push({
+    id: "listing",
+    label: ({
       active: "Active listing",
       "no-active": "No active listing",
       associated: "Associated listing",
       unassociated: "Never listed",
       opportunity: "Suggested to list (>£5)",
     } satisfies Record<Exclude<ListingFilter, "all">, string>)[listingFilter],
-    minPrice && `Min £${minPrice}`,
-    maxPrice && `Max £${maxPrice}`,
-  ].filter(Boolean) as string[];
+    onRemove: () => setListingFilter("all"),
+  });
+  if (minPrice) activeFilters.push({ id: "min-price", label: `Min £${minPrice}`, onRemove: () => setMinPrice("") });
+  if (maxPrice) activeFilters.push({ id: "max-price", label: `Max £${maxPrice}`, onRemove: () => setMaxPrice("") });
 
   function clearFilters() {
     setSearch("");
@@ -446,6 +468,7 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
   const totalCopies = entries.reduce((sum, entry) => sum + entry.quantity, 0);
   const knownValuePence = entries.reduce((sum, entry) => sum + (entry.estimatedPricePence ?? 0) * entry.quantity, 0);
   const knownCopies = entries.reduce((sum, entry) => sum + (entry.estimatedPricePence === null ? 0 : entry.quantity), 0);
+  const listingOpportunityCount = entries.filter((entry) => entry.listingOpportunity).length;
 
   return (
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
@@ -483,10 +506,26 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
             </label>
             <div className="flex w-full items-center gap-2 md:w-auto">
               <button aria-expanded={filterModalOpen} aria-haspopup="dialog" className={`inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border px-3 text-sm font-bold transition focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2 md:flex-none ${activeFilters.length ? "border-[#8a1f2d]/30 bg-rose-50 text-[#8a1f2d]" : "border-zinc-300 bg-white text-zinc-700 hover:border-[#8a1f2d] hover:text-[#8a1f2d]"}`} onClick={() => setFilterModalOpen(true)} ref={filterButtonRef} type="button"><SlidersHorizontal aria-hidden className="size-4" /> Filters{activeFilters.length ? <span className="rounded bg-[#8a1f2d] px-1.5 py-0.5 text-xs font-black text-white">{activeFilters.length}</span> : null}</button>
-              {activeFilters.length ? <button className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-bold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950" onClick={clearFilters} type="button"><X aria-hidden className="size-4" /> Clear</button> : null}
             </div>
           </div>
-          {activeFilters.length ? <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 px-3 py-2"><Filter aria-hidden className="size-4 text-zinc-400" />{activeFilters.map((filter) => <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-[#8a1f2d]" key={filter}>{filter}</span>)}</div> : null}
+          {activeFilters.length ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 px-3 py-2">
+              <Filter aria-hidden className="size-4 shrink-0 text-zinc-400" />
+              {activeFilters.map((filter) => (
+                <button
+                  aria-label={`Remove ${filter.label} filter`}
+                  className="inline-flex min-h-11 max-w-full touch-manipulation items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 text-left text-xs font-bold text-[#8a1f2d] transition hover:border-[#8a1f2d]/40 hover:bg-rose-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
+                  key={filter.id}
+                  onClick={filter.onRemove}
+                  type="button"
+                >
+                  <span className="truncate">{filter.label}</span>
+                  <X aria-hidden className="size-3.5 shrink-0" />
+                </button>
+              ))}
+              <button className="ml-auto inline-flex min-h-11 touch-manipulation items-center justify-center rounded-md px-3 text-xs font-bold text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2" onClick={clearFilters} type="button">Clear all</button>
+            </div>
+          ) : null}
         </section>
 
         <section className="overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm" aria-labelledby="results-heading">
@@ -498,7 +537,7 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
             <div className="divide-y divide-zinc-200">{filteredEntries.map((entry) => <EntryCard entry={entry} key={`${entry.printingId}:${entry.condition}`} />)}</div>
           )}
         </section>
-        {filterModalOpen ? <RecordCardFiltersModal activeFilterCount={activeFilters.length} conditionFilter={conditionFilter} editionFilter={editionFilter} listingFilter={listingFilter} maxPrice={maxPrice} minPrice={minPrice} onClear={clearFilters} onClose={() => setFilterModalOpen(false)} options={options} rarityFilter={rarityFilter} setCodeFilter={setCodeFilter} setConditionFilter={setConditionFilter} setEditionFilter={setEditionFilter} setListingFilter={setListingFilter} setMaxPrice={setMaxPrice} setMinPrice={setMinPrice} setNameFilter={setNameFilter} setRarityFilter={setRarityFilter} setSetCodeFilter={setSetCodeFilter} setSetNameFilter={setSetNameFilter} setTargetFilter={setTargetFilter} targetFilter={targetFilter} triggerRef={filterButtonRef} /> : null}
+        {filterModalOpen ? <RecordCardFiltersModal activeFilterCount={activeFilters.length} conditionFilter={conditionFilter} editionFilter={editionFilter} listingFilter={listingFilter} listingOpportunityCount={listingOpportunityCount} maxPrice={maxPrice} minPrice={minPrice} onClear={clearFilters} onClose={() => setFilterModalOpen(false)} options={options} rarityFilter={rarityFilter} setCodeFilter={setCodeFilter} setConditionFilter={setConditionFilter} setEditionFilter={setEditionFilter} setListingFilter={setListingFilter} setMaxPrice={setMaxPrice} setMinPrice={setMinPrice} setNameFilter={setNameFilter} setRarityFilter={setRarityFilter} setSetCodeFilter={setSetCodeFilter} setSetNameFilter={setSetNameFilter} setTargetFilter={setTargetFilter} targetFilter={targetFilter} triggerRef={filterButtonRef} /> : null}
       </div>
     </main>
   );
