@@ -4,6 +4,7 @@ import test from "node:test";
 import { cardPricingIdentityKey } from "../src/lib/records/card-pricing.ts";
 import {
   ebayPricingSearchTerms,
+  ebayTitleMatchesRarity,
   ebayTitleMatchesSetCode,
 } from "../src/lib/records/ebay-pricing-search.ts";
 
@@ -24,12 +25,18 @@ test("Records pricing separates exact Printings and conditions", () => {
 });
 
 test("eBay queries retain set code while listings may omit it", () => {
-  const card = { condition: "Near Mint", name: "Blue-Eyes White Dragon", setCode: "LOB-001" };
-  assert.equal(ebayPricingSearchTerms(card, true), "Blue-Eyes White Dragon LOB-001 Near Mint english");
-  assert.equal(ebayPricingSearchTerms(card, false), "Blue-Eyes White Dragon LOB-001 english");
+  const card = { condition: "Near Mint", name: "Blue-Eyes White Dragon", rarity: "Ultra Rare", setCode: "LOB-001" };
+  assert.equal(ebayPricingSearchTerms(card, true), "Blue-Eyes White Dragon LOB-001 Ultra Rare Near Mint english");
+  assert.equal(ebayPricingSearchTerms(card, false), "Blue-Eyes White Dragon LOB-001 Ultra Rare english");
   assert.equal(ebayTitleMatchesSetCode("Blue-Eyes White Dragon LOB-001 Near Mint", "LOB-001"), true);
   assert.equal(ebayTitleMatchesSetCode("Blue-Eyes White Dragon Near Mint Yu-Gi-Oh!", "LOB-001"), true);
   assert.equal(ebayTitleMatchesSetCode("Blue-Eyes White Dragon SDK-001 Near Mint", "LOB-001"), false);
+  assert.equal(ebayTitleMatchesRarity("Blue-Eyes White Dragon LOB-001 Ultra Rare", "Ultra Rare"), true);
+  assert.equal(ebayTitleMatchesRarity("Blue-Eyes White Dragon LOB-001 Secret Rare", "Ultra Rare"), false);
+  assert.equal(ebayTitleMatchesRarity("Dark Magician Girl YGLD-ENA04 Near Mint", "Common"), true);
+  assert.equal(ebayTitleMatchesRarity("Dark Magician Girl YGLD-ENA04 Secret Rare", "Common"), false);
+  assert.equal(ebayTitleMatchesRarity("Dark Magician Girl YGLD-ENA04 Common", "Common"), true);
+  assert.equal(ebayTitleMatchesRarity("Dark Magician Girl QCSR", "Quarter Century Secret Rare"), true);
 });
 
 test("entry forms start estimates during card completion and carry results into saves", () => {
@@ -41,6 +48,9 @@ test("entry forms start estimates during card completion and carry results into 
   assert.match(forms, /if \(step === 3 && source\.mode === "live"\)/);
   assert.match(forms, /pricing: completedPricing/);
   assert.match(forms, /cardPricingIdentityKey\(current\.card\) === pricing\.identityKey/);
+  const pricingHook = fs.readFileSync("src/components/records/use-card-pricing.ts", "utf8");
+  assert.match(pricingHook, /pricing\.status === "estimated" \|\| pricing\.status === "no-match"/);
+  assert.doesNotMatch(pricingHook, /card\.pricing\.status !== "failed"/);
   assert.match(records, /const estimatedPricePence = input\.pricing\.estimatedPricePence/);
   assert.match(records, /insert\(cardPricingEstimates\)/);
 });
@@ -100,6 +110,15 @@ test("Record card viewer exposes listing state and an over-£5 unlisted opportun
   assert.match(viewer, /useViewportOverlay<HTMLElement>/);
   assert.match(viewer, /aria-modal="true"/);
   assert.match(viewer, /createPortal\(/);
+  assert.match(viewer, /aria-pressed=\{listingFilter === "opportunity"\}/);
+  assert.match(viewer, /listingOpportunityCount/);
+  assert.match(viewer, /Show listable cards valued over £5 without a current listing\./);
+  assert.match(viewer, /setCode\.split\("-", 1\)/);
+  assert.match(viewer, /setCodePrefix\(entry\.setCode\) !== setCodeFilter/);
+  assert.match(viewer, /aria-label=\{`Remove \$\{filter\.label\} filter`\}/);
+  assert.match(viewer, /onClick=\{filter\.onRemove\}/);
+  assert.match(viewer, />Clear all<\/button>/);
+  assert.doesNotMatch(viewer, /> Clear<\/button>/);
   assert.match(viewer, /function EntryCard\(/);
   assert.doesNotMatch(viewer, /<table/);
   assert.match(viewer, /aria-label=\{`Create listing for \$\{entry\.name\}`\}/);
@@ -119,6 +138,7 @@ test("Records estimates persist by Printing and condition and eBay fallback reta
   assert.match(records, /cardPricingEstimates\.condition/);
   assert.match(ebay, /prices\.length < minimumConditionSampleSize/);
   assert.match(ebay, /ebayPricingSearchTerms\(card, includeCondition\)/);
+  assert.match(ebay, /AbortSignal\.timeout\(ebayRequestTimeoutMs\)/);
   assert.match(ebaySearch, /explicitCodes\.length === 0/);
   assert.match(pricingProvider, /recordPricingCandidates/);
   assert.match(pricingProvider, /refreshRecordPricing\.mutateAsync/);

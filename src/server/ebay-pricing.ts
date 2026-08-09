@@ -3,6 +3,7 @@ import { cards } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import {
   ebayPricingSearchTerms,
+  ebayTitleMatchesRarity,
   ebayTitleMatchesSetCode,
   searchablePricingCardName,
   type EbayPricingSearchCard,
@@ -61,6 +62,7 @@ const retryBaseDelayMs = 300;
 const retryMaxDelayMs = 8_000;
 const maxRetries = 4;
 const minimumConditionSampleSize = 3;
+const ebayRequestTimeoutMs = 8_000;
 
 type EbayPricingCard = EbayPricingSearchCard;
 
@@ -74,6 +76,24 @@ class EbayHttpError extends Error {
 }
 
 let tokenCache: { accessToken: string; expiresAt: number } | null = null;
+
+async function fetchEbayWithTimeout(
+  input: string,
+  init: RequestInit,
+  operation: string,
+) {
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: AbortSignal.timeout(ebayRequestTimeoutMs),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new Error(`${operation} timed out after ${ebayRequestTimeoutMs / 1_000} seconds.`);
+    }
+    throw error;
+  }
+}
 
 function normalizeText(value: string | null | undefined) {
   return String(value ?? "")
@@ -104,45 +124,6 @@ function titleMatchesName(title: string, name: string) {
 
   const matches = tokens.filter((token) => normalizedTitle.includes(token));
   return matches.length / tokens.length >= 0.75;
-}
-
-function titleMatchesRarity(title: string, rarity: string | null) {
-  if (!rarity) {
-    return true;
-  }
-
-  const normalizedTitle = normalizeText(title);
-  const normalizedRarity = normalizeText(rarity);
-
-  if (normalizedRarity === "quarter century secret rare") {
-    return (
-      normalizedTitle.includes("quarter century") ||
-      normalizedTitle.includes("qcsr") ||
-      normalizedTitle.includes("qcr") ||
-      normalizedTitle.includes("25th secret rare")
-    );
-  }
-
-  if (normalizedRarity === "overframe ultra rare") {
-    return (
-      normalizedTitle.includes("overframe ultra rare") ||
-      normalizedTitle.includes("over frame ultra rare")
-    );
-  }
-
-  if (
-    normalizedRarity === "overframe starlight rare" ||
-    normalizedRarity === "overframe startlight rare"
-  ) {
-    return (
-      normalizedTitle.includes("overframe starlight rare") ||
-      normalizedTitle.includes("over frame starlight rare") ||
-      normalizedTitle.includes("overframe startlight rare") ||
-      normalizedTitle.includes("over frame startlight rare")
-    );
-  }
-
-  return normalizedTitle.includes(normalizedRarity);
 }
 
 const conditionAliases: Record<string, RegExp[]> = {
@@ -266,7 +247,7 @@ async function getAccessToken() {
     throw new Error("Missing eBay API credentials.");
   }
 
-  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+  const response = await fetchEbayWithTimeout("https://api.ebay.com/identity/v1/oauth2/token", {
     method: "POST",
     headers: {
       Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString(
@@ -278,7 +259,7 @@ async function getAccessToken() {
       grant_type: "client_credentials",
       scope: "https://api.ebay.com/oauth/api_scope",
     }),
-  });
+  }, "eBay OAuth");
 
   if (!response.ok) {
     throw new Error(`eBay OAuth failed (${response.status}).`);
@@ -306,7 +287,7 @@ async function searchEbay(card: EbayPricingCard, includeCondition: boolean) {
     sort: "price",
     filter: "buyingOptions:{FIXED_PRICE},priceCurrency:GBP",
   });
-  const response = await fetch(
+  const response = await fetchEbayWithTimeout(
     `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`,
     {
       headers: {
@@ -314,6 +295,7 @@ async function searchEbay(card: EbayPricingCard, includeCondition: boolean) {
         "X-EBAY-C-MARKETPLACE-ID": process.env.EBAY_MARKETPLACE_ID || "EBAY_GB",
       },
     },
+    "eBay search",
   );
 
   if (!response.ok) {
@@ -350,9 +332,8 @@ function usablePrices(
     .filter((item) => item.title)
     .filter((item) => !shouldExclude(item.title ?? ""))
     .filter((item) => titleMatchesName(item.title ?? "", card.name))
-    .filter((item) => card.setCode
-      ? ebayTitleMatchesSetCode(item.title ?? "", card.setCode)
-      : titleMatchesRarity(item.title ?? "", card.rarity ?? null))
+    .filter((item) => ebayTitleMatchesSetCode(item.title ?? "", card.setCode))
+    .filter((item) => ebayTitleMatchesRarity(item.title ?? "", card.rarity))
     .filter((item) => !includeCondition || titleMatchesCondition(item.title ?? "", card.condition))
     .map(priceValue)
     .filter((value): value is number => value !== null);
