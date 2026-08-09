@@ -42,6 +42,39 @@ export function selectNumberOnFocus(event: FocusEvent<HTMLInputElement>) {
   event.currentTarget.select();
 }
 
+export function ProgressBar({
+  label,
+  max,
+  value,
+  valueText,
+}: {
+  label: string;
+  max: number;
+  value: number;
+  valueText?: string;
+}) {
+  const boundedMax = Math.max(0, max);
+  const boundedValue = Math.max(0, Math.min(value, boundedMax));
+  const percentage = boundedMax ? (boundedValue / boundedMax) * 100 : 0;
+
+  return (
+    <div
+      aria-label={label}
+      aria-valuemax={boundedMax}
+      aria-valuemin={0}
+      aria-valuenow={boundedValue}
+      aria-valuetext={valueText}
+      className="h-2 overflow-hidden rounded-full bg-zinc-200"
+      role="progressbar"
+    >
+      <div
+        className="h-full bg-[#8a1f2d] transition-[width] duration-200 ease-out"
+        style={{ width: `${percentage}%` }}
+      />
+    </div>
+  );
+}
+
 export function rowId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }

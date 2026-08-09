@@ -48,11 +48,10 @@ import {
 } from "@/components/records/ebay-copy-exposure-presentation";
 import { inventoryEbayListingSummary } from "@/components/records/inventory-ebay-listing-summary-presentation";
 import {
-  DestructiveToast,
   parsePoundsToPence,
-  SuccessToast,
 } from "@/components/records/entry-form-ui";
 import { DataLoadError } from "@/components/data-load-error";
+import { usePricingRefresh } from "@/components/pricing-refresh-provider";
 import { UnavailableAction } from "@/components/unavailable-action";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
@@ -99,7 +98,6 @@ import {
   type InventoryListState,
 } from "@/lib/records/inventory-route-state";
 import { trpc } from "@/trpc/client";
-import { useCollectionChange } from "@/lib/use-collection-change";
 
 export type RecordsView = "overview" | "history" | "inventory";
 
@@ -374,72 +372,30 @@ function recordPricingVariants(record: RecordEntry, snapshot: RecordsSnapshot) {
   return [...variants.values()];
 }
 
-type PricingRefreshFeedback = {
-  message: string;
-  tone: "error" | "success";
-};
-
 function RecordPricingRefreshButton({
-  onFeedback,
+  onRefresh,
   record,
+  running,
   snapshot,
 }: {
-  onFeedback: (feedback: PricingRefreshFeedback) => void;
+  onRefresh: (input: { candidates: ReturnType<typeof recordPricingVariants>; recordId: string }) => void;
   record: RecordEntry;
+  running: boolean;
   snapshot: RecordsSnapshot;
 }) {
   const variants = recordPricingVariants(record, snapshot);
-  const refreshPricing = trpc.library.refreshRecordPricing.useMutation();
-  const collectionChanged = useCollectionChange();
-  const [progress, setProgress] = useState<{ completed: number; failed: number; total: number } | null>(null);
 
   if (!variants.length) return null;
 
-  async function refreshRecordPricing() {
-    if (progress && progress.completed < progress.total) return;
-    setProgress({ completed: 0, failed: 0, total: variants.length });
-    let completed = 0;
-    let failed = 0;
-    for (let index = 0; index < variants.length; index += 2) {
-      const results = await Promise.allSettled(
-        variants.slice(index, index + 2).map((variant) => refreshPricing.mutateAsync(variant)),
-      );
-      completed += results.length;
-      failed += results.filter((result) => result.status === "rejected").length;
-      setProgress({ completed, failed, total: variants.length });
-    }
-    try {
-      await collectionChanged("target");
-    } catch {
-      onFeedback({
-        message: "Estimates were checked, but another open screen may need a manual refresh.",
-        tone: "error",
-      });
-      return;
-    }
-    onFeedback(failed
-      ? {
-          message: `${variants.length - failed} estimate${variants.length - failed === 1 ? "" : "s"} refreshed; ${failed} failed. Try the refresh again.`,
-          tone: "error",
-        }
-      : {
-          message: `${variants.length} Printing and condition estimate${variants.length === 1 ? "" : "s"} refreshed.`,
-          tone: "success",
-        });
-  }
-
-  const running = progress !== null && progress.completed < progress.total;
   return (
     <button
       aria-label={`Refresh UK eBay estimates for ${record.title}`}
-      className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
-      disabled={running}
-      onClick={() => void refreshRecordPricing()}
+      className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d]"
+      onClick={() => onRefresh({ candidates: variants, recordId: record.id })}
       type="button"
     >
       <RefreshCcw aria-hidden="true" className={`size-3.5 ${running ? "animate-spin motion-reduce:animate-none" : ""}`} />
       Refresh estimates ({variants.length})
-      {running ? <span className="sr-only">{progress.completed} of {progress.total} estimates checked.</span> : null}
     </button>
   );
 }
@@ -1219,12 +1175,11 @@ function HistoryView() {
   const [includeVoid, setIncludeVoid] = useState(true);
   const [page, setPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
-  const [pricingFeedback, setPricingFeedback] = useState<PricingRefreshFeedback | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [statusRecordId, setStatusRecordId] = useState<string | null>(null);
+  const { activeRun, startRecordRefresh } = usePricingRefresh();
   const statusButtonRef = useRef<HTMLButtonElement>(null);
   const handledReviewId = useRef<string | null>(null);
-  const dismissPricingFeedback = useCallback(() => setPricingFeedback(null), []);
   const requestedReviewValue = searchParams.get("record");
   const requestedReviewIntent = parseSaleReviewIntent(requestedReviewValue);
   const requestedReviewId = requestedReviewIntent?.recordId ?? null;
@@ -1339,7 +1294,14 @@ function HistoryView() {
           <RecordRow
             actions={
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {source.mode === "live" ? <RecordPricingRefreshButton onFeedback={setPricingFeedback} record={record} snapshot={historySnapshot} /> : null}
+                {source.mode === "live" ? (
+                  <RecordPricingRefreshButton
+                    onRefresh={(input) => void startRecordRefresh(input)}
+                    record={record}
+                    running={Boolean(activeRun?.running && activeRun.source.kind === "record" && activeRun.source.recordId === record.id)}
+                    snapshot={historySnapshot}
+                  />
+                ) : null}
                 <Link aria-label={`Edit ${record.title}`} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2" href={recordEditHref(record)}><Pencil className="size-3.5" /> Edit</Link>
                 <button
                   className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-60"
@@ -1376,8 +1338,6 @@ function HistoryView() {
     {editingRecord?.type === "sale" && saleEditorSnapshotQuery.isPending ? <p className="fixed bottom-4 right-4 z-[80] rounded-md bg-zinc-950 px-4 py-3 text-sm font-bold text-white shadow-xl" role="status">Preparing the Sale editor…</p> : null}
     {editingRecord?.type === "sale" && saleEditorSnapshotQuery.isError ? <div className="mt-4"><DataLoadError message={saleEditorSnapshotQuery.error.message} onRetry={() => saleEditorSnapshotQuery.refetch()} title="Sale editor data could not be loaded" /></div> : null}
     {statusRecord ? <RecordStatusConfirmationDialog onClose={() => setStatusRecordId(null)} onSuccess={(statusMessage) => { setStatusRecordId(null); setMessage(statusMessage); }} record={statusRecord} source={source} triggerRef={statusButtonRef} /> : null}
-    <SuccessToast message={pricingFeedback?.tone === "success" ? pricingFeedback.message : null} onDismiss={dismissPricingFeedback} title="Pricing refreshed" />
-    <DestructiveToast message={pricingFeedback?.tone === "error" ? pricingFeedback.message : null} onDismiss={dismissPricingFeedback} title="Pricing refresh incomplete" />
     </>
   );
 }

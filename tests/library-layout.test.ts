@@ -6,6 +6,18 @@ const source = readFileSync(
   new URL("../src/components/wishlist-app.tsx", import.meta.url),
   "utf8",
 );
+const priceRefreshProgressSource = readFileSync(
+  new URL("../src/components/price-refresh-progress.tsx", import.meta.url),
+  "utf8",
+);
+const pricingRefreshProviderSource = readFileSync(
+  new URL("../src/components/pricing-refresh-provider.tsx", import.meta.url),
+  "utf8",
+);
+const providersSource = readFileSync(
+  new URL("../src/app/providers.tsx", import.meta.url),
+  "utf8",
+);
 const appHeaderSource = readFileSync(
   new URL("../src/components/app-header.tsx", import.meta.url),
   "utf8",
@@ -113,6 +125,23 @@ test("Library icon controls share the same accessible target size", () => {
   assert.match(rarityGuideSource, /aria-label="View rarity abbreviation guide"[\s\S]*?size-11/);
   assert.match(rarityGuideSource, /aria-label="Close rarity guide"[\s\S]*?size-11/);
   assert.match(source, /aria-label="Refresh current UK eBay estimates for all cards"[\s\S]*?size-11/);
+});
+
+test("Library price refresh reports progress and its four-card calculation batch", () => {
+  assert.match(pricingRefreshProviderSource, /export const pricingRefreshBatchSize = 4/);
+  assert.match(source, /Prices are calculated for \{pricingRefreshBatchSize\} cards at a time\./);
+  assert.match(priceRefreshProgressSource, /\{completed\} of \{total\} price checks complete/);
+  assert.match(priceRefreshProgressSource, /\{refreshed\} prices refreshed/);
+  assert.match(priceRefreshProgressSource, /const \[minimized, setMinimized\] = useState\(true\)/);
+  assert.match(priceRefreshProgressSource, /aria-label="Expand price refresh progress"/);
+  assert.match(pricingRefreshProviderSource, /<PriceRefreshProgress/);
+  assert.equal(pricingRefreshProviderSource.match(/<PriceRefreshProgress/g)?.length, 1);
+  assert.doesNotMatch(source, /<PriceRefreshProgress/);
+  assert.match(pricingRefreshProviderSource, /slice\(index, index \+ pricingRefreshBatchSize\)/);
+  assert.match(providersSource, /<PricingRefreshProvider>[\s\S]*?<AppShell>\{children\}<\/AppShell>[\s\S]*?<\/PricingRefreshProvider>/);
+  assert.match(source, /usePricingRefresh\(\)/);
+  assert.match(source, /void startLibraryRefresh\(\)/);
+  assert.match(source, /The refresh continues while you navigate between pages/);
 });
 
 test("Add to wishlist is a global Add destination backed by a page form", () => {
