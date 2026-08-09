@@ -3,6 +3,7 @@
 import { TrpcProvider } from "@/trpc/client";
 import { useCollectionChangeListener } from "@/lib/use-collection-change";
 import { AppShell } from "@/components/app-shell";
+import { PricingRefreshProvider } from "@/components/pricing-refresh-provider";
 import {
   createContext,
   useContext,
@@ -34,7 +35,9 @@ export function Providers({
     <TrpcProvider>
       <CollectionChangeListener>
         <InitialAuthContext.Provider value={initialAuth}>
-          <AppShell>{children}</AppShell>
+          <PricingRefreshProvider>
+            <AppShell>{children}</AppShell>
+          </PricingRefreshProvider>
         </InitialAuthContext.Provider>
       </CollectionChangeListener>
     </TrpcProvider>

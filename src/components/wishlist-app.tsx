@@ -34,6 +34,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { DataLoadError } from "@/components/data-load-error";
 import { HolographicCardCanvas } from "@/components/holographic-card-canvas";
+import {
+  pricingRefreshBatchSize,
+  usePricingRefresh,
+} from "@/components/pricing-refresh-provider";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
 import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
@@ -95,15 +99,6 @@ type EditForm = Omit<CardForm, "edition"> & {
   paidPriceText: string;
   chaseLevel: string;
   edition: CardForm["edition"] | "Unknown edition";
-};
-type PricingRun = {
-  completed: number;
-  estimated: number;
-  failed: number;
-  minimized: boolean;
-  noMatch: number;
-  running: boolean;
-  total: number;
 };
 type CardDetailState = {
   card: Card;
@@ -1669,9 +1664,12 @@ function PricingRefreshDialog({
                   : "We could not calculate the number of cards. You can still start the refresh."}
             </p>
           </div>
+          <p className="text-xs font-semibold text-zinc-600">
+            Prices are calculated for {pricingRefreshBatchSize} cards at a time.
+          </p>
           <div className="flex gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-950" id="pricing-refresh-description">
             <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <p><strong>Keep this page open.</strong> Refreshing the page, navigating away, or closing the tab stops this manual run. Your completed cards are saved; you can run it again later.</p>
+            <p><strong>You can keep using the site.</strong> The refresh continues while you navigate between pages. Reloading or closing this tab still stops the run; completed prices remain saved.</p>
           </div>
         </div>
 
@@ -1720,13 +1718,13 @@ export function WishlistApp() {
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [cardDetail, setCardDetail] = useState<CardDetailState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
-  const [pricingError, setPricingError] = useState<string | null>(null);
   const [collectionWarning, setCollectionWarning] = useState<string | null>(null);
-  const [pricingRun, setPricingRun] = useState<PricingRun | null>(null);
   const [pricingRefreshDialogOpen, setPricingRefreshDialogOpen] = useState(false);
   const [pricingCandidateCount, setPricingCandidateCount] = useState<number | null>(null);
   const utils = trpc.useUtils();
   const collectionChanged = useCollectionChange();
+  const { activeRun, rejectConcurrentRefresh, startLibraryRefresh } = usePricingRefresh();
+  const libraryPricingRunning = Boolean(activeRun?.running && activeRun.source.kind === "library");
 
   const updateTrackerUrl = useCallback(function updateTrackerUrl(
     updates: Partial<
@@ -1774,18 +1772,6 @@ export function WishlistApp() {
     return () => window.clearTimeout(timeoutId);
   }, [query, searchInput, updateTrackerUrl]);
 
-  useEffect(() => {
-    if (!pricingRun?.running) return;
-
-    function warnBeforeLeaving(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = "";
-    }
-
-    window.addEventListener("beforeunload", warnBeforeLeaving);
-    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
-  }, [pricingRun?.running]);
-
   async function invalidateCardsAndSpend() {
     try {
       await collectionChanged("target");
@@ -1829,13 +1815,6 @@ export function WishlistApp() {
   const lastPricingRefresh = trpc.library.lastPricingRefresh.useQuery(undefined, {
     enabled: clientReady,
     staleTime: 30_000,
-  });
-  const refreshPricing = trpc.library.refreshPricing.useMutation();
-  const refreshRecordPricing = trpc.library.refreshRecordPricing.useMutation();
-  const recordPricingRefresh = trpc.library.recordPricingRefresh.useMutation({
-    onSuccess: () => {
-      void utils.library.lastPricingRefresh.invalidate();
-    },
   });
   const deleteCard = trpc.library.delete.useMutation({
     onSuccess: async () => { await invalidateCardsAndSpend(); },
@@ -1901,83 +1880,8 @@ export function WishlistApp() {
     });
   }
 
-  async function refreshAllPrices() {
-    if (pricingRun?.running) return;
-    setPricingError(null);
-    try {
-      const [targetCandidates, recordCandidates] = await Promise.all([
-        utils.library.pricingCandidates.fetch(),
-        utils.library.recordPricingCandidates.fetch(),
-      ]);
-      const candidates = [
-        ...targetCandidates.map((candidate) => ({ kind: "target" as const, ...candidate })),
-        ...recordCandidates.map((candidate) => ({ kind: "record" as const, ...candidate })),
-      ];
-      const initial: PricingRun = {
-        completed: 0,
-        estimated: 0,
-        failed: 0,
-        minimized: false,
-        noMatch: 0,
-        running: true,
-        total: candidates.length,
-      };
-      setPricingRun(initial);
-      let completed = 0;
-      let estimated = 0;
-      let failed = 0;
-      let noMatch = 0;
-      let consecutiveFailures = 0;
-
-      for (let index = 0; index < candidates.length; index += 2) {
-        const batch = await Promise.allSettled(
-          candidates.slice(index, index + 2).map((candidate) => (
-            candidate.kind === "target"
-              ? refreshPricing.mutateAsync({ id: candidate.id })
-              : refreshRecordPricing.mutateAsync({
-                  condition: candidate.condition,
-                  printingId: candidate.printingId,
-                })
-          )),
-        );
-        for (const result of batch) {
-          completed += 1;
-          if (result.status === "fulfilled") {
-            consecutiveFailures = 0;
-            if (result.value.estimatedPricePence === null) noMatch += 1;
-            else estimated += 1;
-          } else {
-            failed += 1;
-            consecutiveFailures += 1;
-          }
-        }
-        setPricingRun((current) => ({
-          completed,
-          estimated,
-          failed,
-          minimized: current?.minimized ?? false,
-          noMatch,
-          running: true,
-          total: candidates.length,
-        }));
-        if (consecutiveFailures >= 6) {
-          throw new Error("eBay stopped responding repeatedly, so the refresh was paused to avoid losing progress visibility. Try again later.");
-        }
-        if (index + 2 < candidates.length) {
-          await new Promise((resolve) => window.setTimeout(resolve, 150));
-        }
-      }
-      setPricingRun((current) => ({ completed, estimated, failed, minimized: current?.minimized ?? false, noMatch, running: false, total: candidates.length }));
-      void recordPricingRefresh.mutateAsync().catch(() => undefined);
-      invalidateCardsAndSpend();
-    } catch (error) {
-      setPricingRun((current) => current ? { ...current, running: false } : null);
-      setPricingError(error instanceof Error ? error.message : "Price refresh stopped unexpectedly. Try again shortly.");
-    }
-  }
-
   function openPricingRefreshDialog() {
-    if (pricingRun?.running) return;
+    if (rejectConcurrentRefresh()) return;
     setPricingCandidateCount(null);
     setPricingRefreshDialogOpen(true);
     void Promise.all([
@@ -2041,7 +1945,6 @@ export function WishlistApp() {
                   <button
                     aria-label="Refresh current UK eBay estimates for all cards"
                     className="grid size-11 place-items-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d] disabled:cursor-wait disabled:opacity-50"
-                    disabled={pricingRun?.running}
                     onClick={openPricingRefreshDialog}
                     title="Refresh current UK eBay estimates"
                     type="button"
@@ -2049,7 +1952,7 @@ export function WishlistApp() {
                     <RefreshCw
                       aria-hidden="true"
                       className={`size-4 ${
-                        pricingRun?.running ? "animate-spin" : ""
+                        libraryPricingRunning ? "animate-spin" : ""
                       }`}
                     />
                   </button>
@@ -2425,63 +2328,6 @@ export function WishlistApp() {
           </section>
         </section>
       </div>
-      {pricingRun ? (
-        <aside
-          aria-label="Price refresh progress"
-          className="fixed bottom-4 right-4 z-40 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-zinc-300 bg-white p-4 shadow-xl"
-        >
-          {pricingRun.minimized ? (
-            <button
-              className="flex w-full items-center justify-between gap-3 text-left"
-              onClick={() => setPricingRun((current) => current ? { ...current, minimized: false } : current)}
-              type="button"
-            >
-              <span className="font-bold text-zinc-900">{pricingRun.running ? "Refreshing estimates" : "Estimate refresh complete"}</span>
-              <span className="text-sm font-bold tabular-nums text-zinc-600">{pricingRun.completed}/{pricingRun.total}</span>
-            </button>
-          ) : (
-            <>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-black text-zinc-950">{pricingRun.running ? "Refreshing UK eBay estimates" : "Estimate refresh complete"}</p>
-                  <p className="mt-1 text-sm font-medium text-zinc-600">{pricingRun.completed} of {pricingRun.total} checked</p>
-                </div>
-                <button
-                  aria-label="Minimise price refresh progress"
-                  className="grid size-10 place-items-center rounded-md border border-zinc-300 text-sm font-black text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950"
-                  onClick={() => setPricingRun((current) => current ? { ...current, minimized: true } : current)}
-                  type="button"
-                >
-                  −
-                </button>
-              </div>
-              <div
-                aria-label={`${pricingRun.completed} of ${pricingRun.total} prices checked`}
-                aria-valuemax={pricingRun.total}
-                aria-valuemin={0}
-                aria-valuenow={pricingRun.completed}
-                className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200"
-                role="progressbar"
-              >
-                <div className="h-full bg-[#8a1f2d] transition-[width] duration-200 ease-out" style={{ width: `${pricingRun.total ? (pricingRun.completed / pricingRun.total) * 100 : 0}%` }} />
-              </div>
-              <p className="mt-3 text-xs font-semibold leading-5 text-zinc-600">
-                {pricingRun.estimated} estimated · {pricingRun.noMatch} no usable listing · {pricingRun.failed} failed
-              </p>
-              {!pricingRun.running ? (
-                <button
-                  className="mt-3 min-h-11 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 transition hover:border-zinc-950 hover:text-zinc-950"
-                  onClick={() => setPricingRun(null)}
-                  type="button"
-                >
-                  Dismiss
-                </button>
-              ) : null}
-            </>
-          )}
-        </aside>
-      ) : null}
-      <DestructiveToast message={pricingError} onDismiss={() => setPricingError(null)} title="Pricing refresh stopped" />
       <DestructiveToast
         message={collectionWarning}
         onDismiss={() => setCollectionWarning(null)}
@@ -2494,7 +2340,7 @@ export function WishlistApp() {
           onClose={() => setPricingRefreshDialogOpen(false)}
           onConfirm={() => {
             setPricingRefreshDialogOpen(false);
-            void refreshAllPrices();
+            void startLibraryRefresh();
           }}
         />
       ) : null}

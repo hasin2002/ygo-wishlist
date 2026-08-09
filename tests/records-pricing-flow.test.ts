@@ -48,14 +48,34 @@ test("entry forms start estimates during card completion and carry results into 
 test("History uses full-page edits, variant refresh, and card-detail navigation", () => {
   const history = fs.readFileSync("src/components/records/records-app.tsx", "utf8");
   const entry = fs.readFileSync("src/components/records/record-entry-app.tsx", "utf8");
+  const formUi = fs.readFileSync("src/components/records/entry-form-ui.tsx", "utf8");
+  const refreshProgress = fs.readFileSync("src/components/price-refresh-progress.tsx", "utf8");
+  const pricingProvider = fs.readFileSync("src/components/pricing-refresh-provider.tsx", "utf8");
+  const providers = fs.readFileSync("src/app/providers.tsx", "utf8");
   assert.match(history, /href=\{recordEditHref\(record\)\}/);
   assert.match(history, /RecordPricingRefreshButton/);
   assert.match(history, /recordPricingVariants/);
   assert.match(history, /\/viewdbentries\?record=/);
-  assert.match(history, /<SuccessToast[\s\S]*title="Pricing refreshed"/);
-  assert.match(history, /<DestructiveToast[\s\S]*title="Pricing refresh incomplete"/);
   assert.match(history, /Refresh estimates \(\{variants\.length\}\)/);
-  assert.doesNotMatch(history, /\{running \? `\$\{progress\.completed\}\/\$\{progress\.total\}`/);
+  assert.match(history, /usePricingRefresh\(\)/);
+  assert.match(history, /onRefresh=\{\(input\) => void startRecordRefresh\(input\)\}/);
+  assert.doesNotMatch(history, /<PriceRefreshProgress/);
+  assert.doesNotMatch(history, /disabled=\{Boolean\(pricingRun\?\.running\)\}/);
+  assert.match(pricingProvider, /export const pricingRefreshBatchSize = 4/);
+  assert.match(pricingProvider, /slice\(index, index \+ pricingRefreshBatchSize\)/);
+  assert.equal(pricingProvider.match(/<PriceRefreshProgress/g)?.length, 1);
+  assert.match(pricingProvider, /title: "Price refresh already running"/);
+  assert.match(pricingProvider, /Use the compact progress control in the bottom-right/);
+  assert.match(pricingProvider, /<DestructiveToast/);
+  assert.match(providers, /<PricingRefreshProvider>[\s\S]*?<AppShell>\{children\}<\/AppShell>[\s\S]*?<\/PricingRefreshProvider>/);
+  assert.match(refreshProgress, /<aside[\s\S]*aria-label="Price refresh progress"/);
+  assert.match(refreshProgress, /fixed bottom-4 right-4/);
+  assert.match(refreshProgress, /return createPortal\(/);
+  assert.match(refreshProgress, /document\.body/);
+  assert.match(refreshProgress, /useState\(true\)/);
+  assert.match(refreshProgress, /aria-label="Expand price refresh progress"/);
+  assert.match(refreshProgress, /Calculating prices for \{batchSize\} cards at a time/);
+  assert.match(formUi, /role="progressbar"/);
   assert.doesNotMatch(history, /aria-label=\{`Edit \$\{record\.title\}`\}[\s\S]{0,300}setEditingRecordId/);
   assert.match(entry, /<PurchaseForm edit=\{\{ record: editingRecord, snapshot: editSource\.snapshot \}\}/);
   assert.match(entry, /<OpeningForm edit=\{\{ record: editingRecord, snapshot: editSource\.snapshot \}\}/);
@@ -72,6 +92,11 @@ test("Record card viewer exposes listing state and an over-£5 unlisted opportun
   assert.match(viewer, /Has associated listing/);
   assert.match(viewer, /No active listing/);
   assert.match(viewer, /linkedListingHref\(entry\.selectedTargetId/);
+  assert.match(viewer, /usePricingRefresh\(\)/);
+  assert.match(viewer, /aria-label=\{`Refresh UK eBay estimates for \$\{record\.title\}`\}/);
+  assert.match(viewer, /void startRecordRefresh\(\{/);
+  assert.match(viewer, /candidates: entries\.map\(\(\{ condition, printingId \}\) => \(\{ condition, printingId \}\)\)/);
+  assert.doesNotMatch(viewer, /disabled=\{recordPricingRunning\}/);
   assert.match(viewer, /useViewportOverlay<HTMLElement>/);
   assert.match(viewer, /aria-modal="true"/);
   assert.match(viewer, /createPortal\(/);
@@ -87,7 +112,7 @@ test("Records estimates persist by Printing and condition and eBay fallback reta
   const records = fs.readFileSync("src/server/routers/records.ts", "utf8");
   const ebay = fs.readFileSync("src/server/ebay-pricing.ts", "utf8");
   const ebaySearch = fs.readFileSync("src/lib/records/ebay-pricing-search.ts", "utf8");
-  const library = fs.readFileSync("src/components/wishlist-app.tsx", "utf8");
+  const pricingProvider = fs.readFileSync("src/components/pricing-refresh-provider.tsx", "utf8");
   assert.match(schema, /card_pricing_estimates_owner_variant_unique/);
   assert.match(schema, /table\.ownerId,[\s\S]*table\.printingId,[\s\S]*table\.condition/);
   assert.match(records, /cardPricingEstimates\.printingId/);
@@ -95,8 +120,8 @@ test("Records estimates persist by Printing and condition and eBay fallback reta
   assert.match(ebay, /prices\.length < minimumConditionSampleSize/);
   assert.match(ebay, /ebayPricingSearchTerms\(card, includeCondition\)/);
   assert.match(ebaySearch, /explicitCodes\.length === 0/);
-  assert.match(library, /recordPricingCandidates/);
-  assert.match(library, /refreshRecordPricing\.mutateAsync/);
+  assert.match(pricingProvider, /recordPricingCandidates/);
+  assert.match(pricingProvider, /refreshRecordPricing\.mutateAsync/);
 });
 
 test("Purchase and Pack Opening edits open on card details with a three-step progress flow", () => {

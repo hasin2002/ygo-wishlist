@@ -7,6 +7,7 @@ import {
   CircleDollarSign,
   ExternalLink,
   Filter,
+  RefreshCcw,
   Search,
   SlidersHorizontal,
   WalletCards,
@@ -18,6 +19,7 @@ import { useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { AppHeader } from "@/components/app-header";
 import { DataLoadError } from "@/components/data-load-error";
+import { usePricingRefresh } from "@/components/pricing-refresh-provider";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { linkedListingHref } from "@/lib/records/inventory-route-state";
 import {
@@ -342,6 +344,7 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const filterButtonRef = useRef<HTMLButtonElement>(null);
+  const { activeRun, startRecordRefresh } = usePricingRefresh();
   const query = trpc.records.history.useQuery({
     includeVoid: true,
     page: 1,
@@ -354,6 +357,11 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
   const entries = useMemo(
     () => recordId && snapshot ? entriesForRecord(recordId, snapshot) : [],
     [recordId, snapshot],
+  );
+  const recordPricingRunning = Boolean(
+    activeRun?.running
+    && activeRun.source.kind === "record"
+    && activeRun.source.recordId === recordId,
   );
 
   const options = useMemo(() => ({
@@ -461,7 +469,21 @@ export function ViewDbEntriesClient({ recordId }: { recordId: string | null }) {
                 {record.status === "void" ? <span className="rounded-md bg-zinc-100 px-2 py-1">Voided</span> : null}
               </div>
               <h2 className="mt-3 text-xl font-black text-zinc-950 sm:text-2xl">{record.title}</h2>
-              <p className="mt-1 text-sm font-medium text-zinc-500">{record.source} · {totalCopies} exact physical Cop{totalCopies === 1 ? "y" : "ies"}</p>
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <p className="min-w-0 text-sm font-medium text-zinc-500">{record.source} · {totalCopies} exact physical Cop{totalCopies === 1 ? "y" : "ies"}</p>
+                {entries.length ? <button
+                  aria-label={`Refresh UK eBay estimates for ${record.title}`}
+                  className="grid size-9 shrink-0 place-items-center rounded-md text-zinc-400 transition hover:bg-zinc-100 hover:text-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
+                  onClick={() => void startRecordRefresh({
+                    candidates: entries.map(({ condition, printingId }) => ({ condition, printingId })),
+                    recordId: record.id,
+                  })}
+                  title="Refresh estimates for this Record"
+                  type="button"
+                >
+                  <RefreshCcw aria-hidden className={`size-3.5 ${recordPricingRunning ? "animate-spin motion-reduce:animate-none" : ""}`} />
+                </button> : null}
+              </div>
               {record.notes ? <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600">{record.notes}</p> : null}
             </div>
             <div className="grid grid-cols-3 gap-2 sm:min-w-[390px]">
