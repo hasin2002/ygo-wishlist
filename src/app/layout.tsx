@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
 import { Providers } from "./providers";
+import { AppInit } from "@/components/app-init";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,14 +13,6 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
-
-const themeInitializer = `
-  try {
-    if (window.localStorage.getItem("ygo-theme") === "dark") {
-      document.documentElement.classList.add("dark-mode");
-    }
-  } catch (_) {}
-`;
 
 export const metadata: Metadata = {
   title: "Yu-Gi-Oh! Collection Hub",
@@ -47,21 +39,14 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <head>
-        <Script
-          dangerouslySetInnerHTML={{ __html: themeInitializer }}
-          id="theme-initializer"
-          strategy="beforeInteractive"
-        />
-        {process.env.NODE_ENV === "development" && process.env.RECORDS_BROWSER_TEST !== "1" ? (
-          <Script
-            crossOrigin="anonymous"
-            src="//unpkg.com/react-grab/dist/index.global.js"
-            strategy="beforeInteractive"
-          />
-        ) : null}
-      </head>
+      <head />
       <body className="min-h-full flex flex-col">
+        <AppInit
+          loadGrabScript={
+            process.env.NODE_ENV === "development" &&
+            process.env.RECORDS_BROWSER_TEST !== "1"
+          }
+        />
         <Providers
           initialAuth={{
             isAuthenticated: Boolean(session),

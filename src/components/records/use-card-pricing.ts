@@ -12,6 +12,10 @@ function pounds(pence: number) {
   return `£${(pence / 100).toFixed(2)}`;
 }
 
+function isCompletedPricing(pricing: CardPricingDraft) {
+  return pricing.status === "estimated" || pricing.status === "no-match";
+}
+
 export function useCardPricing(
   updateCardPricing: (cardId: string, pricing: CardPricingDraft) => void,
 ) {
@@ -22,12 +26,12 @@ export function useCardPricing(
 
   const requestPricing = useCallback((card: CardContentsDraft) => {
     const localKey = cardPricingIdentityKey(card);
-    if (card.pricing && card.pricing.identityKey === localKey && card.pricing.status !== "failed") {
+    if (card.pricing && card.pricing.identityKey === localKey && isCompletedPricing(card.pricing)) {
       completed.current.set(localKey, card.pricing);
       return;
     }
     const cached = completed.current.get(localKey);
-    if (cached) {
+    if (cached && isCompletedPricing(cached)) {
       updateCardPricing(card.id, cached);
       return;
     }
