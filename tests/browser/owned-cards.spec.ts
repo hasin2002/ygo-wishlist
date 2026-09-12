@@ -35,6 +35,7 @@ for (const width of [1280, 843, 390]) {
     await selection.getByRole("button", { name: "Increase quantity", exact: true }).click();
     await selection.getByRole("button", { name: "Add to list" }).click();
     await page.getByRole("button", { name: "Choose Blue-Eyes White Dragon, LOB-001, Ultra Rare" }).click();
+    await selection.getByRole("button", { name: "Increase quantity", exact: true }).click();
     await selection.getByRole("button", { name: "Add to list" }).click();
     const list = page.getByRole("region", { name: "Cards to add" });
     await expect(list.getByRole("spinbutton")).toHaveValue("3");
@@ -109,4 +110,23 @@ test("queue pagination, search, rarity modal and confirmed clear", async ({ page
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole("button", { name: /Choose Blue-Eyes/ })).toBeFocused();
+});
+
+test("existing owned quantity starts at current total and saves only the increase", async ({ page }) => {
+  await page.goto("/records/new/owned");
+  await page.getByLabel("Card name or set code").fill("LOB-001");
+  const choose = page.getByRole("button", { name: "Choose Blue-Eyes White Dragon, LOB-001, Ultra Rare" });
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await choose.click();
+  await dialog.getByRole("button", { name: "Increase quantity", exact: true }).click();
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
+  await page.getByRole("button", { name: "Add 2 cards to collection", exact: true }).click();
+  await page.getByRole("button", { name: "Add more cards", exact: true }).click();
+  await choose.click();
+  await expect(dialog.getByText("Already owned: 2", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("2");
+  await dialog.getByRole("button", { name: "Increase quantity", exact: true }).click();
+  await expect(dialog.getByText("Set the total you want to own. 1 new copy will be added.")).toBeVisible();
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Add 1 card to collection", exact: true })).toBeVisible();
 });

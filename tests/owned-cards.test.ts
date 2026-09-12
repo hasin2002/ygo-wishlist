@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addOwnedCardsSchema, collapseOwnedCards, type AddOwnedCardsDraft } from "../src/lib/records/owned-cards.ts";
+import { addOwnedCardsSchema, collapseOwnedCards, matchingOwnedCardCopies, type AddOwnedCardsDraft } from "../src/lib/records/owned-cards.ts";
 import { applyOwnedCards } from "../src/lib/records/preview-data.ts";
 import type { RecordsSnapshot } from "../src/lib/records/types.ts";
 
@@ -32,4 +32,34 @@ test("preview saves exact physical IDs with unknown costs, no bulk container and
   assert.equal(first.next.targets[0].desiredQuantity, 0);
   assert.equal(first.next.bulkLots.length, 0);
   assert.equal(applyOwnedCards(first.next, input).next.copies.length, 4);
+});
+
+test("existing quantity matches exact product, edition and condition, excluding sold or void copies", () => {
+  const snapshot = applyOwnedCards(empty, input).next;
+  assert.equal(matchingOwnedCardCopies(snapshot, card).length, 2);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...card, condition: "Lightly Played" }).length, 0);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...card, edition: "Unlimited Edition" }).length, 0);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...card, rarity: "Secret Rare" }).length, 0);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...card, productId: 456 }).length, 0);
+  snapshot.copies[0].status = "sold";
+  assert.equal(matchingOwnedCardCopies(snapshot, card).length, 1);
+  snapshot.records[0].status = "void";
+  assert.equal(matchingOwnedCardCopies(snapshot, card).length, 0);
+});
+
+test("legacy stock without a product URL matches complete set identity", () => {
+  const snapshot = applyOwnedCards(empty, input).next;
+  snapshot.printings[0].tcgplayerUrl = null;
+  assert.equal(matchingOwnedCardCopies(snapshot, card).length, 2);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...card, setCode: "OTHER-001" }).length, 0);
+});
+
+test("mixed-condition legacy product URLs count six NM plus one LP without merging conditions", () => {
+  const snapshot = applyOwnedCards(empty, { ...input, cards: [{ ...card, quantity: 6 }, { ...card, condition: "Lightly Played", quantity: 1 }] }).next;
+  snapshot.printings[0].tcgplayerUrl = "https://www.tcgplayer.com/product/123/blue-eyes-white-dragon?Language=all";
+  snapshot.printings[0].setCode = "LOB";
+  const selected = { ...card, name: "Blue-Eyes White Dragon (Ultra Rare)" };
+  assert.equal(matchingOwnedCardCopies(snapshot, selected).length, 6);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...selected, condition: "Lightly Played" }).length, 1);
+  assert.equal(matchingOwnedCardCopies(snapshot, { ...selected, condition: undefined }).length, 7);
 });
