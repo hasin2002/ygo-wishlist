@@ -15,7 +15,7 @@ const cards = Array.from({ length: 10 }, (_, index) => {
     ebaySearchUrl: null,
     edition: "1st Edition",
     id: `library-layout-${index + 1}`,
-    imageUrl: index === 6 ? null : cardImage,
+    imageUrl: index === 6 ? null : index % 2 ? cardImage.replace("width='590' height='860'", "width='1200' height='1800'") : cardImage,
     marketPriceText: unpriced ? null : index % 3 === 0 ? `£${(index + 1).toFixed(2)}` : null,
     name: index === 0 ? longCardName : `Responsive Library Card ${index + 1}`,
     notes: index === 5 ? "A long note remains available in card details." : null,
@@ -46,19 +46,27 @@ const trackerPage = {
 
 async function mockLibrary(page: Page, canEdit = false) {
   await page.route("**/api/trpc/**", async (route) => {
-    if (route.request().url().includes("library.trackerPage")) {
+    if (route.request().url().includes("library.updateCollection")) {
+      await route.fulfill({ contentType: "application/json", json: [{ result: { data: { json: { id: cards[0].id } } } }] });
+      return;
+    }
+    if (route.request().url().includes("library.trackerPage") || route.request().url().includes("library.collectionCopies")) {
       const procedures = decodeURIComponent(
         new URL(route.request().url()).pathname.split("/api/trpc/")[1],
       )
         .split(",");
+      const inputs = route.request().postDataJSON() ?? JSON.parse(new URL(route.request().url()).searchParams.get("input") || "{}");
       await route.fulfill({
         contentType: "application/json",
-        json: procedures.map((procedure) => ({
+        json: procedures.map((procedure, index) => ({
           result: {
             data: {
               json: procedure === "library.trackerPage"
                 ? { ...trackerPage, canEdit }
-                : null,
+                : procedure === "library.collectionCopies" ? {
+                  printings: [{ id: "printing-1", setCode: "TEST-001", setName: "Test set" }],
+                  copies: Array.from({ length: cards.find(card => card.id === inputs[String(index)]?.json?.id)?.ownedQuantity ?? 0 }, (_, index) => ({ id: `copy-${index + 1}`, printingId: "printing-1", condition: "Near Mint", stickerNumber: `${index + 1}`, source: "Test purchase" })),
+                } : null,
             },
           },
         })),
@@ -307,10 +315,11 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
 
   await page.goto("/");
   await page.getByRole("button", { name: longCardName, exact: true }).click();
-  const editDialog = page.getByRole("dialog", { name: "Edit card" });
+  const editDialog = page.getByRole("dialog", { name: "Edit collection" });
   await expect(editDialog).toBeVisible();
   await expect(editDialog.getByText("Library state", { exact: true })).toHaveCount(0);
   await expect(editDialog.getByText("Owned from Records", { exact: true })).toHaveCount(0);
+  await editDialog.getByText("More details", { exact: true }).click();
   await expect(editDialog.getByLabel("Notes")).toBeVisible();
   await editDialog.getByLabel("Notes").fill("Keep this unsaved note");
   await expect(editDialog.getByRole("button", { name: "Remove from wishlist" })).toBeVisible();
@@ -326,6 +335,7 @@ test("Add and edit forms remove redundant panels and explain wishlist removal", 
   await removalDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(removalDialog).toBeHidden();
   await expect(editDialog).toBeVisible();
+  await expect(editDialog.getByLabel("Notes")).toBeVisible();
   await expect(editDialog.getByLabel("Notes")).toHaveValue("Keep this unsaved note");
   await editDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(editDialog).toBeHidden();
@@ -390,3 +400,137 @@ async function expectCompleteDesktopRows(page: Page, columns: number, rows: numb
   });
   expect(cardsByRow).toEqual(Array.from({ length: rows }, () => columns));
 }
+
+for (const canEdit of [false, true]) {
+  test(`Library card bodies open consistently with edit access ${canEdit}`, async ({ page }, testInfo) => {
+    await mockLibrary(page, canEdit);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto("/");
+    await expect(page.locator("[data-library-card]")).toHaveCount(10);
+    for (const width of [320, 375, 843, 1366]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.mouse.move(0, 0);
+      await expect.poll(() => page.locator("[data-library-open]").first().evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(130);
+      const geometry = await page.locator("[data-library-card]").evaluateAll((cards) => cards.map((card) => {
+        const media = card.querySelector("[data-library-media]")!.getBoundingClientRect();
+        const title = card.querySelector("h3")!.getBoundingClientRect();
+        return { mediaHeight: media.height, titleWidth: title.width };
+      }));
+      expect(Math.max(...geometry.map(item => item.mediaHeight)) - Math.min(...geometry.map(item => item.mediaHeight))).toBeLessThan(2);
+      expect(geometry.every(item => item.titleWidth > 130), JSON.stringify({ width, geometry })).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await screenshotLibrary(page, testInfo, `cards-${canEdit}-${width}`);
+    }
+    const card = page.locator("[data-library-card]").first();
+    const title = card.locator("[data-library-open]");
+    const dialog = page.getByRole("dialog", { name: "Edit collection" });
+    // Click plain card space, away from the title and separate image/marketplace actions.
+    await card.locator("[data-library-quantity-summary]").click();
+    await expect(dialog).toBeVisible();
+    await expect(page.locator("[data-library-image-preview]")).toHaveCount(0);
+    if (!canEdit) {
+      await expect(dialog.getByRole("link", { name: "Sign in to edit" })).toHaveAttribute("href", /\/login\?next=/);
+      await expect(dialog.getByLabel("Wanted quantity", { exact: true })).toBeDisabled();
+      await expect(dialog.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+    }
+    await page.keyboard.press("Escape");
+    await expect(title).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    const missingImageCard = page.locator("[data-library-card]").nth(6);
+    await missingImageCard.locator("[data-library-open]").click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    const ebay = card.getByRole("link", { name: /Open eBay search/ });
+    await expect(ebay).toHaveAttribute("target", "_blank");
+    expect(await ebay.evaluate(element => { const r = element.getBoundingClientRect(); return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest("a") === element; })).toBe(true);
+  });
+}
+
+
+test("Collection modal saves wanted quantity and preserves changes on a failed save", async ({ page }, testInfo) => {
+  await mockLibrary(page, true);
+  let saved: unknown;
+  let fail = true;
+  await page.route("**/api/trpc/library.updateCollection*", async route => {
+    saved = route.request().postDataJSON();
+    if (fail) { await route.abort("failed"); return; }
+    await route.fulfill({ contentType: "application/json", json: [{ result: { data: { json: { id: cards[0].id } } } }] });
+  });
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto("/");
+  const first = page.locator("[data-library-card]").first();
+  await first.locator("[data-library-quantity-summary]").click();
+  const dialog = page.getByRole("dialog", { name: "Edit collection" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Notes")).toBeHidden();
+  await expect(dialog.getByLabel("Wanted quantity", { exact: true })).toHaveValue("3");
+  await dialog.getByRole("button", { name: "Decrease wanted quantity" }).click();
+  await dialog.getByRole("button", { name: "Decrease wanted quantity" }).click();
+  await expect(dialog.getByRole("status")).toHaveText("Owned · target met");
+  await dialog.getByRole("button", { name: "Increase wanted quantity" }).click();
+  await expect(dialog.getByRole("status")).toHaveText("Wishlist · 1 still wanted");
+  const bounds = await dialog.locator("section").boundingBox();
+  expect(bounds!.height).toBeLessThanOrEqual(700 - 24);
+  await page.screenshot({ path: testInfo.outputPath("collection-modal-small-phone.png") });
+  await page.setViewportSize({ width: 375, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("collection-modal-phone.png") });
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByLabel("Wanted quantity", { exact: true })).toHaveValue("2");
+  fail = false;
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toBeHidden();
+  expect(saved).toEqual({ "0": { json: { id: cards[0].id, desiredQuantity: 2 } } });
+  await expect(first.locator("[data-library-open]")).toBeFocused();
+});
+
+test("Owned quantity uses inline steppers and sends exact copy selections", async ({ page }) => {
+  await mockLibrary(page, true);
+  let saved: { [key: string]: { json: Record<string, unknown> } } | undefined;
+  await page.route("**/api/trpc/library.updateCollection*", async route => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", json: [{ result: { data: { json: { id: cards[0].id } } } }] });
+  });
+  await page.setViewportSize({ width: 375, height: 844 });
+  await page.goto("/");
+  await page.locator("[data-library-card]").first().locator("[data-library-quantity-summary]").click();
+  const dialog = page.getByRole("dialog", { name: "Edit collection" });
+  await expect(dialog.getByRole("button", { name: "Add copies", exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Increase owned quantity" }).click();
+  await expect(dialog.getByLabel("Owned quantity", { exact: true })).toHaveValue("2");
+  await expect(dialog.getByText(/unknown purchase cost/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toBeHidden();
+  expect(saved?.["0"].json).toMatchObject({ ownedQuantity: 2, expectedOwnedQuantity: 1, removeCopyIds: [], condition: "Near Mint" });
+  await expect(page).toHaveURL(/\/$/);
+  await page.locator("[data-library-card]").nth(1).locator("[data-library-quantity-summary]").click();
+  await dialog.getByRole("button", { name: "Decrease owned quantity" }).click();
+  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await dialog.getByRole("checkbox").nth(2).check();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toBeHidden();
+  expect(saved?.["0"].json).toMatchObject({ ownedQuantity: 3, expectedOwnedQuantity: 4, removeCopyIds: ["copy-3"] });
+});
+
+
+test("Collapsed catalogue edits are saved with the wanted quantity", async ({ page }) => {
+  await mockLibrary(page, true);
+  let saved: unknown;
+  await page.route("**/api/trpc/library.update?*", async route => {
+    saved = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", json: [{ result: { data: { json: cards[0] } } }] });
+  });
+  await page.goto("/");
+  await page.locator("[data-library-card]").first().locator("[data-library-quantity-summary]").click();
+  const dialog = page.getByRole("dialog", { name: "Edit collection" });
+  await dialog.getByText("More details", { exact: true }).click();
+  await dialog.getByLabel("Notes").fill("Keep this catalogue edit");
+  await dialog.getByText("More details", { exact: true }).click();
+  await dialog.getByLabel("Wanted quantity", { exact: true }).fill("5");
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toBeHidden();
+  expect(saved).toMatchObject({ "0": { json: { id: cards[0].id, desiredQuantity: 5, notes: "Keep this catalogue edit" } } });
+});

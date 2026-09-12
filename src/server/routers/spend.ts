@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -10,6 +10,14 @@ import {
   targetMonthlyFavorites,
 } from "@/db/schema";
 import { authenticatedProcedure, router } from "@/server/trpc";
+
+export function monthBounds(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const nextMonth = month === 12
+    ? `${String(year + 1).padStart(4, "0")}-01`
+    : `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}`;
+  return { start: `${monthKey}-01`, endExclusive: `${nextMonth}-01` };
+}
 
 function currentMonthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -24,11 +32,12 @@ function monthLabel(monthKey: string) {
 export const spendRouter = router({
   currentMonth: authenticatedProcedure.query(async ({ ctx }) => {
     const month = currentMonthKey();
+    const bounds = monthBounds(month);
     const rows = await db.select().from(recordEntries).where(and(
       eq(recordEntries.ownerId, ctx.collectionOwnerId),
       eq(recordEntries.status, "active"),
-      gte(recordEntries.occurredOn, `${month}-01`),
-      lte(recordEntries.occurredOn, `${month}-31`),
+      gte(recordEntries.occurredOn, bounds.start),
+      lt(recordEntries.occurredOn, bounds.endExclusive),
     ));
     const acquisitions = rows.filter((record) => (
       record.type === "purchase" || record.type === "imported-acquisition"
@@ -60,7 +69,7 @@ export const spendRouter = router({
 
   setMonthlyFavourite: authenticatedProcedure.input(z.object({
     cardId: z.string().min(1).nullable(),
-    month: z.string().regex(/^\d{4}-\d{2}$/),
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
   })).mutation(async ({ ctx, input }) => {
     if (input.cardId === null) {
       await db.delete(targetMonthlyFavorites).where(and(
@@ -81,11 +90,12 @@ export const spendRouter = router({
       inArray(cardCopies.printingId, printings.map((printing) => printing.id)),
     )) : [];
     const acquisitionIds = Array.from(new Set(copies.map((copy) => copy.acquiredRecordId)));
+    const bounds = monthBounds(input.month);
     const acquisitions = acquisitionIds.length ? await db.select().from(recordEntries).where(and(
       eq(recordEntries.ownerId, ctx.collectionOwnerId),
       inArray(recordEntries.id, acquisitionIds),
-      gte(recordEntries.occurredOn, `${input.month}-01`),
-      lte(recordEntries.occurredOn, `${input.month}-31`),
+      gte(recordEntries.occurredOn, bounds.start),
+      lt(recordEntries.occurredOn, bounds.endExclusive),
     )) : [];
     if (!acquisitions.length) {
       throw new TRPCError({

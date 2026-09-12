@@ -46,8 +46,10 @@ changed.
 - Library and Records are projections of one owner-scoped collection model.
   The `library` API is the only first-party API for Library catalogue reads and
   Wishlist Target edits. Physical ownership is always derived from the same
-  Copies and Record Entries shown in Records; only Records mutations may create,
-  sell, void, or restore a Copy. The legacy `cards` table is migration input
+  Copies and Record Entries shown in Records. Library quantity controls delegate
+  physical-copy changes to Records operations: additions create an imported
+  acquisition with unknown cost; removals use exact Copy IDs and the existing
+  sale/listing-history restrictions. Wishlist/Owned remains computed. The legacy `cards` table is migration input
   only after cutover and is never maintained by permanent dual writes. A
   temporary `legacyCards` read adapter may seed the resettable Records preview
   while legacy rows exist; it must be removed after those rows are migrated and

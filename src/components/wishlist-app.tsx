@@ -9,8 +9,8 @@ import {
   ExternalLink,
   Loader2,
   Plus,
+  Minus,
   RefreshCw,
-  Save,
   Search,
   SlidersHorizontal,
   Star,
@@ -40,6 +40,8 @@ import {
 } from "@/components/pricing-refresh-provider";
 import { RarityGuidePopover } from "@/components/rarity-guide-popover";
 import { RarityCombobox } from "@/components/rarity-combobox";
+import { cardConditions, type CardCondition } from "@/lib/records/types";
+import { getLibraryCardStatus } from "@/lib/records/library-status";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import { useClientReady } from "@/lib/use-client-ready";
@@ -95,6 +97,11 @@ type CardForm = {
 type EditForm = Omit<CardForm, "edition"> & {
   id: string;
   desiredQuantity: number;
+  ownedQuantity: number;
+  removeCopyIds: string[];
+  printingId: string;
+  condition: CardCondition;
+  operationId: string;
   ebayListingUrl: string;
   paidPriceText: string;
   chaseLevel: string;
@@ -328,6 +335,11 @@ function editFormFromCard(card: Card): EditForm {
   return {
     id: card.id,
     desiredQuantity: card.desiredQuantity,
+    ownedQuantity: card.ownedQuantity,
+    removeCopyIds: [],
+    printingId: "",
+    condition: "Near Mint",
+    operationId: crypto.randomUUID(),
     name: card.name,
     url: card.url ?? "",
     imageUrl: card.imageUrl ?? "",
@@ -387,21 +399,42 @@ function EditCardModal({
   onDelete,
   onSave,
   setForm,
+  error,
+  originalForm,
+  detailsOpen,
+  setDetailsOpen,
+  canEdit,
 }: {
+  canEdit: boolean;
+  originalForm: EditForm;
+  detailsOpen: boolean;
+  setDetailsOpen: (open: boolean) => void;
+  error: string | null;
   form: EditForm;
   saving: boolean;
   onClose: () => void;
   onDelete: (id: string) => void;
-  onSave: () => void;
+  onSave: (details: boolean) => void;
   setForm: (updater: (current: EditForm) => EditForm) => void;
 }) {
+  const detailsChanged = Object.entries(form).some(([key, value]) => !["desiredQuantity", "ownedQuantity", "removeCopyIds", "printingId", "condition", "operationId"].includes(key) && value !== originalForm[key as keyof EditForm]);
+  const copyQuery = trpc.library.collectionCopies.useQuery({ id: form.id }, { enabled: canEdit });
+  const removeCount = Math.max(0, originalForm.ownedQuantity - form.ownedQuantity);
+  const adding = form.ownedQuantity > originalForm.ownedQuantity;
+  const ownershipChanged = form.ownedQuantity !== originalForm.ownedQuantity;
+  const invalidSelection = ownershipChanged && (!copyQuery.data || copyQuery.isError || (removeCount > 0 && form.removeCopyIds.length !== removeCount) || (adding && copyQuery.data.printings.length > 1 && !form.printingId));
+  function changeOwned(quantity: number) {
+    const next = Math.max(0, Math.min(10000, quantity));
+    setForm(current => ({ ...current, ownedQuantity: next, removeCopyIds: next >= originalForm.ownedQuantity ? [] : copyQuery.data?.copies.length === 1 ? [copyQuery.data.copies[0].id] : current.removeCopyIds.slice(0, originalForm.ownedQuantity - next) }));
+  }
+  const status = getLibraryCardStatus(form.desiredQuantity, form.ownedQuantity);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
+    onCloseRef.current = () => { if (!saving) onClose(); };
+  }, [onClose, saving]);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement
@@ -423,7 +456,7 @@ function EditCardModal({
         dialogRef.current?.querySelectorAll<HTMLElement>(
           'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ) ?? [],
-      ).filter((element) => !element.hasAttribute("hidden"));
+      ).filter((element) => element.getClientRects().length > 0 && !element.matches(":disabled"));
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable.at(-1);
@@ -452,15 +485,16 @@ function EditCardModal({
     <div
       aria-labelledby="edit-card-title"
       aria-modal="true"
-      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/45 px-0 py-0 backdrop-blur-sm sm:px-4 sm:py-6"
+      className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/45 p-3 backdrop-blur-sm sm:p-6"
+      onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onCloseRef.current(); }}
       role="dialog"
     >
       <section
-        className="flex max-h-dvh w-full flex-col overflow-hidden bg-white shadow-2xl sm:max-h-[90dvh] sm:max-w-4xl sm:rounded-lg sm:border sm:border-zinc-300"
+        className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-2xl sm:max-h-[90dvh]"
         ref={dialogRef}
       >
         <header className="flex items-center justify-between gap-4 border-b border-zinc-200 px-4 py-3 sm:px-5">
-          <h2 className="text-xl font-black" id="edit-card-title">Edit card</h2>
+          <h2 className="text-xl font-black" id="edit-card-title">Edit collection</h2>
           <button
             aria-label="Close edit card"
             className="grid size-11 shrink-0 place-items-center rounded-md border border-zinc-300 text-zinc-600 transition hover:border-zinc-950 hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d] focus-visible:ring-offset-2"
@@ -472,9 +506,47 @@ function EditCardModal({
           </button>
         </header>
 
-        <div className="overflow-y-auto p-4 sm:p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block md:col-span-2">
+        <div className="min-h-0 overflow-y-auto p-4 sm:p-5">
+          <p className="mb-4 text-lg font-bold leading-snug">{form.name}</p>
+          {!canEdit ? <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">You’re viewing the public collection. Sign in to edit quantities and card details.</p> : null}
+          <fieldset className="min-w-0" disabled={!canEdit || saving}>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+              <label className="text-sm font-bold" htmlFor="collection-wanted">Wanted quantity</label>
+              <div className="mt-2 flex items-center rounded-md border border-zinc-300 bg-white">
+                <button aria-label="Decrease wanted quantity" className="grid size-11 shrink-0 place-items-center disabled:opacity-30" disabled={saving || form.desiredQuantity === 0} onClick={() => setForm(current => ({ ...current, desiredQuantity: Math.max(0, current.desiredQuantity - 1) }))} type="button"><Minus className="size-4" /></button>
+                <input id="collection-wanted" aria-label="Wanted quantity" className="h-11 w-full min-w-0 appearance-textfield bg-transparent text-center text-base font-bold tabular-nums [&::-webkit-inner-spin-button]:appearance-none" type="number" min={0} max={10000} step={1} disabled={saving} value={form.desiredQuantity} onChange={event => { const value = event.target.valueAsNumber; setForm(current => ({ ...current, desiredQuantity: Number.isFinite(value) ? Math.max(0, Math.min(10000, Math.trunc(value))) : 0 })); }} />
+                <button aria-label="Increase wanted quantity" className="grid size-11 shrink-0 place-items-center disabled:opacity-30" disabled={saving || form.desiredQuantity >= 10000} onClick={() => setForm(current => ({ ...current, desiredQuantity: current.desiredQuantity + 1 }))} type="button"><Plus className="size-4" /></button>
+              </div>
+            </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+              <label className="text-sm font-bold" htmlFor="collection-owned">Owned quantity</label>
+              <div className="mt-2 flex items-center rounded-md border border-zinc-300 bg-white">
+                <button aria-label="Decrease owned quantity" className="grid size-11 shrink-0 place-items-center disabled:opacity-30" disabled={saving || form.ownedQuantity === 0} onClick={() => changeOwned(form.ownedQuantity - 1)} type="button"><Minus className="size-4" /></button>
+                <input id="collection-owned" aria-label="Owned quantity" className="h-11 w-full min-w-0 appearance-textfield bg-transparent text-center text-base font-bold tabular-nums [&::-webkit-inner-spin-button]:appearance-none" type="number" min={0} max={10000} step={1} value={form.ownedQuantity} onChange={event => changeOwned(Number.isFinite(event.target.valueAsNumber) ? Math.trunc(event.target.valueAsNumber) : 0)} />
+                <button aria-label="Increase owned quantity" className="grid size-11 shrink-0 place-items-center disabled:opacity-30" disabled={saving || form.ownedQuantity >= 10000} onClick={() => changeOwned(form.ownedQuantity + 1)} type="button"><Plus className="size-4" /></button>
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-sm font-semibold text-zinc-600" role="status">{form.desiredQuantity === 0 && form.ownedQuantity === 0 ? "Not in your collection" : status.status === "wishlist" ? `Wishlist · ${status.wishlistRemainingQuantity} still wanted` : "Owned · target met"}</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">Wanted is the total you want to keep, including copies you already own. Set it to 0 to stop tracking a wishlist target.</p>
+          {ownershipChanged && copyQuery.isPending ? <p className="mt-3 text-sm" role="status">Loading copy details…</p> : null}
+          {ownershipChanged && copyQuery.isError ? <div className="mt-3 text-sm text-rose-800" role="alert">Couldn’t load your copies. <button type="button" className="min-h-11 underline" onClick={() => void copyQuery.refetch()}>Retry</button></div> : null}
+          {adding ? <div className="mt-4 grid gap-3">
+            <p className="text-xs leading-5 text-zinc-500">Added copies are recorded in History with an unknown purchase cost.</p>
+            {copyQuery.data && copyQuery.data.printings.length > 1 ? <label className="text-sm font-semibold">Printing<select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3" value={form.printingId} onChange={event => setForm(current => ({ ...current, printingId: event.target.value }))}><option value="">Choose a printing</option>{copyQuery.data.printings.map(printing => <option key={printing.id} value={printing.id}>{printing.setCode || "Unknown code"} · {printing.setName}</option>)}</select></label> : null}
+            <label className="text-sm font-semibold">Condition of added copies<select className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-white px-3" value={form.condition} onChange={event => setForm(current => ({ ...current, condition: event.target.value as CardCondition }))}>{cardConditions.map(condition => <option key={condition}>{condition}</option>)}</select></label>
+          </div> : null}
+          {removeCount > 0 && copyQuery.data ? <div className="mt-4 rounded-md border border-rose-200 p-3">
+            <p className="text-sm font-semibold">{copyQuery.data.copies.length > 1 ? `Select ${removeCount} copies to remove` : "This copy will be removed when you save"}</p>
+            <div className="mt-2 max-h-44 overflow-y-auto">{copyQuery.data.copies.map(copy => <label key={copy.id} className="flex min-h-11 cursor-pointer items-center gap-2 py-2 text-sm"><input type="checkbox" className="size-4 shrink-0" checked={form.removeCopyIds.includes(copy.id)} onChange={event => setForm(current => ({ ...current, removeCopyIds: event.target.checked ? [...current.removeCopyIds, copy.id] : current.removeCopyIds.filter(id => id !== copy.id) }))} /><span>{copy.stickerNumber ? `#${copy.stickerNumber}` : copy.id} · {copy.condition}<span className="block text-xs text-zinc-500">{copy.source}</span></span></label>)}</div>
+            <p className="mt-2 text-xs text-zinc-500">Copies with sale or eBay listing history cannot be removed here.</p>
+          </div> : null}
+          {error ? <p className="mt-3 rounded-md bg-rose-50 p-3 text-sm font-semibold text-rose-800" role="alert">{error}</p> : null}
+          <details className="mt-5 border-t border-zinc-200 pt-4" open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+            <summary className="min-h-11 cursor-pointer text-sm font-bold">More details</summary>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
             <span className="text-sm font-medium text-zinc-700">Card name</span>
             <input
               className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
@@ -485,7 +557,7 @@ function EditCardModal({
             />
           </label>
 
-          <label className="block md:col-span-2">
+          <label className="block sm:col-span-2">
             <span className="text-sm font-medium text-zinc-700">TCGplayer product link</span>
             <input
               className="mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
@@ -496,7 +568,7 @@ function EditCardModal({
             />
           </label>
 
-          <div className={`grid gap-4 md:col-span-2 sm:grid-cols-2 ${form.desiredQuantity > 0 ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
+          <div className={`grid gap-4 sm:col-span-2 sm:grid-cols-2`}>
             <label className="block">
               <span className="text-sm font-medium text-zinc-700">Manual market estimate</span>
               <input
@@ -566,7 +638,7 @@ function EditCardModal({
             ) : null}
           </div>
 
-          <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+          <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
             {form.desiredQuantity > 0 ? (
               <label className="block">
                 <span className="text-sm font-medium text-zinc-700">Saved eBay listing</span>
@@ -601,7 +673,7 @@ function EditCardModal({
             </label>
           </div>
 
-          <label className="block md:col-span-2">
+          <label className="block sm:col-span-2">
             <span className="text-sm font-medium text-zinc-700">Notes</span>
             <textarea
               className="mt-1 min-h-24 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm outline-none transition focus:border-[#8a1f2d] focus:bg-white"
@@ -615,12 +687,14 @@ function EditCardModal({
             />
           </label>
           </div>
+          </details>
+          </fieldset>
         </div>
 
         <footer className={`flex flex-col gap-3 border-t border-zinc-200 bg-zinc-50 px-4 py-3 sm:flex-row sm:items-center sm:px-5 ${
           form.desiredQuantity > 0 ? "sm:justify-between" : "sm:justify-end"
         }`}>
-          {form.desiredQuantity > 0 ? (
+          {canEdit && form.desiredQuantity > 0 ? (
             <button
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800 focus-visible:ring-2 focus-visible:ring-rose-700 focus-visible:ring-offset-2"
               disabled={saving}
@@ -639,15 +713,17 @@ function EditCardModal({
             >
               Cancel
             </button>
-            <button
+            {!canEdit ? (
+              <Link className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-950 px-4 text-center text-sm font-semibold text-white" href={`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in to edit</Link>
+            ) : <button
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-              disabled={saving || form.edition === "Unknown edition"}
-              onClick={onSave}
+              disabled={saving || invalidSelection || (detailsChanged && form.edition === "Unknown edition")}
+              onClick={() => onSave(detailsChanged)}
               type="button"
             >
-              {saving ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Save aria-hidden="true" className="size-4" />}
-              Save changes
-            </button>
+              {saving ? <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" /> : null}
+              <span className="whitespace-nowrap">Save changes</span>
+            </button>}
           </div>
         </footer>
       </section>
@@ -1716,6 +1792,10 @@ export function WishlistApp() {
   const [searchInput, setSearchInput] = useState(query);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [editOriginalForm, setEditOriginalForm] = useState<EditForm | null>(null);
+  const [editDetailsOpen, setEditDetailsOpen] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [cardDetail, setCardDetail] = useState<CardDetailState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const [collectionWarning, setCollectionWarning] = useState<string | null>(null);
@@ -1819,12 +1899,8 @@ export function WishlistApp() {
   const deleteCard = trpc.library.delete.useMutation({
     onSuccess: async () => { await invalidateCardsAndSpend(); },
   });
-  const updateCard = trpc.library.update.useMutation({
-    onSuccess: async () => {
-      setEditForm(null);
-      await invalidateCardsAndSpend();
-    },
-  });
+  const updateCollection = trpc.library.updateCollection.useMutation();
+  const updateCard = trpc.library.update.useMutation();
 
   const rarityOptions = useMemo(
     () => list.data?.rarityOptions ?? [],
@@ -1893,19 +1969,41 @@ export function WishlistApp() {
   }
 
   function openCardEditor(card: Card) {
-    if (!canEdit) {
-      return;
-    }
-    setEditForm(editFormFromCard(card));
+    updateCard.reset();
+    updateCollection.reset();
+    setSaveError(null);
+    const form = editFormFromCard(card);
+    setEditOriginalForm(form);
+    setEditDetailsOpen(false);
+    setEditForm(form);
   }
 
-  function saveEdit() {
-    if (!editForm || editForm.edition === "Unknown edition") {
-      return;
-    }
-
-    updateCard.mutate({
+  async function saveEdit(details = false) {
+    if (!canEdit || !editForm || !editOriginalForm || savingEdit) return;
+    if (details && editForm.edition === "Unknown edition") return;
+    const ownedChanged = editForm.ownedQuantity !== editOriginalForm.ownedQuantity;
+    setSavingEdit(true);
+    setSaveError(null);
+    let quantitySaved = false;
+    try {
+      await updateCollection.mutateAsync({
+        id: editForm.id,
+        desiredQuantity: editForm.desiredQuantity,
+        ...(ownedChanged ? {
+          ownedQuantity: editForm.ownedQuantity,
+          expectedOwnedQuantity: editOriginalForm.ownedQuantity,
+          removeCopyIds: editForm.removeCopyIds,
+          printingId: editForm.printingId || undefined,
+          condition: editForm.condition,
+          operationId: editForm.operationId,
+        } : {}),
+      });
+      quantitySaved = true;
+      setEditForm(current => current ? { ...current, operationId: crypto.randomUUID(), removeCopyIds: [] } : current);
+      setEditOriginalForm(current => current ? { ...current, desiredQuantity: editForm.desiredQuantity, ownedQuantity: editForm.ownedQuantity } : current);
+      if (details && editForm.edition !== "Unknown edition") await updateCard.mutateAsync({
       id: editForm.id,
+      desiredQuantity: editForm.desiredQuantity,
       name: editForm.name,
       url: editForm.url || undefined,
       imageUrl: editForm.imageUrl || undefined,
@@ -1915,12 +2013,22 @@ export function WishlistApp() {
       rarity: editForm.rarity || undefined,
       edition: editForm.edition,
       chaseLevel:
-        editForm.status === "wishlist" && editForm.chaseLevel
+        editForm.desiredQuantity > editForm.ownedQuantity && editForm.chaseLevel
           ? Number(editForm.chaseLevel)
           : null,
       status: editForm.status,
       notes: editForm.notes || undefined,
-    });
+      });
+      setEditForm(null);
+    } catch (error) {
+      setSaveError(`${quantitySaved ? "Quantities saved; card details were not saved. " : ""}${error instanceof Error ? error.message : "Couldn’t save changes."}`);
+    } finally {
+      if (quantitySaved) {
+        try { await Promise.all([collectionChanged(ownedChanged ? "records" : "target"), utils.library.collectionCopies.invalidate({ id: editForm.id })]); }
+        catch (error) { setCollectionWarning(collectionRefreshFailureMessage(error)); }
+      }
+      setSavingEdit(false);
+    }
   }
 
   return (
@@ -2116,15 +2224,21 @@ export function WishlistApp() {
                   {paginatedCards.map((card: Card) => (
                     <article
                       data-library-card
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [data-library-media]")) return;
+                        const trigger = event.currentTarget.querySelector<HTMLButtonElement>("[data-library-open]");
+                        trigger?.focus();
+                        openCardEditor(card);
+                      }}
                       key={card.id}
-                      className="group flex min-w-0 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md sm:h-full sm:flex-col"
+                      className="group relative isolate flex min-w-0 cursor-pointer overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-400 hover:shadow-md sm:h-full sm:flex-col"
                     >
-                      <div className="flex w-32 shrink-0 flex-col border-r border-zinc-200 sm:w-full sm:border-r-0" data-library-media-column>
-                      <div className="grid h-36 place-items-center bg-[#f7f6f2] p-2 sm:h-auto sm:aspect-[4/5] sm:border-b sm:p-3" data-library-media>
+                      <div className="flex w-32 shrink-0 flex-col max-[360px]:w-28 border-r border-zinc-200 sm:w-full sm:border-r-0" data-library-media-column>
+                      <div className="relative grid h-36 shrink-0 place-items-center overflow-hidden bg-[#f7f6f2] p-2 sm:h-auto sm:aspect-[4/5] sm:border-b sm:p-3" data-library-media>
                         {card.imageUrl ? (
                           <button
                             aria-label={`Open larger image of ${card.name}`}
-                            className="group/image relative grid h-full w-full cursor-zoom-in place-items-center rounded-md transition hover:bg-zinc-100 focus-visible:bg-zinc-100"
+                            className="group/image absolute inset-2 z-10 grid min-h-0 min-w-0 sm:inset-3 cursor-zoom-in place-items-center rounded-md transition hover:bg-zinc-100 focus-visible:bg-zinc-100"
                             data-library-action
                             onClick={(event) => setCardDetail({ card, returnFocusTo: event.currentTarget })}
                             title="Open larger image"
@@ -2133,7 +2247,7 @@ export function WishlistApp() {
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               alt={card.name}
-                              className="aspect-[59/86] h-full max-h-full w-auto max-w-full rounded-sm object-contain shadow-sm transition duration-200 group-hover/image:scale-[1.03] group-focus-visible/image:scale-[1.03]"
+                              className="absolute inset-0 h-full w-full rounded-sm object-contain shadow-sm transition duration-200 group-hover/image:scale-[1.03] group-focus-visible/image:scale-[1.03]"
                               loading="lazy"
                               src={card.imageUrl}
                             />
@@ -2145,7 +2259,7 @@ export function WishlistApp() {
                             </span>
                           </button>
                         ) : (
-                          <div className="grid aspect-[59/86] h-full max-w-full place-items-center rounded border border-dashed border-zinc-300 px-3 text-center text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                          <div className="absolute inset-2 grid min-h-0 min-w-0 place-items-center sm:inset-3 rounded border border-dashed border-zinc-300 px-3 text-center text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
                             No image
                           </div>
                         )}
@@ -2154,28 +2268,9 @@ export function WishlistApp() {
                       </div>
 
                       <div className="flex min-w-0 flex-1 flex-col gap-1.5 p-2 sm:gap-3 sm:p-3">
-                        <div className="flex min-w-0 items-start">
-                          <div className="min-w-0 flex-1">
-                            {canEdit ? (
-                              <button
-                                className="line-clamp-2 min-h-11 min-w-11 text-left text-base font-bold leading-[1.2] text-zinc-950 underline-offset-4 transition hover:text-[#8a1f2d] hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d] sm:text-lg"
-                                onClick={() => openCardEditor(card)}
-                                title={`Edit ${card.name}`}
-                                type="button"
-                              >
-                                {card.name}
-                              </button>
-                            ) : (
-                              <h3
-                                className="line-clamp-2 text-base font-bold leading-[1.2] text-zinc-950 sm:text-lg"
-                                title={card.name}
-                              >
-                                {card.name}
-                              </h3>
-                            )}
-                          </div>
+                        <div className="flex min-w-0 flex-col items-start gap-1 sm:gap-2">
                           <span
-                            className={`ml-2 shrink-0 rounded-md border px-2.5 py-1 text-xs font-bold uppercase tracking-[0.08em] ${
+                            className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${
                               card.status === "owned"
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                                 : "border-rose-200 bg-rose-50 text-rose-800"
@@ -2183,6 +2278,17 @@ export function WishlistApp() {
                           >
                             {card.status === "owned" ? "Owned" : "Wishlist"}
                           </span>
+                          <h3 className="w-full">
+                            <button
+                              className="line-clamp-2 min-h-11 min-w-11 w-full cursor-pointer text-left text-base font-bold leading-[1.2] text-zinc-950 underline-offset-4 hover:text-[#8a1f2d] hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d] sm:text-lg"
+                              data-library-open
+                              onClick={() => openCardEditor(card)}
+                              title={`Edit collection for ${card.name}`}
+                              type="button"
+                            >
+                              {card.name}
+                            </button>
+                          </h3>
                         </div>
 
                         <div className="grid gap-2">
@@ -2241,7 +2347,7 @@ export function WishlistApp() {
                             {isTcgplayerUrl(card.url) ? (
                               <a
                                 aria-label={`Open ${card.name} on TCGplayer`}
-                                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                                className="relative z-10 inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
                                 data-library-action
                                 href={card.url ?? undefined}
                                 rel="noreferrer"
@@ -2253,7 +2359,7 @@ export function WishlistApp() {
                             ) : null}
                             <a
                               aria-label={`Open eBay search for ${card.name}`}
-                              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                              className="relative z-10 inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-bold text-zinc-700 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
                               data-library-action
                               href={ebaySearchUrl(card)}
                               rel="noreferrer"
@@ -2265,7 +2371,7 @@ export function WishlistApp() {
                             {card.url && !isTcgplayerUrl(card.url) ? (
                               <a
                                 aria-label={`Open saved link for ${card.name}`}
-                                className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
+                                className="relative z-10 inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition hover:border-[#8a1f2d] hover:bg-rose-50 hover:text-[#8a1f2d]"
                                 data-library-action
                                 href={card.url}
                                 rel="noreferrer"
@@ -2369,13 +2475,18 @@ export function WishlistApp() {
           pending={deleteCard.isPending}
         />
       ) : null}
-      {canEdit && editForm && !deleteTarget ? (
+      {editForm && editOriginalForm && !deleteTarget ? (
         <EditCardModal
+          canEdit={canEdit}
           form={editForm}
+          originalForm={editOriginalForm}
+          detailsOpen={editDetailsOpen}
+          setDetailsOpen={setEditDetailsOpen}
+          error={saveError}
           onClose={() => setEditForm(null)}
           onDelete={deleteCardById}
           onSave={saveEdit}
-          saving={updateCard.isPending}
+          saving={savingEdit}
           setForm={(updater) =>
             setEditForm((current) => (current ? updater(current) : current))
           }

@@ -74,9 +74,9 @@ test("Library results use compact phone rows and add columns as more screen widt
 test("Library image and external actions keep accessible touch targets in the compact layout", () => {
   assert.match(source, /aria-label=\{`Open larger image of \$\{card\.name\}`\}/);
   assert.match(source, /data-library-media/);
-  assert.match(source, /className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md/);
-  assert.match(source, /className="inline-flex size-11 items-center justify-center rounded-md/);
-  assert.match(source, /className="line-clamp-2 min-h-11 min-w-11 text-left/);
+  assert.match(source, /className="relative z-10 inline-flex min-h-11 min-w-11 items-center justify-center rounded-md/);
+  assert.match(source, /className="relative z-10 inline-flex size-11 items-center justify-center rounded-md/);
+  assert.match(source, /className="line-clamp-2 min-h-11 min-w-11[\s\S]*?text-left/);
   assert.match(source, /className="absolute right-0 top-0 z-10 grid size-11/);
 });
 
@@ -162,7 +162,7 @@ test("Add to wishlist is a global Add destination backed by a page form", () => 
 test("Edit card uses a focused viewport dialog with wishlist removal at the bottom", () => {
   assert.match(source, /function EditCardModal[\s\S]*?return createPortal\(/);
   assert.match(source, /aria-labelledby="edit-card-title"/);
-  assert.match(source, /max-h-dvh[\s\S]*?sm:max-w-4xl/);
+  assert.match(source, /max-h-\[calc\(100dvh-1\.5rem\)\][\s\S]*?max-w-lg/);
   assert.match(source, /overflow-y-auto p-4 sm:p-5/);
   assert.match(source, /<footer[\s\S]*?Remove from wishlist[\s\S]*?Save changes/);
   assert.match(source, /event\.key === "Escape"/);
