@@ -234,7 +234,7 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
         {!embedded && source.mode === "preview" ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">Preview mode: saving changes only this browser tab.</p> : null}
         <fieldset className="grid min-w-0 items-start gap-3 disabled:opacity-70 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,.85fr)]" disabled={saving}>
           <div className="min-w-0 space-y-4">
-            <section className="rounded-lg border border-zinc-300 bg-white p-3" aria-label="Find cards">
+            <section className={embedded ? "min-w-0" : "rounded-lg border border-zinc-300 bg-white p-3"} aria-label="Find cards">
               <div className="flex min-h-8 items-center justify-between gap-2">
                 <label className="text-sm font-bold" htmlFor="owned-card-search">Card name or set code</label>
                 <button type="button" aria-haspopup="dialog" title={activeRarity || "Filter rarity"} className="relative inline-flex shrink-0 items-center gap-1.5 rounded-md py-1 text-sm font-semibold text-zinc-600 after:absolute after:-inset-y-2 after:inset-x-0 hover:text-[#8a1f2d] focus-visible:outline-2 focus-visible:outline-[#8a1f2d]" onClick={() => setFilterOpen(true)}><SlidersHorizontal className="size-3.5" />Filter rarity{activeRarity ? <span aria-label={`Active rarity: ${activeRarity}`} className="size-1.5 rounded-full bg-[#8a1f2d]" /> : null}</button>
@@ -252,7 +252,7 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
             </section>
           </div>
           <div className="min-w-0 space-y-3 md:sticky md:top-3">
-          <section aria-label="Cards to add" className="min-w-0 rounded-lg border border-zinc-300 bg-white p-3">
+          <section aria-label="Cards to add" className={embedded ? "min-w-0" : "min-w-0 rounded-lg border border-zinc-300 bg-white p-3"}>
             <div className="flex items-baseline justify-between gap-2"><h2 className="text-lg font-bold">Your cards</h2><div className="flex items-center gap-2">{draft.cards.length ? <button type="button" className="min-h-11 px-2 text-xs text-zinc-500 hover:text-rose-800" onClick={() => setClearOpen(true)}>Clear all</button> : null}<span className="text-sm font-semibold text-zinc-500">{totalQuantity} {totalQuantity === 1 ? "copy" : "copies"}</span></div></div>
             <p className="mt-1 text-xs leading-5 text-zinc-500">Matching copies combine automatically.</p>
             {draft.cards.length ? <div className="relative mt-2"><Search className="pointer-events-none absolute left-2 top-3 size-4 text-zinc-400" /><input aria-label="Search your cards" onKeyDown={(event) => { if (embedded && event.key === "Enter") event.preventDefault(); }} placeholder="Search your cards" value={queueQuery} onChange={(event) => { setQueueQuery(event.target.value); setQueuePage(1); }} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-8 pr-2 text-sm outline-none focus:border-[#8a1f2d]" /></div> : null}
