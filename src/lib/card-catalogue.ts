@@ -73,3 +73,27 @@ export function normalizeCatalogueProduct(raw: unknown, group: RawGroup): Catalo
     searchText: normalizeCatalogueText(`${value.name} ${setCode} ${String(setCode).replace(/[^a-z0-9]/gi, "")} ${group.name} ${group.abbreviation ?? ""}`),
   };
 }
+
+/** Market estimates are USD cents, keyed by TCGplayer edition; never condition-specific. */
+export function catalogueMarketPrices(rows: unknown): Map<number, Record<string, number>> {
+  const result = new Map<number, Record<string, number>>();
+  if (!Array.isArray(rows)) return result;
+  for (const row of rows) {
+    if (!row || !Number.isSafeInteger(row.productId) || row.productId < 1
+      || typeof row.subTypeName !== "string" || !row.subTypeName.trim()
+      || typeof row.marketPrice !== "number" || !Number.isFinite(row.marketPrice) || row.marketPrice < 0) continue;
+    const cents = Math.round(row.marketPrice * 100);
+    if (!Number.isSafeInteger(cents)) continue;
+    const prices = result.get(row.productId) ?? {};
+    Object.defineProperty(prices, row.subTypeName, { value: cents, enumerable: true, configurable: true });
+    result.set(row.productId, prices);
+  }
+  return result;
+}
+
+export function cataloguePriceLabel(prices: Record<string, number> | null | undefined) {
+  const values = Object.values(prices ?? {}).filter((value) => Number.isFinite(value) && value >= 0);
+  if (!values.length) return null;
+  const low = Math.min(...values), high = Math.max(...values);
+  return `${low !== high ? "from " : ""}US$${(low / 100).toFixed(2)}`;
+}

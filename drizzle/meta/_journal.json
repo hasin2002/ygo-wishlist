@@ -85,6 +85,13 @@
       "when": 1789234694907,
       "tag": "0011_owned_card_catalogue",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789247303612,
+      "tag": "0012_catalogue_market_prices",
+      "breakpoints": true
     }
   ]
 }

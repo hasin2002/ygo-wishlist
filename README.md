@@ -330,3 +330,9 @@ catalogue becomes searchable only when the complete import succeeds; failed
 refreshes keep the previous catalogue available. Initial import takes several
 minutes, independently of search latency. No credentials for TCGCSV or eBay are
 needed for importing card metadata.
+
+Catalogue search results show TCGplayer market estimates in USD, imported from
+TCGCSV with the daily catalogue sync. Multiple edition prices show the lowest
+as “from”; these estimates are not condition-specific and never become purchase
+costs. Missing prices remain blank. Migration 0012 adds the nullable price map;
+the next catalogue sync automatically backfills older catalogue rows.

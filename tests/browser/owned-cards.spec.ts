@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const products = [
-  { productId: 12345, name: "Blue-Eyes White Dragon", setCode: "LOB-001", setName: "Legend of Blue Eyes White Dragon", rarity: "Ultra Rare", imageUrl: null, tcgplayerUrl: "https://www.tcgplayer.com/product/12345" },
+  { marketPricesUsdCents: { "1st Edition": 56 }, productId: 12345, name: "Blue-Eyes White Dragon", setCode: "LOB-001", setName: "Legend of Blue Eyes White Dragon", rarity: "Ultra Rare", imageUrl: null, tcgplayerUrl: "https://www.tcgplayer.com/product/12345" },
   { productId: 12346, name: "Blue-Eyes White Dragon", setCode: "RA02-EN001", setName: "Rarity Collection II", rarity: "Secret Rare", imageUrl: null, tcgplayerUrl: "https://www.tcgplayer.com/product/12346" },
 ];
 
@@ -26,6 +26,7 @@ for (const width of [1280, 843, 390]) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto("/records/new/owned");
     await page.getByLabel("Card name or set code").fill("Blue-Eyes ultra rare");
+    await expect(page.getByText("TCGplayer · US$0.56", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Remove detected rarity filter" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Choose Blue-Eyes White Dragon, LOB-001, Ultra Rare" })).toBeVisible();
     await page.getByRole("button", { name: "Choose Blue-Eyes White Dragon, LOB-001, Ultra Rare" }).click();
@@ -92,17 +93,30 @@ test("queue pagination, search, rarity modal and confirmed clear", async ({ page
     await dialog.getByRole("button", { name: "Add to list" }).click();
   }
   const queue = page.getByRole("region", { name: "Cards to add" });
-  await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(4);
+  await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(5);
+  await expect(queue.getByRole("navigation", { name: "Your cards pages" })).toHaveCount(0);
+  await page.evaluate(() => {
+    const key = Object.keys(sessionStorage).find((key) => key.startsWith("ygo:owned-cards:v1:"))!;
+    const draft = JSON.parse(sessionStorage.getItem(key)!);
+    draft.cards = Array.from({ length: 21 }, (_, index) => ({
+      ...draft.cards[0], productId: 10000 + index, name: `Queue card ${index}`,
+      condition: index === 0 ? "Near Mint" : "Lightly Played", quantity: 1,
+    }));
+    sessionStorage.setItem(key, JSON.stringify(draft));
+  });
+  await page.reload();
+  await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(20);
   await queue.getByRole("button", { name: "Next cards" }).click();
   await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(1);
   await queue.getByLabel("Search your cards").fill("Near Mint");
   await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(1);
   await queue.getByRole("button", { name: "Clear all", exact: true }).click();
   await page.getByRole("button", { name: "Keep cards", exact: true }).click();
-  await expect(queue.getByText("5 copies", { exact: true })).toBeVisible();
+  await expect(queue.getByText("21 copies", { exact: true })).toBeVisible();
   await queue.getByRole("button", { name: "Clear all", exact: true }).click();
   await page.getByRole("button", { name: "Clear list", exact: true }).click();
   await expect(queue.getByText("0 copies", { exact: true })).toBeVisible();
+  await page.getByLabel("Card name or set code").fill("Blue-Eyes");
   await page.getByRole("button", { name: "Filter rarity", exact: true }).click();
   await page.getByRole("dialog", { name: "Filter rarity" }).getByRole("button", { name: "Secret Rare", exact: true }).click();
   await expect(page.getByRole("button", { name: /Choose Blue-Eyes/ })).toHaveCount(1);

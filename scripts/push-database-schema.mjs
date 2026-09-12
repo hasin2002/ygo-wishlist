@@ -22,9 +22,9 @@ const forwardedArguments = process.argv.slice(2).filter((argument) => argument !
 if (catalogueOnly) {
   const { readFile } = await import("node:fs/promises");
   const { default: pg } = await import("pg");
-  const migration = await readFile(path.join(projectRoot, "drizzle/0011_owned_card_catalogue.sql"), "utf8");
+  const migration = (await Promise.all(["0011_owned_card_catalogue.sql", "0012_catalogue_market_prices.sql"].map((file) => readFile(path.join(projectRoot, "drizzle", file), "utf8")))).join("\n--> statement-breakpoint\n");
   const statements = migration.split("--> statement-breakpoint").map((statement) => statement.trim()).filter(Boolean);
-  if (statements.some((statement) => !/^CREATE (?:TABLE|INDEX) "card_catalogue_/.test(statement))) {
+  if (statements.some((statement) => !/^CREATE (?:TABLE|INDEX) "card_catalogue_/.test(statement) && statement !== 'ALTER TABLE "card_catalogue_products" ADD COLUMN "market_prices_usd_cents" jsonb;')) {
     throw new Error("Catalogue-only push accepts only additive catalogue tables and indexes.");
   }
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 8000 });
@@ -32,10 +32,10 @@ if (catalogueOnly) {
     await client.connect();
     await client.query("begin");
     for (const statement of statements) {
-      await client.query(statement.replace(/^CREATE (TABLE|INDEX) /, "CREATE $1 IF NOT EXISTS "));
+      await client.query(statement.replace(/^CREATE (TABLE|INDEX) /, "CREATE $1 IF NOT EXISTS ").replace('ADD COLUMN "market_prices_usd_cents"', 'ADD COLUMN IF NOT EXISTS "market_prices_usd_cents"'));
     }
     await client.query("commit");
-    console.log("Catalogue tables and indexes are ready. No existing tables or sequences were changed.");
+    console.log("Catalogue schema is up to date; ownership tables were unchanged.");
   } catch (error) {
     await client.query("rollback").catch(() => {});
     throw error;

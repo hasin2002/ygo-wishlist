@@ -33,3 +33,17 @@ test("rarity words inside actual card names remain searchable", () => {
   assert.equal(parseCatalogueQuery("Common Charity").detectedRarity, null);
   assert.equal(parseCatalogueQuery("Blue Eyes common").detectedRarity, "Common");
 });
+
+test("market estimates preserve editions, USD cents, zero and missing values", async () => {
+  const { catalogueMarketPrices, cataloguePriceLabel } = await import("../src/lib/card-catalogue.ts");
+  const prices = catalogueMarketPrices([
+    { productId: 1, subTypeName: "1st Edition", marketPrice: 0.56 },
+    { productId: 1, subTypeName: "Unlimited", marketPrice: 1.23 },
+    { productId: 2, subTypeName: "1st Edition", marketPrice: null },
+    { productId: 3, subTypeName: "1st Edition", marketPrice: 0 },
+  ]);
+  assert.deepEqual(prices.get(1), { "1st Edition": 56, Unlimited: 123 });
+  assert.equal(cataloguePriceLabel(prices.get(1)), "from US$0.56");
+  assert.equal(cataloguePriceLabel(prices.get(2)), null);
+  assert.equal(cataloguePriceLabel(prices.get(3)), "US$0.00");
+});

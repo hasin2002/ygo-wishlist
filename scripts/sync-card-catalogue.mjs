@@ -1,6 +1,6 @@
 import pg from "pg";
 import { setTimeout as delay } from "node:timers/promises";
-import { normalizeCatalogueProduct } from "../src/lib/card-catalogue.ts";
+import { catalogueMarketPrices, normalizeCatalogueProduct } from "../src/lib/card-catalogue.ts";
 
 // Run manually or daily on the development/deployment host. No user search calls TCGCSV.
 const connectionString = process.env.DATABASE_URL;
@@ -25,16 +25,20 @@ try {
   if (!locked) throw new Error("A catalogue sync is already running.");
   await client.query("insert into card_catalogue_sync (id) values ('yugioh') on conflict do nothing");
   let state = (await client.query("select * from card_catalogue_sync where id = 'yugioh'")).rows[0];
+  const pricesMissing = Boolean((await client.query("select 1 from card_catalogue_products where market_prices_usd_cents is null limit 1")).rowCount);
+  if (pricesMissing && state.pending_timestamp) {
+    await client.query("delete from card_catalogue_staging where exists (select 1 from jsonb_array_elements(products) p where not (p ? 'marketPricesUsdCents'))");
+  }
   let stamp = state.pending_timestamp;
   let groups = state.pending_groups;
   if (!stamp || !Array.isArray(groups)) {
-    if (state.last_attempt_at && Date.now() - new Date(state.last_attempt_at).getTime() < 86400_000) {
+    if (!pricesMissing && state.last_attempt_at && Date.now() - new Date(state.last_attempt_at).getTime() < 86400_000) {
       console.log("Catalogue already checked within 24 hours; no remote requests made.");
       process.exitCode = 0;
     } else {
       stamp = await request("last-updated.txt", false);
       if (!Number.isFinite(Date.parse(stamp))) throw new Error("Invalid TCGCSV build timestamp.");
-      if (state.source_timestamp && Date.parse(stamp) <= Date.parse(state.source_timestamp)) {
+      if (!pricesMissing && state.source_timestamp && Date.parse(stamp) <= Date.parse(state.source_timestamp)) {
         await client.query("update card_catalogue_sync set last_attempt_at = now() where id = 'yugioh'");
         console.log("The latest TCGCSV build is already imported.");
         stamp = null;
@@ -56,7 +60,9 @@ try {
     for (const group of groups) {
       if (completed.has(group.groupId)) continue;
       const raw = await request(`tcgplayer/2/${group.groupId}/products`);
-      const normalized = raw.map((product) => normalizeCatalogueProduct(product, group)).filter(Boolean);
+      const prices = catalogueMarketPrices(await request(`tcgplayer/2/${group.groupId}/prices`));
+      const normalized = raw.map((product) => normalizeCatalogueProduct(product, group)).filter(Boolean)
+        .map((product) => ({ ...product, marketPricesUsdCents: prices.get(product.productId) ?? {} }));
       // A product explicitly marked as a single must never be silently dropped by validation.
       const declaredSingles = raw.filter((product) => Array.isArray(product.extendedData) && product.extendedData.some((f) => f.name === "Number" && f.value) && product.extendedData.some((f) => f.name === "Rarity" && f.value && !/^(n\/a|none|unknown)$/i.test(f.value))).length;
       if (normalized.length < declaredSingles) throw new Error(`Invalid single-card metadata in group ${group.groupId}; catalogue retained.`);
@@ -68,9 +74,9 @@ try {
     if (!stagedCount || (state.product_count > 1000 && stagedCount < state.product_count * 0.9)) throw new Error("Catalogue is empty or unexpectedly smaller; existing catalogue retained for investigation.");
     await client.query("begin");
     await client.query("delete from card_catalogue_products");
-    await client.query(`insert into card_catalogue_products (product_id,group_id,name,image_url,tcgplayer_url,set_code,set_name,rarity,search_text)
-      select p."productId",p."groupId",p.name,p."imageUrl",p."tcgplayerUrl",p."setCode",p."setName",p.rarity,p."searchText"
-      from card_catalogue_staging s cross join lateral jsonb_to_recordset(s.products) as p("productId" integer,"groupId" integer,name text,"imageUrl" text,"tcgplayerUrl" text,"setCode" text,"setName" text,rarity text,"searchText" text)
+    await client.query(`insert into card_catalogue_products (product_id,group_id,name,image_url,tcgplayer_url,set_code,set_name,rarity,search_text,market_prices_usd_cents)
+      select p."productId",p."groupId",p.name,p."imageUrl",p."tcgplayerUrl",p."setCode",p."setName",p.rarity,p."searchText",p."marketPricesUsdCents"
+      from card_catalogue_staging s cross join lateral jsonb_to_recordset(s.products) as p("productId" integer,"groupId" integer,name text,"imageUrl" text,"tcgplayerUrl" text,"setCode" text,"setName" text,rarity text,"searchText" text,"marketPricesUsdCents" jsonb)
       where s.source_timestamp=$1`, [stamp]);
     await client.query("update card_catalogue_sync set source_timestamp=$1,pending_timestamp=null,pending_groups=null,updated_at=now(),product_count=$2,syncing=false where id='yugioh'", [stamp, stagedCount]);
     await client.query("delete from card_catalogue_staging");
