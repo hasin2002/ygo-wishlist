@@ -1,5 +1,7 @@
 "use client";
 
+import { CardQuantityInput } from "@/components/records/card-quantity-input";
+
 import {
   Archive,
   Boxes,
@@ -240,6 +242,7 @@ function isHttpUrl(value: string) {
 
 function productInput(value: ProductIdentityDraft): ProductIdentityInput {
   return {
+    catalogueProductId: value.catalogueProductId,
     selectedTargetId: value.selectedTargetId,
     tcgplayerUrl: value.tcgplayerUrl.trim(),
     name: value.name.trim(),
@@ -701,8 +704,8 @@ export function PurchaseForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved
         </div>
       </FormSection></StepPanel> : null}
 
-      {step === 3 ? <StepPanel step={step}><FormSection description="Fetch the TCGplayer details, check the populated fields, and correct anything that is incomplete." number={3} title={`${selectedKind?.label || "Item"} details`}>
-        {draft.kind === "card" ? <ProductIdentityEditor cardNameFields={<div className="grid grid-cols-[minmax(0,1.4fr)_minmax(7rem,0.6fr)] gap-3"><label><span className="text-sm font-bold text-zinc-700">Condition <span className="text-rose-700">*</span></span><select className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, card: { ...current.card, condition: event.target.value as CardCondition } }))} required value={draft.card.condition ?? "Near Mint"}>{cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><input className={fieldClass} min="1" onChange={(event) => setDraft((current) => ({ ...current, card: { ...current.card, quantity: Number(event.target.value) } }))} onFocus={selectNumberOnFocus} required type="number" value={draft.card.quantity} /></label></div>} compact kind="card" onChange={(identity) => setDraft((current) => { const changed = identity.selectedTargetId !== current.card.selectedTargetId || identity.name !== current.card.name || identity.rarity !== current.card.rarity || identity.edition !== current.card.edition; return { ...current, card: { ...current.card, ...identity, pricing: changed ? undefined : current.card.pricing } }; })} value={draft.card} /> : null}
+      {step === 3 ? <StepPanel step={step}><FormSection description={draft.kind === "card" || draft.kind === "bulk" ? "Find your cards in the catalogue, then choose edition, condition and quantity." : "Check the product details and quantity."} number={3} title={`${selectedKind?.label || "Item"} details`}>
+        {draft.kind === "card" ? <ProductIdentityEditor cardNameFields={<div className="grid grid-cols-[minmax(0,1.4fr)_minmax(9rem,0.6fr)] gap-3"><label><span className="text-sm font-bold text-zinc-700">Condition <span className="text-rose-700">*</span></span><select className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, card: { ...current.card, condition: event.target.value as CardCondition } }))} required value={draft.card.condition ?? "Near Mint"}>{cardConditionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><CardQuantityInput value={draft.card.quantity} onChange={(quantity) => setDraft((current) => ({ ...current, card: { ...current.card, quantity } }))} /></label></div>} compact kind="card" onChange={(identity) => setDraft((current) => { const changed = identity.selectedTargetId !== current.card.selectedTargetId || identity.name !== current.card.name || identity.rarity !== current.card.rarity || identity.edition !== current.card.edition; return { ...current, card: { ...current.card, ...identity, pricing: changed ? undefined : current.card.pricing } }; })} value={draft.card} /> : null}
         {draft.kind === "sealed" ? <div className="grid gap-4"><ProductIdentityEditor kind="sealed" onChange={(identity) => setDraft((current) => ({ ...current, sealed: { ...current.sealed, ...identity } }))} value={draft.sealed} /><label className="sm:max-w-52"><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><input className={fieldClass} min="1" onChange={(event) => setDraft((current) => ({ ...current, sealed: { ...current.sealed, quantity: Number(event.target.value) }, sealedUnitAllocations: [], sealedAllocationsReviewed: false }))} onFocus={selectNumberOnFocus} required type="number" value={draft.sealed.quantity} /></label>{amountKnown && draft.sealed.quantity > 1 ? <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3"><label className="flex items-start gap-2 text-sm font-semibold text-zinc-800"><input checked={draft.useSealedOverrides} onChange={(event) => setDraft((current) => ({ ...current, useSealedOverrides: event.target.checked, sealedUnitAllocations: event.target.checked ? Array.from({ length: current.sealed.quantity }, (_, index) => current.sealedUnitAllocations[index] ?? equalSealedUnitAllocations[index] ?? "0.00") : [], sealedAllocationsReviewed: false }))} type="checkbox" />Allocate different costs to the exact sealed units</label><p className="mt-1 text-xs font-medium text-zinc-500">The normal policy splits the receipt evenly, including any one-penny remainder. Use this only when you have reviewed a different cost for each physical unit.</p>{draft.useSealedOverrides ? <div className="mt-3 grid gap-2"><div className="grid gap-2 sm:grid-cols-3">{Array.from({ length: draft.sealed.quantity }, (_, index) => <label key={index}><span className="text-xs font-bold text-zinc-600">Unit {index + 1}</span><div className="relative mt-1"><span className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-bold text-zinc-500">£</span><input className={`${fieldClass} mt-0 pl-7`} inputMode="decimal" min="0" onChange={(event) => setDraft((current) => ({ ...current, sealedUnitAllocations: Array.from({ length: current.sealed.quantity }, (_, currentIndex) => currentIndex === index ? event.target.value : current.sealedUnitAllocations[currentIndex] ?? equalSealedUnitAllocations[currentIndex] ?? "0.00"), sealedAllocationsReviewed: false }))} step="0.01" type="number" value={draft.sealedUnitAllocations[index] ?? equalSealedUnitAllocations[index] ?? "0.00"} /></div></label>)}</div><label className="flex items-start gap-2 text-sm font-semibold text-zinc-800"><input checked={draft.sealedAllocationsReviewed} onChange={(event) => setDraft((current) => ({ ...current, sealedAllocationsReviewed: event.target.checked }))} type="checkbox" />I reviewed these exact unit costs and they add up to the purchase total.</label></div> : null}</div> : null}</div> : null}
         {draft.kind === "bulk" ? <div className="grid gap-5"><label className="max-w-xs"><span className="text-sm font-bold text-zinc-700">Total cards in lot <span className="text-rose-700">*</span></span><input className={fieldClass} inputMode="numeric" min="1" onChange={(event) => setDraft((current) => ({ ...current, bulkTotalCardCount: event.target.value }))} onFocus={selectNumberOnFocus} placeholder="e.g. 100" required type="number" value={draft.bulkTotalCardCount} /><span className="mt-1 block text-xs font-medium leading-5 text-zinc-500">Count every physical card in the lot, even if you only identify some of them now. This fixes each card&apos;s share of the purchase cost.</span></label><CardContentsEditor allowExistingIncomplete={Boolean(edit)} onChange={(bulkCards) => setDraft((current) => ({ ...current, bulkCards }))} onFinishCard={source.mode === "live" ? cardPricing.requestPricing : undefined} rows={draft.bulkCards} /></div> : null}
         {draft.kind === "supply" ? <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold text-zinc-700">Supply or extra <span className="text-rose-700">*</span></span><select className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, supplyCategory: event.target.value as SupplyCategory }))} value={draft.supplyCategory}><option value="sleeves">Sleeves</option><option value="binder">Binder</option><option value="storage">Storage</option><option value="playmat">Playmat</option><option value="other">Other</option></select></label><label><span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span><input className={fieldClass} min="1" onChange={(event) => setDraft((current) => ({ ...current, supplyQuantity: Number(event.target.value) }))} onFocus={selectNumberOnFocus} required type="number" value={draft.supplyQuantity} /></label>{draft.supplyCategory === "other" ? <label className="sm:col-span-2"><span className="text-sm font-bold text-zinc-700">What is it? <span className="text-rose-700">*</span></span><input className={fieldClass} onChange={(event) => setDraft((current) => ({ ...current, supplyOther: event.target.value }))} required value={draft.supplyOther} /></label> : null}</div> : null}
@@ -729,6 +732,7 @@ export function PurchaseForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved
 }
 
 type OpeningDraft = {
+  submissionId?: string;
   version: 8;
   acquisitionMode: "tracked" | "untracked" | null;
   recordName: string;
@@ -798,16 +802,18 @@ function openingEditDraft(record: RecordEntry, snapshot: RecordsSnapshot): Openi
 
 export function OpeningForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved: (recordId: string, warning?: string) => void }) {
   const source = useRecordsDataSource();
+  const [formSubmissionId] = useState(() => crypto.randomUUID());
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnHref = taskReturnHref(searchParams.get("origin"));
   const requested = searchParams.get("sealedId");
   const requestedUnit = source.snapshot.sealedUnits.find((unit) => unit.id === requested && unit.status === "sealed");
   const initialDraft = useMemo<OpeningDraft>(() => ({
+    submissionId: formSubmissionId,
     ...(edit ? openingEditDraft(edit.record, edit.snapshot) : {
     version: 8,
     acquisitionMode: requestedUnit ? "tracked" : null,
-    recordName: "",
+    recordName: requestedUnit ? `${requestedUnit.name} opening`.slice(0, 80) : "",
     date: today(),
     notes: "",
     total: requestedUnit?.allocationPence !== null && requestedUnit?.allocationPence !== undefined ? (requestedUnit.allocationPence / 100).toFixed(2) : "",
@@ -824,7 +830,7 @@ export function OpeningForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved:
     sourceOther: "",
     pulls: [blankCardContents()],
     }),
-  }), [edit, requestedUnit]);
+  }), [edit, requestedUnit, formSubmissionId]);
   const launchIntent = useMemo(() => ({
     kind: requested ? "sealed-unit" as const : "none" as const,
     id: requested,
@@ -840,6 +846,10 @@ export function OpeningForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved:
     isValidData: isOpeningDraft,
   });
   const { data: draft, setData: setDraft } = lifecycle;
+  useEffect(() => {
+    if (!lifecycle.hydrated || draft.submissionId) return;
+    setDraft((current) => current.submissionId ? current : { ...current, submissionId: formSubmissionId });
+  }, [draft.submissionId, formSubmissionId, lifecycle.hydrated, setDraft]);
   const updatePullPricing = useCallback((cardId: string, pricing: CardPricingDraft) => {
     setDraft((current) => ({
       ...current,
@@ -888,6 +898,7 @@ export function OpeningForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved:
     const acquisition = unit ? formSnapshot.records.find((record) => record.id === unit.acquiredRecordId) : null;
     if (!unit || !acquisition) return;
     setDraft((current) => ({ ...current, acquisitionMode: "tracked", sealedUnitId: unit.id,
+      recordName: current.recordName.trim() || `${unit.name} opening`.slice(0, 80),
       sourceOption: sourceOptions.find((option) => option.label === acquisition.source)?.value ?? "other",
       sourceOther: sourceOptions.some((option) => option.label === acquisition.source) ? "" : acquisition.source,
       total: unit.allocationPence !== null && unit.allocationPence !== undefined ? (unit.allocationPence / 100).toFixed(2) : "",
@@ -976,6 +987,7 @@ export function OpeningForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved:
       return;
     }
     const result = await source.createOpening({
+      operationId: draft.submissionId ?? formSubmissionId,
       recordName: draft.recordName.trim(),
       date: draft.date,
       notes: draft.notes.trim(),
@@ -1033,7 +1045,7 @@ export function OpeningForm({ edit, onSaved }: { edit?: RecordFormEdit; onSaved:
         </div> : null}
       </FormSection></StepPanel> : null}
 
-      {step === 3 ? <StepPanel step={step}><FormSection description="Each row creates physical Copies tied to this opening. Fetch and check every card before reviewing." number={3} title="Pulled cards"><CardContentsEditor allowExistingIncomplete={Boolean(edit)} noun="pulled card" onChange={(pulls) => setDraft((current) => ({ ...current, pulls }))} onFinishCard={source.mode === "live" ? cardPricing.requestPricing : undefined} rows={draft.pulls} /></FormSection></StepPanel> : null}
+      {step === 3 ? <StepPanel step={step}><FormSection description="Choose each pulled card from the catalogue. Its physical Copies stay tied to this opening." number={3} title="Pulled cards"><CardContentsEditor allowExistingIncomplete={Boolean(edit)} noun="pulled card" onChange={(pulls) => setDraft((current) => ({ ...current, pulls }))} onFinishCard={source.mode === "live" ? cardPricing.requestPricing : undefined} rows={draft.pulls} /></FormSection></StepPanel> : null}
 
       {step === 4 ? <StepPanel step={step}><div className="grid gap-4"><PreviewNotice label={source.mode === "preview" ? "Preview only." : "Review before saving."}>This is a read-only review. Nothing has been saved; only the confirmation button below {edit ? "updates this existing Pack Opening" : `creates the ${source.mode === "preview" ? "preview " : ""}opening`}.</PreviewNotice><FormSection description="Check the product, source, date, pulled cards, and notes. Use Edit to correct a section." number={4} title="Review opening">
         <div className="flex items-start justify-between gap-3"><div><span className="text-xs font-bold uppercase text-zinc-500">Record name</span><h3 className="mt-1 font-bold">{draft.recordName}</h3><p className="mt-1 text-sm font-medium text-zinc-500">Opened product · {openingSource} · {draft.date}</p></div><button className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold" onClick={() => setStep(2)} type="button"><Pencil className="size-4" /> Edit</button></div><div className="mt-3"><ProductReview item={draft.product} kind="sealed" quantity={1} /></div>

@@ -3,6 +3,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
+import { timeoutForRequest } from "@/lib/request-timeout";
 import { httpBatchLink } from "@trpc/client";
 import { createTRPCReact } from "@trpc/react-query";
 import superjson from "superjson";
@@ -22,10 +23,6 @@ import type { AppRouter } from "@/server/root";
 import { useState, type ReactNode } from "react";
 
 export const trpc = createTRPCReact<AppRouter>();
-const requestTimeoutMs = 15_000;
-const purchaseRequestTimeoutMs = 60_000;
-const requestTimeoutMessage = "The request took too long. Check your connection, then try again.";
-const purchaseRequestTimeoutMessage = "This Purchase is taking longer than expected and may still have been saved. Check Records History before retrying; a retry will not create a duplicate.";
 const queryCacheMaxAgeMs = 15 * 60 * 1_000;
 export { queryCacheStorageKey } from "@/lib/query-cache-persistence";
 
@@ -42,18 +39,6 @@ function getBaseUrl() {
   }
 
   return "http://localhost:3000";
-}
-
-function timeoutForRequest(url: RequestInfo | URL) {
-  return String(url).includes("records.createPurchase")
-    ? {
-        message: purchaseRequestTimeoutMessage,
-        milliseconds: purchaseRequestTimeoutMs,
-      }
-    : {
-        message: requestTimeoutMessage,
-        milliseconds: requestTimeoutMs,
-      };
 }
 
 export function shouldRetryQuery(failureCount: number, error: unknown) {

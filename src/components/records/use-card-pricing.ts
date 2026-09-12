@@ -25,6 +25,8 @@ export function useCardPricing(
   const [pendingCount, setPendingCount] = useState(0);
 
   const requestPricing = useCallback((card: CardContentsDraft) => {
+    // Catalogue selection already shows a USD estimate; never block entry on an eBay lookup.
+    if (card.catalogueProductId) return;
     const localKey = cardPricingIdentityKey(card);
     if (card.pricing && card.pricing.identityKey === localKey && isCompletedPricing(card.pricing)) {
       completed.current.set(localKey, card.pricing);

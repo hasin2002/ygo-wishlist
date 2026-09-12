@@ -14,6 +14,7 @@ import {
   cardCopies,
   cardCopyImages,
   cardPrintings,
+  cardPricingEstimates,
   cardTargets,
   ebayConnections,
   ebayListingMembers,
@@ -770,7 +771,7 @@ test("unknown cost remains unknown until explicitly changed to a known £0", asy
   assert.deepEqual(knownZero.copies.filter((copy) => copy.acquiredRecordId === created.id).map((copy) => copy.allocationPence), [0, 0]);
 });
 
-test("a later Purchase refreshes one shared Target price and never erases an older estimate with no match", async () => {
+test("a later Purchase refreshes the exact Printing price and never erases an older estimate with no match", async () => {
   const pricingCard = {
     ...card(),
     id: "pricing-blue-eyes-a",
@@ -793,7 +794,9 @@ test("a later Purchase refreshes one shared Target price and never erases an old
     card: pricingCard,
   });
   const [afterFirst] = await db.select().from(cardTargets).where(eq(cardTargets.normalizedName, "pricing blue-eyes white dragon"));
-  assert.equal(afterFirst?.estimatedPricePence, 1234);
+  const [pricedPrinting] = await db.select().from(cardPrintings).where(eq(cardPrintings.targetId, afterFirst.id));
+  const [firstEstimate] = await db.select().from(cardPricingEstimates).where(eq(cardPricingEstimates.printingId, pricedPrinting.id));
+  assert.equal(firstEstimate?.estimatedPricePence, 1234);
 
   await records.createPurchase({
     kind: "card",
@@ -814,8 +817,9 @@ test("a later Purchase refreshes one shared Target price and never erases an old
   });
   const matchingTargets = await db.select().from(cardTargets).where(eq(cardTargets.normalizedName, "pricing blue-eyes white dragon"));
   assert.equal(matchingTargets.length, 1);
-  assert.equal(matchingTargets[0]?.estimatedPricePence, 1234);
-  assert.match(matchingTargets[0]?.ebaySearchUrl ?? "", /current/);
+  const [latestEstimate] = await db.select().from(cardPricingEstimates).where(eq(cardPricingEstimates.printingId, pricedPrinting.id));
+  assert.equal(latestEstimate?.estimatedPricePence, 1234);
+  assert.match(latestEstimate?.ebaySearchUrl ?? "", /current/);
 });
 
 test("unknown bulk cost stays unknown when its total changes or an identified Copy is removed", async () => {
@@ -1840,4 +1844,69 @@ test("catalogue ingestion creates exact copies, groups variants and safely retri
   await records.removeCardCopy({ copyId: newCopies[0].id });
   const afterRemoval = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, next.id));
   assert.equal(afterRemoval.length, 1);
+});
+
+test("large owned-card saves use bounded database round trips and retries retain every exact Copy", async () => {
+  const products = Array.from({ length: 58 }, (_, index) => ({
+    productId: 991000 + index, groupId: 991, name: `Large batch card ${index}`, imageUrl: null,
+    tcgplayerUrl: `https://www.tcgplayer.com/product/${991000 + index}`,
+    setCode: `BATCH-${index}`, setName: "Batch test set", rarity: "Ultra Rare", searchText: `batch ${index}`,
+  }));
+  await db.insert(cardCatalogueProducts).values(products);
+  const input = { operationId: randomUUID(), date: "2026-09-12", source: "", notes: "", cards: products.map((product) => ({
+    productId: product.productId, edition: "1st Edition" as const, condition: "Near Mint" as const, quantity: 1,
+  })) };
+  // The test runner uses a one-connection pool. Add latency to every SQL round trip
+  // so this exercises the network-sensitive path, not only fast loopback inserts.
+  const client = await db.$client.connect();
+  const query = client.query;
+  let roundTrips = 0;
+  client.query = (async (...args: unknown[]) => {
+    roundTrips++;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return Reflect.apply(query, client, args);
+  }) as typeof query;
+  client.release();
+  let saved: { id: string };
+  try {
+    saved = await records.addOwnedCards(input);
+    assert(roundTrips <= 16, `58 cards required ${roundTrips} SQL round trips`);
+  } finally { client.query = query; }
+  const copies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, saved!.id));
+  assert.equal(copies.length, 58);
+  assert.equal(new Set(copies.map((copy) => copy.id)).size, 58);
+  assert.equal(new Set(copies.map((copy) => copy.printingId)).size, 58);
+  const retried = await records.addOwnedCards(input);
+  assert.equal(retried.id, saved!.id);
+  assert.equal((await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, saved!.id))).length, 58);
+  // Supported upper quantity bound is also one batch, with a separate ID per copy.
+  const maximum = await records.addOwnedCards({ ...input, operationId: randomUUID(), cards: [{ ...input.cards[0], quantity: 1000 }] });
+  assert.equal((await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, maximum.id))).length, 1000);
+});
+
+test("catalogue Purchase and Opening selections keep trusted identities and receipt costs", async () => {
+  const productId = 992001;
+  await db.insert(cardCatalogueProducts).values({ productId, groupId: 992, name: "Catalogue receipt card", imageUrl: null,
+    tcgplayerUrl: `https://www.tcgplayer.com/product/${productId}`, setCode: "RECEIPT-001", setName: "Receipt set", rarity: "Secret Rare", searchText: "receipt" });
+  const selected = { ...card(2), catalogueProductId: productId, name: "Untrusted browser title", condition: "Lightly Played" as const };
+  const receipt = { recordName: "Catalogue receipt", date: "2026-09-12", source: "Local shop", listingUrl: "", notes: "", totalPence: 101 };
+  const single = await records.createPurchase({ ...receipt, kind: "card", card: selected });
+  const singleCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, single.id));
+  assert.deepEqual(singleCopies.map((copy) => copy.allocationPence).sort(), [50, 51]);
+  const [printing] = await db.select().from(cardPrintings).where(eq(cardPrintings.id, singleCopies[0].printingId));
+  assert.equal(printing.setCode, "RECEIPT-001");
+  assert.equal((await db.select().from(recordLines).where(eq(recordLines.recordId, single.id)))[0].name, "Catalogue receipt card");
+  const bulk = await records.createPurchase({ ...receipt, kind: "bulk", totalCardCount: 3, cards: [selected, { ...selected, id: "other-condition", quantity: 1, condition: "Near Mint" }] });
+  const bulkCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, bulk.id));
+  assert.equal(bulkCopies.length, 3);
+  assert.equal(bulkCopies.reduce((sum, copy) => sum + (copy.allocationPence ?? 0), 0), 101);
+  assert(bulkCopies.every((copy) => copy.printingId === printing.id && copy.bulkLotId));
+  assert.equal(new Set(bulkCopies.map((copy) => copy.allocationIndex)).size, 3);
+  const openingInput = { ...receipt, operationId: randomUUID(), useTrackedStock: false, sealedUnitId: null,
+    product: { ...card(), name: "Receipt booster" }, pulls: [selected] };
+  const [opening, replay] = await Promise.all([records.createOpening(openingInput), records.createOpening(openingInput)]);
+  assert.equal(replay.id, opening.id);
+  const pulls = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, opening.id));
+  assert.equal(pulls.length, 2);
+  assert(pulls.every((copy) => copy.printingId === printing.id && copy.condition === "Lightly Played"));
 });

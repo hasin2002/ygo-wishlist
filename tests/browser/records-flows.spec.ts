@@ -1,24 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const metadata = {
-  metadata: {
-    cardType: "Dark Spellcaster",
-    edition: "1st Edition",
-    imageUrl: null,
-    rarity: "Ultra Rare",
-    resolution: "page",
-    setCode: "LOB-005",
-    setName: "Legend of Blue Eyes White Dragon",
-    title: "Dark Magician",
-  },
-};
-
-async function mockMetadata(page: Page) {
-  await page.route("**/api/records/metadata", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: metadata });
-  });
-}
-
 async function chooseCardPurchase(page: Page) {
   const choice = page.getByRole("button", { name: /^Single card/ });
   await choice.getByText("Single card", { exact: true }).click();
@@ -43,16 +24,14 @@ test("Purchase type choices share one compact row on wide desktop", async ({ pag
 });
 
 async function createCardPurchase(page: Page) {
-  await mockMetadata(page);
+  await mockCatalogue(page);
   await page.goto("/records/new/purchase");
   await expect(page.getByRole("heading", { name: "Record purchase" })).toBeVisible();
   await chooseCardPurchase(page);
   await page.getByLabel(/Record name/).fill("Browser purchase");
   await page.getByLabel(/All-in amount paid/).fill("1.01");
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel(/TCGplayer product link/).fill("https://www.tcgplayer.com/product/12345/dark-magician");
-  await page.getByRole("button", { name: "Fetch details" }).click();
-  await expect(page.getByRole("combobox", { name: /Card name/ })).toHaveValue("Dark Magician");
+  await chooseCatalogueCard(page);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review purchase" })).toBeVisible();
   await page.getByRole("button", { name: "Confirm preview purchase" }).click();
@@ -215,7 +194,7 @@ test("a generic Purchase draft also asks before an explicit target replaces its 
   await page.getByLabel(/Record name/).fill("New targeted purchase");
   await page.getByLabel(/All-in amount paid/).fill("1.00");
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.getByRole("combobox", { name: /Card name/ })).toHaveValue("First");
+  await expect(page.getByRole("button", { name: /First.*Change/ })).toBeVisible();
 });
 
 test("a corrupt Purchase payload is discarded before controls can read it", async ({ page }) => {
@@ -422,4 +401,57 @@ test("preview gates mixed eBay entry points and rejects crafted listing-photo op
   });
   expect(previewDelete.ok()).toBe(false);
   expect((await previewDelete.json()).message).toMatch(/preview mode/i);
+});
+
+
+async function mockCatalogue(page: Page) {
+  await page.route("**/api/trpc/cardCatalogue.search**", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify([{ result: { data: { json: {
+    products: [{ productId: 12345, name: "Dark Magician", setCode: "LOB-005", setName: "Legend of Blue Eyes White Dragon", rarity: "Ultra Rare", imageUrl: null, tcgplayerUrl: "https://www.tcgplayer.com/product/12345", marketPricesUsdCents: { "1st Edition": 56 } }],
+    total: 1, page: 1, pageCount: 1, detectedRarity: "Ultra Rare", searchText: "LOB-005", rarities: ["Ultra Rare"], status: { ready: true, stale: false, syncing: false, productCount: 1, updatedAt: null },
+  } } } }]) }));
+}
+
+async function chooseCatalogueCard(page: Page) {
+  const trigger = page.getByRole("button", { name: /Search card name or set code/ });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Choose card printing" });
+  await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate((element) => element.parentElement?.parentElement === document.body)).toBe(true);
+  await dialog.getByLabel("Card name or set code").fill("LOB-005 ultra rare");
+  await expect(dialog.getByText("TCGplayer · US$0.56")).toBeVisible();
+  if (page.viewportSize()?.width === 390) await page.screenshot({ path: "/tmp/catalogue-picker-mobile.png" });
+  await dialog.getByRole("button", { name: "Choose Dark Magician, LOB-005, Ultra Rare" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("combobox", { name: "Card edition", exact: true })).toHaveValue("1st Edition");
+  await expect(page.getByLabel(/TCGplayer product link/)).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+}
+
+test("Bulk contents select catalogue cards without product links", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockCatalogue(page);
+  await page.goto("/records/new/purchase");
+  await page.getByRole("button", { name: /^Bulk lot/ }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Record name/).fill("Catalogue bulk");
+  await page.getByLabel(/All-in amount paid/).fill("10.00");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Total cards in lot/).fill("1");
+  await chooseCatalogueCard(page);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review purchase" })).toBeVisible();
+  await expect(page.getByText("Dark Magician", { exact: true }).first()).toBeVisible();
+});
+
+
+test("Tracked opening pulls select catalogue cards without product links", async ({ page }) => {
+  await mockCatalogue(page);
+  await page.goto("/records/new/opening");
+  await page.getByRole("button", { name: /^Tracked sealed/ }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: /Spellcaster.s Command Structure Deck/ }).first().click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await chooseCatalogueCard(page);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review opening" })).toBeVisible();
 });

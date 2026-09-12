@@ -3,6 +3,8 @@
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { CatalogueProductPicker } from "@/components/records/catalogue-product-picker";
+import { SearchablePicklist } from "@/components/records/searchable-picklist";
 import { RarityCombobox } from "@/components/rarity-combobox";
 import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
@@ -13,6 +15,7 @@ const fieldClass = "mt-1 h-11 w-full rounded-md border border-zinc-300 bg-zinc-5
 export type ProductFetchStatus = "idle" | "fetching" | "resolved" | "attention" | "stale";
 
 export type ProductIdentityDraft = {
+  catalogueProductId?: number;
   selectedTargetId: string | null;
   tcgplayerUrl: string;
   name: string;
@@ -70,7 +73,7 @@ function FieldOrigin({ edited, fetched }: { edited: boolean; fetched: boolean })
   return null;
 }
 
-export function ProductIdentityEditor({
+function LegacyProductIdentityEditor({
   cardNameFields,
   compact = false,
   hideSealedEdition = false,
@@ -108,7 +111,7 @@ export function ProductIdentityEditor({
     const editedFields = value.editedFields.includes(field)
       ? value.editedFields
       : [...value.editedFields, field];
-    onChange({ ...value, [field]: nextValue, editedFields });
+    onChange({ ...value, catalogueProductId: undefined, [field]: nextValue, editedFields });
   }
 
   function applyLibrarySuggestion(suggestion: LibraryCardSuggestion) {
@@ -122,6 +125,7 @@ export function ProductIdentityEditor({
     );
     onChange({
       ...value,
+      catalogueProductId: undefined,
       selectedTargetId: suggestion.targetId,
       tcgplayerUrl: suggestion.tcgplayerUrl ?? "",
       name: suggestion.name,
@@ -263,6 +267,7 @@ export function ProductIdentityEditor({
     setFetchError(null);
     const nextValue = {
       ...value,
+      catalogueProductId: undefined,
       tcgplayerUrl: nextUrl,
       fetchStatus: value.fetchAttempted ? "stale" : "idle",
       fetchMessage: value.fetchAttempted
@@ -371,6 +376,7 @@ export function ProductIdentityEditor({
                   : [...value.editedFields, "name"];
                 onChange({
                   ...value,
+                  catalogueProductId: undefined,
                   name: nextName,
                   selectedTargetId: nextName === value.name ? value.selectedTargetId : null,
                   editedFields,
@@ -472,4 +478,26 @@ export function ProductIdentityEditor({
       </div>
     </div>
   );
+}
+
+
+export function ProductIdentityEditor(props: Parameters<typeof LegacyProductIdentityEditor>[0]) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  if (props.kind === "sealed") return <LegacyProductIdentityEditor {...props} />;
+  const { value, onChange, cardNameFields } = props;
+  const editions = ["1st Edition", "Unlimited Edition", "Limited Edition"];
+  return <div className="grid gap-3">
+    <button type="button" onClick={() => setSearchOpen(true)} className="flex min-h-11 w-full items-center gap-3 rounded-lg border border-zinc-300 bg-white p-3 text-left hover:border-[#8a1f2d] focus-visible:ring-2 focus-visible:ring-[#8a1f2d]">
+      {value.imageUrl ? <Image alt="" className="h-20 w-14 shrink-0 object-contain" height={80} width={56} unoptimized src={`/api/image-proxy?url=${encodeURIComponent(value.imageUrl)}`} /> : null}
+      <span className="min-w-0 flex-1"><span className="block text-sm font-bold">{value.name || "Search card name or set code"}</span>{value.name ? <span className="block text-xs text-zinc-500">{value.setCode} · {value.rarity}</span> : <span className="block text-xs text-zinc-500">Find the exact printing and rarity in the catalogue.</span>}</span><span className="text-xs font-semibold text-[#8a1f2d]">{value.name ? "Change" : "Search"}</span>
+    </button>
+    {value.name ? <div className="grid gap-3"><SearchablePicklist key={value.edition} compact label="Card edition" placeholder="Choose edition" resultsLabel="Card editions" emptyMessage="No editions found" selectedId={value.edition || "1st Edition"} options={editions.map((edition) => ({ id: edition, label: edition, displayText: edition, detail: "", searchText: edition.toLowerCase() }))} onSelect={(edition) => onChange({ ...value, edition: edition as ProductEdition })} />{cardNameFields}</div> : null}
+    <button type="button" className="min-h-11 justify-self-start text-xs text-zinc-500 underline hover:text-zinc-900" onClick={() => setManualOpen(!manualOpen)}>{manualOpen ? "Hide manual details" : "Can't find your card? Enter details manually"}</button>
+    {manualOpen ? <LegacyProductIdentityEditor {...props} cardNameFields={undefined} /> : null}
+    {searchOpen ? <CatalogueProductPicker onClose={() => setSearchOpen(false)} onSelect={(product) => {
+      onChange({ ...value, catalogueProductId: product.productId, selectedTargetId: null, tcgplayerUrl: product.tcgplayerUrl, name: product.name, imageUrl: product.imageUrl, edition: "1st Edition", rarity: product.rarity, setName: product.setName, setCode: product.setCode, cardType: "", fetchStatus: "resolved", fetchAttempted: true, fetchMessage: "Selected from the card catalogue.", metadataNeedsAttention: false, editedFields: [] });
+      setSearchOpen(false); setManualOpen(false);
+    }} /> : null}
+  </div>;
 }
