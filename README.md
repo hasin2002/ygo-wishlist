@@ -26,7 +26,10 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 Library is the card catalogue: it reads and edits Wishlist Targets through the
 `library` API. `Owned` and `Wishlist` are computed from the desired target
-quantity and available physical Copies; no Library action can toggle ownership.
+quantity and available physical Copies. The Library collection modal offers
+Wanted and Owned quantity steppers. Added owned copies create an imported
+acquisition with unknown purchase cost; reducing the count selects exact Copies
+and uses the same removal rules as Records. No separate ownership flag is stored.
 
 Records is the operational source of truth. A Purchase, Pack Opening, Sale, or
 other Record change creates, sells, voids, or restores exact Copy IDs together

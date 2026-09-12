@@ -11,6 +11,9 @@ import {
   recordEntries,
   targetWheelEntries,
 } from "@/db/schema";
+import { addOwnedCopiesInTransaction, removeCardCopyInTransaction } from "@/server/routers/records";
+import { hasEbayCompositionSchema } from "@/server/ebay-listing-composition";
+import { deleteCardInventoryImage } from "@/server/card-inventory-images";
 import { getLibraryCardStatus } from "@/lib/records/library-status";
 import { cardPricingIdentityKey } from "@/lib/records/card-pricing";
 import { cardConditions } from "@/lib/records/types";
@@ -52,7 +55,7 @@ const targetInputSchema = z.object({
   status: statusSchema.default("wishlist"),
   notes: z.string().trim().optional(),
 });
-const updateTargetSchema = targetInputSchema.extend({ id: z.string().min(1) });
+const updateTargetSchema = targetInputSchema.extend({ id: z.string().min(1), desiredQuantity: z.number().int().min(0).max(10_000).optional() });
 const estimatePricingSchema = z.object({
   condition: z.enum(cardConditions),
   selectedTargetId: z.string().min(1).nullable().optional(),
@@ -296,7 +299,7 @@ function stats(cards: LibraryCard[], includeSpend: boolean) {
 
 async function upsertTargetPrinting(
   ownerId: string,
-  input: z.infer<typeof targetInputSchema>,
+  input: z.infer<typeof targetInputSchema> & { desiredQuantity?: number },
   targetId?: string,
 ) {
   const url = requireTcgplayerProductUrl(input.url);
@@ -329,9 +332,17 @@ async function upsertTargetPrinting(
   };
   let target;
   if (targetId) {
-    [target] = await db.update(cardTargets).set(values).where(and(
-      eq(cardTargets.id, targetId), eq(cardTargets.ownerId, ownerId),
-    )).returning();
+    target = await db.transaction(async (tx) => {
+      const [updated] = await tx.update(cardTargets).set({
+        ...values,
+        ...(input.desiredQuantity !== undefined ? { desiredQuantity: input.desiredQuantity } : {}),
+        ...(input.desiredQuantity === 0 ? { chaseLevel: null } : {}),
+      }).where(and(eq(cardTargets.id, targetId), eq(cardTargets.ownerId, ownerId))).returning();
+      if (updated && input.desiredQuantity === 0) await tx.delete(targetWheelEntries).where(and(
+        eq(targetWheelEntries.targetId, updated.id), eq(targetWheelEntries.ownerId, ownerId),
+      ));
+      return updated;
+    });
   } else {
     [target] = await db.select().from(cardTargets).where(and(
       eq(cardTargets.ownerId, ownerId),
@@ -438,6 +449,56 @@ export const libraryRouter = router({
     }
     const target = await upsertTargetPrinting(ctx.collectionOwnerId, input);
     return (await loadLibraryCards(ctx.collectionOwnerId)).find((card) => card.id === target.id)!;
+  }),
+
+  collectionCopies: authenticatedProcedure.input(z.object({ id: z.string().min(1) })).query(async ({ ctx, input }) => {
+    const printings = await db.select().from(cardPrintings).where(and(eq(cardPrintings.ownerId, ctx.collectionOwnerId), eq(cardPrintings.targetId, input.id))).orderBy(asc(cardPrintings.id));
+    const copies = printings.length ? await db.select({ id: cardCopies.id, printingId: cardCopies.printingId, condition: cardCopies.condition, stickerNumber: cardCopies.stickerNumber, source: recordEntries.source }).from(cardCopies)
+      .innerJoin(recordEntries, and(eq(recordEntries.id, cardCopies.acquiredRecordId), eq(recordEntries.ownerId, ctx.collectionOwnerId)))
+      .where(and(eq(cardCopies.ownerId, ctx.collectionOwnerId), inArray(cardCopies.printingId, printings.map(p => p.id)), eq(cardCopies.status, "available"))).orderBy(asc(cardCopies.id)) : [];
+    return { printings: printings.map(p => ({ id: p.id, setCode: p.setCode, setName: p.setName })), copies };
+  }),
+
+  updateCollection: authenticatedProcedure.input(z.object({
+    id: z.string().min(1),
+    desiredQuantity: z.number().int().min(0).max(10_000),
+    ownedQuantity: z.number().int().min(0).max(10_000).optional(),
+    expectedOwnedQuantity: z.number().int().min(0).optional(),
+    removeCopyIds: z.array(z.string().min(1)).max(10_000).default([]),
+    printingId: z.string().min(1).optional(),
+    condition: z.enum(cardConditions).default("Near Mint"),
+    operationId: z.string().uuid().optional(),
+  })).mutation(async ({ ctx, input }) => {
+    const ownerId = ctx.collectionOwnerId;
+    const compositionReady = input.removeCopyIds.length ? await hasEbayCompositionSchema() : false;
+    const removed: { id: string; keys: string[] }[] = [];
+    const result = await db.transaction(async tx => {
+      const [target] = await tx.select().from(cardTargets).where(and(eq(cardTargets.id, input.id), eq(cardTargets.ownerId, ownerId))).for("update");
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Wishlist Target not found." });
+      if (input.operationId) {
+        const [existing] = await tx.select({ id: recordEntries.id }).from(recordEntries).where(and(eq(recordEntries.ownerId, ownerId), eq(recordEntries.submissionId, input.operationId))).limit(1);
+        if (existing) return { id: target.id };
+      }
+      const printings = await tx.select().from(cardPrintings).where(and(eq(cardPrintings.ownerId, ownerId), eq(cardPrintings.targetId, target.id))).orderBy(asc(cardPrintings.id));
+      const copies = printings.length ? await tx.select().from(cardCopies).where(and(eq(cardCopies.ownerId, ownerId), inArray(cardCopies.printingId, printings.map(p => p.id)), eq(cardCopies.status, "available"))).orderBy(asc(cardCopies.id)).for("update") : [];
+      const delta = (input.ownedQuantity ?? copies.length) - copies.length;
+      if (input.ownedQuantity !== undefined && input.expectedOwnedQuantity !== copies.length) throw new TRPCError({ code: "CONFLICT", message: "Owned copies changed. Close and reopen this card before saving again." });
+      if (delta < 0) {
+        const ids = [...new Set(input.removeCopyIds)];
+        if (ids.length !== -delta || ids.some(copyId => !copies.some(copy => copy.id === copyId))) throw new TRPCError({ code: "BAD_REQUEST", message: `Select exactly ${-delta} owned copies to remove.` });
+        for (const copyId of ids.sort()) removed.push(await removeCardCopyInTransaction(tx, ownerId, copyId, compositionReady));
+      } else if (delta > 0) {
+        if (!input.operationId) throw new TRPCError({ code: "BAD_REQUEST", message: "Reopen this card to add copies." });
+        const printing = printings.find(p => p.id === input.printingId) ?? (printings.length === 1 ? printings[0] : undefined);
+        if (!printing) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose the printing for the added copies." });
+        await addOwnedCopiesInTransaction(tx, ownerId, target, printing, delta, input.condition, input.operationId);
+      }
+      await tx.update(cardTargets).set({ desiredQuantity: input.desiredQuantity, ...(input.desiredQuantity === 0 ? { chaseLevel: null } : {}), updatedAt: new Date() }).where(and(eq(cardTargets.id, target.id), eq(cardTargets.ownerId, ownerId)));
+      if (input.desiredQuantity === 0) await tx.delete(targetWheelEntries).where(and(eq(targetWheelEntries.targetId, target.id), eq(targetWheelEntries.ownerId, ownerId)));
+      return { id: target.id };
+    });
+    await Promise.all(removed.flatMap(copy => copy.keys.map(key => deleteCardInventoryImage(ownerId, copy.id, key).catch(() => undefined))));
+    return result;
   }),
 
   update: authenticatedProcedure.input(updateTargetSchema).mutation(async ({ ctx, input }) => {

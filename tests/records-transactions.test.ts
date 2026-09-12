@@ -39,7 +39,7 @@ import {
   CopySelectionError,
   lockReconciledCopies,
 } from "../src/server/records/copy-selection.ts";
-import { spendRouter } from "../src/server/routers/spend.ts";
+import { monthBounds, spendRouter } from "../src/server/routers/spend.ts";
 
 const ownerId = "records-transaction-test-owner";
 const context = {
@@ -1731,4 +1731,53 @@ test.after(async () => {
   const allLines = await db.select().from(recordLines).where(eq(recordLines.ownerId, ownerId));
   assert.ok(allCopies.length > 0);
   assert.ok(allLines.length > 0);
+});
+
+
+test("Library owned steppers preserve exact copies, unknown cost, retry protection, and owner scope", async () => {
+  const purchase = await records.createPurchase({ kind: "card", recordName: "Quantity editor fixture", date: "2026-09-12", source: "Local shop", listingUrl: "", notes: "", totalPence: 1200, card: { ...card(1), name: "Quantity editor fixture", tcgplayerUrl: "https://www.tcgplayer.com/product/999001/quantity-editor" } });
+  const [original] = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, purchase.id));
+  const [printing] = await db.select().from(cardPrintings).where(eq(cardPrintings.id, original.printingId));
+  const targetId = printing.targetId;
+  const operationId = randomUUID();
+  const input = { id: targetId, desiredQuantity: 4, ownedQuantity: 3, expectedOwnedQuantity: 1, operationId, condition: "Lightly Played" as const };
+  await library.updateCollection(input);
+  await library.updateCollection(input);
+  const after = await library.collectionCopies({ id: targetId });
+  assert.equal(after.copies.length, 3);
+  const additions = after.copies.filter(copy => copy.id !== original.id);
+  assert.equal(additions.length, 2);
+  const [addition] = await db.select().from(cardCopies).where(eq(cardCopies.id, additions[0].id));
+  const [record] = await db.select().from(recordEntries).where(eq(recordEntries.id, addition.acquiredRecordId));
+  assert.equal(record.type, "imported-acquisition");
+  assert.equal(record.amountKnown, false);
+  assert.equal(addition.allocationPence, null);
+  assert.equal(addition.condition, "Lightly Played");
+  await assert.rejects(library.updateCollection({ id: targetId, desiredQuantity: 9, ownedQuantity: 1, expectedOwnedQuantity: 3, removeCopyIds: [additions[0].id, additions[0].id] }), /Select exactly/);
+  const [unchangedTarget] = await db.select().from(cardTargets).where(eq(cardTargets.id, targetId));
+  assert.equal(unchangedTarget.desiredQuantity, 4);
+  await library.updateCollection({ id: targetId, desiredQuantity: 2, ownedQuantity: 2, expectedOwnedQuantity: 3, removeCopyIds: [additions[0].id] });
+  const remaining = await library.collectionCopies({ id: targetId });
+  assert.deepEqual(new Set(remaining.copies.map(copy => copy.id)), new Set([original.id, additions[1].id]));
+  const [originalRecord] = await db.select().from(recordEntries).where(eq(recordEntries.id, purchase.id));
+  assert.equal(originalRecord.amountPence, 1200);
+  assert.equal(originalRecord.status, "active");
+  await assert.rejects(library.updateCollection({ ...input, operationId: randomUUID() }), /Owned copies changed/);
+  const otherLibrary = libraryRouter.createCaller({ collectionOwnerId: "unrelated-owner", session: { session: { id: "unrelated-session" }, user: { id: "unrelated-owner", role: "user" } } } as never);
+  await assert.rejects(otherLibrary.updateCollection({ id: targetId, desiredQuantity: 0 }), /not found/);
+});
+
+
+test("spending month bounds handle short months, leap years and year rollover", async () => {
+  for (const [month, endExclusive] of [
+    ["2026-09", "2026-10-01"],
+    ["2026-02", "2026-03-01"],
+    ["2024-02", "2024-03-01"],
+    ["2026-12", "2027-01-01"],
+  ]) {
+    assert.deepEqual(monthBounds(month), { start: `${month}-01`, endExclusive });
+  }
+  for (const month of ["2026-00", "2026-13"]) {
+    await assert.rejects(spend.setMonthlyFavourite({ cardId: null, month }), { code: "BAD_REQUEST" });
+  }
 });
