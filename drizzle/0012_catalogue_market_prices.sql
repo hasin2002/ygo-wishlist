@@ -1,0 +1,1 @@
+ALTER TABLE "card_catalogue_products" ADD COLUMN "market_prices_usd_cents" jsonb;

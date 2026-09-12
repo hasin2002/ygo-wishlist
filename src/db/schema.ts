@@ -1341,6 +1341,7 @@ export type User = typeof users.$inferSelect;
 
 // Shared reference catalogue; ownership continues to use cardPrintings/cardCopies.
 export const cardCatalogueProducts = pgTable("card_catalogue_products", {
+  marketPricesUsdCents: jsonb("market_prices_usd_cents").$type<Record<string, number>>(),
   productId: integer("product_id").primaryKey(),
   groupId: integer("group_id").notNull(),
   name: text("name").notNull(),
