@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cardConditions } from "./types.ts";
+import { type RecordsSnapshot, cardConditions } from "./types.ts";
 
 export const ownedCardVariantSchema = z.object({
   productId: z.number().int().positive(),
@@ -55,3 +55,38 @@ export const ownedCardsDraftSchema = z.object({
   operationId: z.string().uuid(), date: z.iso.date(), source: z.string().max(120),
   notes: z.string().max(4000), cards: z.array(ownedCardDraftSchema).max(100),
 });
+
+/** Returns exact physical IDs; catalogue artwork is not an inventory photo. */
+export function matchingOwnedCardCopies(
+  snapshot: RecordsSnapshot,
+  card: OwnedCardProduct & { edition: string; condition?: string },
+) {
+  const normalize = (value: string) => value.trim().toLocaleLowerCase("en-GB").replace(/\s+/g, " ");
+  const edition = (value: string) => normalize(value) === "unlimited" ? "unlimited edition" : normalize(value);
+  const productId = (url: string | null) => {
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      if (!/(^|\.)tcgplayer\.com$/.test(parsed.hostname)) return null;
+      return parsed.pathname.match(/\/product\/(\d+)(?:\/|$)/)?.[1] ?? null;
+    } catch { return null; }
+  };
+  const targets = new Set(snapshot.targets.filter((target) =>
+    normalize(target.rarity) === normalize(card.rarity)
+    && edition(target.edition) === edition(card.edition)
+  ).map((target) => target.id));
+  const printings = new Set(snapshot.printings.filter((printing) => {
+    if (!targets.has(printing.targetId)) return false;
+    const target = snapshot.targets.find((item) => item.id === printing.targetId)!;
+    const id = productId(printing.tcgplayerUrl);
+    // Exact catalogue IDs handle alternate naming; a conflicting ID never matches.
+    if (id) return id === String(card.productId);
+    return normalize(target.name) === normalize(card.name)
+      && normalize(printing.setCode) === normalize(card.setCode)
+      && normalize(printing.setName) === normalize(card.setName);
+  }).map((printing) => printing.id));
+  const activeRecords = new Set(snapshot.records.filter((record) => record.status === "active").map((record) => record.id));
+  return snapshot.copies.filter((copy) => printings.has(copy.printingId)
+    && copy.status === "available" && activeRecords.has(copy.acquiredRecordId)
+    && (!card.condition || normalize(copy.condition) === normalize(card.condition)));
+}

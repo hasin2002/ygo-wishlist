@@ -303,7 +303,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
 function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNode; ownerScope: string }) {
   const clientReady = useClientReady();
   const pathname = usePathname();
-  const routeOwnsSnapshot = pathname === "/records" || pathname === "/records/history" || pathname === "/records/actions" || pathname === "/records/new/owned";
+  const routeOwnsSnapshot = pathname === "/records" || pathname === "/records/history" || pathname === "/records/actions";
   const snapshotScope = pathname === "/records/inventory"
     ? "inventory" as const
     : pathname.startsWith("/records/listings")

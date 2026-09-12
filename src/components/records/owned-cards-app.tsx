@@ -11,7 +11,7 @@ import { SearchablePicklist } from "@/components/records/searchable-picklist";
 import { AppHeader } from "@/components/app-header";
 import { fieldClass, textAreaClass, today } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
-import { addOwnedCardsSchema, collapseOwnedCards, ownedCardsDraftSchema, ownedCardVariantKey, type AddOwnedCardsDraft, type OwnedCardDraft, type OwnedCardProduct } from "@/lib/records/owned-cards";
+import { addOwnedCardsSchema, collapseOwnedCards, matchingOwnedCardCopies, ownedCardsDraftSchema, ownedCardVariantKey, type AddOwnedCardsDraft, type OwnedCardDraft, type OwnedCardProduct } from "@/lib/records/owned-cards";
 import { cardConditions, type CardCondition, type ProductEdition } from "@/lib/records/types";
 import { taskReturnHref } from "@/lib/navigation-intent";
 import { trpc } from "@/trpc/client";
@@ -43,10 +43,10 @@ function CompactPicklist({ label, value, values, onChange, inlineOptions = false
     placeholder={label} resultsLabel={label + " options"} selectedId={value || "all"} />;
 }
 
-function QuantityStepper({ label, value, max = 1000, onChange }: { label: string; value: number; max?: number; onChange: (value: number) => void }) {
+function QuantityStepper({ label, value, min = 1, max = 1000, onChange }: { label: string; value: number; min?: number; max?: number; onChange: (value: number) => void }) {
   return <div className="inline-flex h-11 shrink-0 items-center overflow-hidden rounded-md border border-zinc-300 bg-white" role="group" aria-label={label}>
-    <button aria-label={`Decrease ${label.toLowerCase()}`} className="grid size-11 place-items-center text-zinc-600 hover:bg-zinc-100 disabled:opacity-30" disabled={value <= 1} onClick={() => onChange(value - 1)} type="button"><Minus className="size-3.5" /></button>
-    <input aria-label={label} className="h-10 w-10 border-x border-zinc-200 bg-transparent text-center text-sm font-bold tabular-nums outline-none focus:bg-rose-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" inputMode="numeric" min={1} max={max} onFocus={(event) => event.target.select()} onChange={(event) => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= 1 && next <= max) onChange(next); }} type="number" value={value} />
+    <button aria-label={`Decrease ${label.toLowerCase()}`} className="grid size-11 place-items-center text-zinc-600 hover:bg-zinc-100 disabled:opacity-30" disabled={value <= min} onClick={() => onChange(value - 1)} type="button"><Minus className="size-3.5" /></button>
+    <input aria-label={label} className="h-10 w-10 border-x border-zinc-200 bg-transparent text-center text-sm font-bold tabular-nums outline-none focus:bg-rose-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" inputMode="numeric" min={min} max={max} onFocus={(event) => event.target.select()} onChange={(event) => { const next = Number(event.target.value); if (Number.isInteger(next) && next >= min && next <= max) onChange(next); }} type="number" value={value} />
     <button aria-label={`Increase ${label.toLowerCase()}`} className="grid size-11 place-items-center text-zinc-600 hover:bg-zinc-100 disabled:opacity-30" disabled={value >= max} onClick={() => onChange(value + 1)} type="button"><Plus className="size-3.5" /></button>
   </div>;
 }
@@ -121,25 +121,44 @@ function OwnedCardsForm() {
   const currentQueuePage = Math.min(queuePage, queuePages);
   const visibleQueueCards = queueCards.slice((currentQueuePage - 1) * 4, currentQueuePage * 4);
   const activeRarity = rarity ?? results.data?.detectedRarity ?? "";
+  const selectedAllCopies = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition }) : [];
+  const selectedConditionCounts = [...new Set(selectedAllCopies.map((copy) => copy.condition))].map((condition) => `${selectedAllCopies.filter((copy) => copy.condition === condition).length} ${condition}`).join(" · ");
+  const selectedOwned = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition, condition }).length : 0;
+  const selectedKey = selected ? ownedCardVariantKey({ ...selected, edition, condition, quantity: 1 }) : "";
+  const selectedQueued = draft?.cards.find((card) => ownedCardVariantKey(card) === selectedKey)?.quantity ?? 0;
+  const selectedAdditional = Number(quantity) - selectedOwned;
   const searching = query.trim() !== searchText || results.isFetching;
 
   function changeQuery(value: string) {
     setQuery(value); setPage(1); setRarity(undefined);
   }
 
-  function choose(product: OwnedCardProduct) {
-    setSelected(product); setEdition("1st Edition"); setQuantity("1"); setMessage(null);
+  function initialQuantity(product: OwnedCardProduct, nextEdition: ProductEdition, nextCondition: CardCondition) {
+    const variant = { ...product, edition: nextEdition, condition: nextCondition, quantity: 1 };
+    const owned = matchingOwnedCardCopies(source.snapshot, variant).length;
+    const queued = draft?.cards.find((card) => ownedCardVariantKey(card) === ownedCardVariantKey(variant))?.quantity ?? 0;
+    return String(owned + queued || 1);
+  }
 
+  function choose(product: OwnedCardProduct) {
+    setSelected(product); setEdition("1st Edition");
+    setQuantity(initialQuantity(product, "1st Edition", condition)); setMessage(null);
+  }
+
+  function changeVariant(nextEdition: ProductEdition, nextCondition: CardCondition) {
+    setEdition(nextEdition); setCondition(nextCondition);
+    if (selected) setQuantity(initialQuantity(selected, nextEdition, nextCondition));
+    setMessage(null);
   }
 
   function addSelection() {
     if (!draft || !selected) return;
-    const count = Number(quantity);
-    if (!edition) { setMessage("Choose the edition printed on your card."); return; }
-    if (!Number.isInteger(count) || count < 1 || totalQuantity + count > 1000) {
-      setMessage("Choose a whole quantity from 1 to 1,000, with at most 1,000 copies in this list."); return;
+    const count = selectedAdditional;
+    if (!Number.isInteger(count) || count < 0 || totalQuantity - selectedQueued + count > 1000) {
+      setMessage("Add up to 1,000 new copies at a time."); return;
     }
-    const cards = collapseOwnedCards([...draft.cards, { ...selected, edition, condition, quantity: count }]);
+    const cards = draft.cards.filter((card) => ownedCardVariantKey(card) !== selectedKey);
+    if (count > 0) cards.push({ ...selected, edition, condition, quantity: count });
     if (cards.length > 100) { setMessage("Save this list before adding more than 100 different variants."); return; }
     setDraft({ ...draft, cards }); setSelected(null); setMessage(null);
     searchRef.current?.focus();
@@ -229,8 +248,11 @@ function OwnedCardsForm() {
         </fieldset>
             {selected ? <OwnedDialog title="Selected printing" onClose={() => { setSelected(null); setMessage(null); }}>
               <div className="flex gap-2"><CardArtwork product={selected} small /><div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-sm font-bold leading-5">{selected.name}</h2><p className="mt-1 text-xs text-zinc-500">{selected.setCode} · {selected.rarity}</p></div></div>
-              <div className="mt-3 grid grid-cols-2 gap-2"><CompactPicklist inlineOptions label="Edition" value={edition} values={editions} onChange={(value) => setEdition(value as ProductEdition)} /><CompactPicklist inlineOptions label="Condition" value={condition} values={[...cardConditions]} onChange={(value) => setCondition(value as CardCondition)} /></div>
-              <div className="mt-2 flex flex-wrap gap-2"><QuantityStepper label="Quantity" value={Number(quantity)} max={Math.max(1, 1000 - totalQuantity)} onChange={(value) => setQuantity(String(value))} /><button className={`${primaryButton} flex-1`} onClick={addSelection} type="button"><Plus className="size-4" /> Add to list</button></div>
+              <div className="mt-3 grid grid-cols-2 gap-2"><CompactPicklist inlineOptions label="Edition" value={edition} values={editions} onChange={(value) => changeVariant(value as ProductEdition, condition)} /><CompactPicklist inlineOptions label="Condition" value={condition} values={[...cardConditions]} onChange={(value) => changeVariant(edition, value as CardCondition)} /></div>
+              <p className="mt-3 text-sm font-semibold text-zinc-700">Already owned: {selectedOwned}</p>
+              {selectedAllCopies.length !== selectedOwned ? <p className="mt-1 text-xs text-zinc-600">{selectedAllCopies.length} owned across conditions: {selectedConditionCounts}. Quantity below is for {condition}.</p> : null}
+              <p className="mt-1 text-xs text-zinc-500">Set the total you want to own. {selectedAdditional > 0 ? `${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"} will be added.` : "No new copies to add."}</p>
+              <div className="mt-2 flex flex-wrap gap-2"><QuantityStepper label="Quantity" value={Number(quantity)} min={Math.max(1, selectedOwned)} max={Math.max(1, selectedOwned + 1000 - totalQuantity + selectedQueued)} onChange={(value) => setQuantity(String(value))} /><button className={`${primaryButton} flex-1`} onClick={addSelection} type="button"><Plus className="size-4" /> {selectedAdditional > 0 ? "Add to list" : "Done"}</button></div>
             {message ? <p className="mt-3 text-sm text-rose-800" role="alert">{message}</p> : null}</OwnedDialog> : null}
 
         {filterOpen ? <OwnedDialog title="Filter rarity" onClose={() => setFilterOpen(false)}>
