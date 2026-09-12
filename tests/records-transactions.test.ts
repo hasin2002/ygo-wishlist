@@ -1711,11 +1711,12 @@ test("History pages on the server and returns only the requested Record context"
   assert.equal(lineSearch.snapshot.records[0]?.lines[0]?.name, "Only line match 16");
 
   const purchaseForm = await records.snapshot({ scope: "purchase-form" });
-  assert.equal(purchaseForm.records.length, 0);
-  assert.equal(purchaseForm.copies.length, 0);
+  assert.ok(purchaseForm.records.length > 0);
+  assert.ok(purchaseForm.copies.length > 0);
+  assert.ok(purchaseForm.records.every((record) => record.lines.length === 0), "Purchase forms omit receipt lines while retaining ownership data");
   assert.ok(purchaseForm.targets.length > 0);
 
-  for (const scope of ["inventory", "listings", "sale-form"] as const) {
+  for (const scope of ["inventory", "listings", "sale-form", "purchase-form", "opening-form"] as const) {
     const snapshot = await records.snapshot({ scope });
     assert.ok(snapshot.copies.length > 0, `${scope} should load physical Copies`);
     const recordIds = new Set(snapshot.records.map((record) => record.id));

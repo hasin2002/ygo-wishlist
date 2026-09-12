@@ -769,7 +769,8 @@ export async function loadRecordsSnapshot(
   const scoped = options.recordIds !== undefined;
   const ids = options.recordIds ?? [];
   const scope = options.scope ?? "full";
-  const includeCopies = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form";
+  // Acquisition pickers also need physical Copies to show existing ownership.
+  const includeCopies = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form" || scope === "purchase-form" || scope === "opening-form";
   // Copy eligibility depends on the active/void status of the acquisition
   // Record. Any scope that returns Copies must therefore return their source
   // Records too, even when Record lines are intentionally omitted.
