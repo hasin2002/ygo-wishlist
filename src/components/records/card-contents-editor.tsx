@@ -2,10 +2,10 @@
 
 import { Check, CirclePlus, Pencil, Trash2 } from "lucide-react";
 import Image from "next/image";
+import { CardQuantityInput } from "@/components/records/card-quantity-input";
 import { useState } from "react";
 import {
   DestructiveToast,
-  selectNumberOnFocus,
 } from "@/components/records/entry-form-ui";
 import {
   blankProductIdentity,
@@ -72,8 +72,8 @@ export function isUntouchedNewCardContents(row: CardContentsDraft) {
 }
 
 export function cardContentsError(row: CardContentsDraft) {
-  if (!isTcgplayerProductUrl(row.tcgplayerUrl)) return "Add a complete TCGplayer product link.";
-  if (!row.fetchAttempted) return "Fetch the card details at least once.";
+  if (!isTcgplayerProductUrl(row.tcgplayerUrl)) return "Choose a card printing from the catalogue.";
+  if (!row.fetchAttempted) return "Choose a card printing from the catalogue.";
   if (row.fetchStatus === "stale") return "The TCGplayer link changed. Fetch the card details again.";
   if (row.fetchStatus === "fetching") return "Wait for the card details to finish fetching.";
   if (!row.name.trim()) return "Add the card name.";
@@ -177,7 +177,7 @@ export function CardContentsEditor({
       {rows.map((row, index) => row.id === activeId ? (
         <article className="records-step-enter rounded-lg border border-[#8a1f2d]/40 bg-white shadow-sm" key={row.id}>
           <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b border-zinc-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-sm">
-            <div><p className="text-xs font-black uppercase tracking-[0.12em] text-[#8a1f2d]">{noun} {index + 1}</p><p className="text-xs font-medium text-zinc-500">Fetch, check, then finish.</p></div>
+            <div><p className="text-xs font-black uppercase tracking-[0.12em] text-[#8a1f2d]">{noun} {index + 1}</p><p className="text-xs font-medium text-zinc-500">Search, choose a printing, then finish.</p></div>
             <div className="flex flex-wrap items-center gap-2">
               <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-zinc-950 px-4 text-sm font-bold text-white transition hover:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2" onClick={finishAndAddCard} type="button"><Check className="size-4" /> Done &amp; add next</button>
               {rows.length > 1 || allowRemoveLast ? (
@@ -199,7 +199,7 @@ export function CardContentsEditor({
           <div className="px-3 pb-3">
             <ProductIdentityEditor
               cardNameFields={(
-                <div className={`grid gap-3 ${showCondition ? "grid-cols-[minmax(0,1.4fr)_minmax(7rem,0.6fr)]" : "sm:ml-auto sm:w-32"}`}>
+                <div className={`grid gap-3 ${showCondition ? "grid-cols-[minmax(0,1.4fr)_minmax(9rem,0.6fr)]" : "sm:ml-auto sm:w-32"}`}>
                   {showCondition ? <label>
                     <span className="text-sm font-bold text-zinc-700">Condition <span className="text-rose-700">*</span></span>
                     <select className={fieldClass} onChange={(event) => update(row.id, { condition: event.target.value as CardCondition })} required value={row.condition ?? "Near Mint"}>
@@ -208,7 +208,7 @@ export function CardContentsEditor({
                   </label> : null}
                   <label>
                     <span className="text-sm font-bold text-zinc-700">Quantity <span className="text-rose-700">*</span></span>
-                    <input className={fieldClass} min="1" onChange={(event) => update(row.id, { quantity: Number(event.target.value) })} onFocus={selectNumberOnFocus} required type="number" value={row.quantity} />
+                    <CardQuantityInput value={row.quantity} onChange={(quantity) => update(row.id, { quantity })} />
                   </label>
                 </div>
               )}

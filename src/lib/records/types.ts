@@ -276,6 +276,7 @@ export type ResolvedProductMetadata = {
 };
 
 export type ProductIdentityInput = {
+  catalogueProductId?: number;
   selectedTargetId?: string | null;
   tcgplayerUrl: string;
   name: string;
@@ -324,6 +325,7 @@ export type PurchaseInput = {
 );
 
 export type OpeningInput = {
+  operationId?: string;
   recordName: string;
   date: string;
   notes: string;

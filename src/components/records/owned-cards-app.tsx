@@ -4,7 +4,7 @@ import { ArrowLeft, Check, ChevronLeft, ChevronRight, Loader2, Minus, Plus, Sear
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useViewportOverlay } from "@/components/use-viewport-overlay";
 import { SearchablePicklist } from "@/components/records/searchable-picklist";
@@ -64,11 +64,24 @@ export function OwnedCardsApp() {
   return <OwnedCardsForm key={source.draftOwnerScope} />;
 }
 
-function OwnedCardsForm() {
+type EmbeddedPicker = { cards: OwnedCardDraft[]; onChange: (cards: OwnedCardDraft[]) => void; single?: boolean };
+
+/** The same search, grid and variant dialog used by Add owned cards, inside a receipt. */
+export function OwnedCardSelection(props: EmbeddedPicker) {
+  return <OwnedCardsForm embedded={props} />;
+}
+
+function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
   const source = useRecordsDataSource();
   const params = useSearchParams();
   const storageKey = `ygo:owned-cards:v1:${source.draftOwnerScope}`;
-  const [draft, setDraft] = useState<AddOwnedCardsDraft | null>(null);
+  const [localDraft, setLocalDraft] = useState<AddOwnedCardsDraft | null>(null);
+  const embeddedCards = embedded?.cards;
+  const draft = useMemo(() => embeddedCards ? { operationId: "", date: "", source: "", notes: "", cards: embeddedCards } : localDraft, [embeddedCards, localDraft]);
+  function setDraft(value: AddOwnedCardsDraft) {
+    if (embedded) embedded.onChange(value.cards);
+    else setLocalDraft(value);
+  }
   const [query, setQuery] = useState(params.get("cardName") || "");
   const [searchText, setSearchText] = useState(query);
   const [rarity, setRarity] = useState<string | undefined>();
@@ -90,25 +103,26 @@ function OwnedCardsForm() {
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (embedded) return;
     const timer = window.setTimeout(() => {
       try {
         const stored = sessionStorage.getItem(storageKey);
         const parsed = stored ? ownedCardsDraftSchema.safeParse(JSON.parse(stored)) : null;
-        setDraft(parsed?.success ? parsed.data : newDraft());
+        setLocalDraft(parsed?.success ? parsed.data : newDraft());
         if (stored && !parsed?.success) setStorageMessage("The previous draft could not be restored. Start a new list below.");
       } catch {
-        setDraft(newDraft());
+        setLocalDraft(newDraft());
         setStorageMessage("Browser storage is unavailable. Keep this page open until you save your cards.");
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [storageKey]);
+  }, [storageKey, embedded]);
 
   useEffect(() => {
-    if (!draft || saved) return;
+    if (embedded || !draft || saved) return;
     try { sessionStorage.setItem(storageKey, JSON.stringify(draft)); }
     catch { /* The save operation remains available if browser storage is full. */ }
-  }, [draft, saved, storageKey]);
+  }, [draft, saved, storageKey, embedded]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchText(query.trim()), 300);
@@ -127,7 +141,8 @@ function OwnedCardsForm() {
   const activeRarity = rarity ?? results.data?.detectedRarity ?? "";
   const selectedAllCopies = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition }) : [];
   const selectedConditionCounts = [...new Set(selectedAllCopies.map((copy) => copy.condition))].map((condition) => `${selectedAllCopies.filter((copy) => copy.condition === condition).length} ${condition}`).join(" · ");
-  const selectedOwned = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition, condition }).length : 0;
+  const selectedExisting = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition, condition }).length : 0;
+  const selectedOwned = embedded ? 0 : selectedExisting;
   const selectedKey = selected ? ownedCardVariantKey({ ...selected, edition, condition, quantity: 1 }) : "";
   const selectedQueued = draft?.cards.find((card) => ownedCardVariantKey(card) === selectedKey)?.quantity ?? 0;
   const editingCard = draft?.cards.find((card) => ownedCardVariantKey(card) === editingKey);
@@ -141,13 +156,13 @@ function OwnedCardsForm() {
 
   function initialQuantity(product: OwnedCardProduct, nextEdition: ProductEdition, nextCondition: CardCondition) {
     const variant = { ...product, edition: nextEdition, condition: nextCondition, quantity: 1 };
-    const owned = matchingOwnedCardCopies(source.snapshot, variant).length;
+    const owned = embedded ? 0 : matchingOwnedCardCopies(source.snapshot, variant).length;
     const queued = draft?.cards.find((card) => ownedCardVariantKey(card) === ownedCardVariantKey(variant))?.quantity ?? 0;
     return String(owned + queued || 1);
   }
 
   function choose(product: OwnedCardProduct) {
-    setEditingKey(null); setSelected(product); setEdition("1st Edition");
+    setEditingKey(embedded?.single && draft?.cards[0] ? ownedCardVariantKey(draft.cards[0]) : null); setSelected(product); setEdition("1st Edition");
     setQuantity(initialQuantity(product, "1st Edition", condition)); setMessage(null);
   }
 
@@ -156,7 +171,7 @@ function OwnedCardsForm() {
     if (selected) {
       if (editingCard) {
         const variant = { ...selected, edition: nextEdition, condition: nextCondition, quantity: 1 };
-        const owned = matchingOwnedCardCopies(source.snapshot, variant).length;
+        const owned = embedded ? 0 : matchingOwnedCardCopies(source.snapshot, variant).length;
         const other = draft?.cards.find((card) => ownedCardVariantKey(card) === ownedCardVariantKey(variant) && ownedCardVariantKey(card) !== editingKey)?.quantity ?? 0;
         setQuantity(String(owned + editingCard.quantity + other));
       } else setQuantity(initialQuantity(selected, nextEdition, nextCondition));
@@ -180,7 +195,7 @@ function OwnedCardsForm() {
   function editCard(card: OwnedCardDraft) {
     setEditingKey(ownedCardVariantKey(card)); setSelected(card);
     setEdition(card.edition); setCondition(card.condition);
-    setQuantity(String(matchingOwnedCardCopies(source.snapshot, card).length + card.quantity));
+    setQuantity(String((embedded ? 0 : matchingOwnedCardCopies(source.snapshot, card).length) + card.quantity));
     setMessage(null);
   }
 
@@ -199,13 +214,15 @@ function OwnedCardsForm() {
     } finally { savingRef.current = false; setSaving(false); }
   }
 
-  return <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
-    <div className="mx-auto flex max-w-6xl flex-col gap-3">
-      <AppHeader title="Add owned cards" />
+  const Container = embedded ? "div" : "main";
+  return <Container className={embedded ? "min-w-0" : "app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6"}>
+    <div className={embedded ? "flex min-w-0 w-full flex-col gap-3" : "mx-auto flex max-w-6xl flex-col gap-3"}>
+      {!embedded ? <><AppHeader title="Add owned cards" />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-zinc-600" href={taskReturnHref(params.get("origin"), "/records/inventory")}><ArrowLeft className="size-4" /> Back to collection</Link>
         <Link className="text-sm font-semibold text-zinc-600 underline underline-offset-4" href="/records/new/purchase">Other records</Link>
       </div>
+      </> : null}
       {storageMessage ? <p className="text-sm text-amber-800" role="status">{storageMessage}</p> : null}
       {!draft ? <p role="status">Preparing your card list…</p> : saved ? <section className="rounded-lg border border-zinc-300 bg-white p-8 text-center">
         <Check className="mx-auto size-10 text-emerald-700" />
@@ -214,16 +231,16 @@ function OwnedCardsForm() {
         {saved.warning ? <p className="mt-3 text-sm text-amber-800" role="alert">{saved.warning}</p> : null}
         <div className="mt-6 flex flex-wrap justify-center gap-3"><Link className={primaryButton} href="/records/inventory">View inventory</Link><button className={secondaryButton} onClick={() => { setDraft(newDraft()); setSaved(null); }} type="button"><Plus className="size-4" /> Add more cards</button></div>
       </section> : <>
-        <p className="max-w-2xl text-sm leading-6 text-zinc-600">Search a card name or set code. Include a rarity to narrow the results, then choose the printing you own.</p>
-        {source.mode === "preview" ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">Preview mode: saving changes only this browser tab.</p> : null}
-        <fieldset className="grid min-w-0 items-start gap-3 disabled:opacity-70 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,.85fr)]" disabled={saving}>
+        {!embedded ? <p className="max-w-2xl text-sm leading-6 text-zinc-600">Search a card name or set code. Include a rarity to narrow the results, then choose the printing you own.</p> : null}
+        {!embedded && source.mode === "preview" ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">Preview mode: saving changes only this browser tab.</p> : null}
+        <fieldset className={`grid min-w-0 items-start disabled:opacity-70 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,.85fr)] ${embedded ? "gap-6" : "gap-3"}`} disabled={saving}>
           <div className="min-w-0 space-y-4">
-            <section className="rounded-lg border border-zinc-300 bg-white p-3" aria-label="Find cards">
+            <section className={embedded ? "min-w-0" : "rounded-lg border border-zinc-300 bg-white p-3"} aria-label="Find cards">
               <div className="flex min-h-8 items-center justify-between gap-2">
                 <label className="text-sm font-bold" htmlFor="owned-card-search">Card name or set code</label>
                 <button type="button" aria-haspopup="dialog" title={activeRarity || "Filter rarity"} className="relative inline-flex shrink-0 items-center gap-1.5 rounded-md py-1 text-sm font-semibold text-zinc-600 after:absolute after:-inset-y-2 after:inset-x-0 hover:text-[#8a1f2d] focus-visible:outline-2 focus-visible:outline-[#8a1f2d]" onClick={() => setFilterOpen(true)}><SlidersHorizontal className="size-3.5" />Filter rarity{activeRarity ? <span aria-label={`Active rarity: ${activeRarity}`} className="size-1.5 rounded-full bg-[#8a1f2d]" /> : null}</button>
               </div>
-              <div className="relative"><Search className="pointer-events-none absolute left-3 top-4 size-5 text-zinc-400" /><input autoComplete="off" className={`${fieldClass} pl-10`} id="owned-card-search" maxLength={200} onChange={(event) => changeQuery(event.target.value)} placeholder="e.g. Blue-Eyes, LOB-001, RA02 ultra rare" ref={searchRef} value={query} /></div>
+              <div className="relative"><Search className="pointer-events-none absolute left-3 top-4 size-5 text-zinc-400" /><input autoComplete="off" onKeyDown={(event) => { if (embedded && event.key === "Enter") event.preventDefault(); }} className={`${fieldClass} pl-10`} id="owned-card-search" maxLength={200} onChange={(event) => changeQuery(event.target.value)} placeholder="e.g. Blue-Eyes, LOB-001, RA02 ultra rare" ref={searchRef} value={query} /></div>
               {rarity === undefined && results.data?.detectedRarity ? <div className="mt-2 flex flex-wrap items-center gap-2">
                 {rarity === undefined && results.data?.detectedRarity ? <button className="inline-flex min-h-11 items-center gap-1 rounded-full bg-rose-50 px-3 text-xs font-bold text-[#8a1f2d]" onClick={() => { setRarity(""); setPage(1); }} type="button" aria-label="Remove detected rarity filter">{results.data.detectedRarity}<X className="size-3" /></button> : null}
               </div> : null}
@@ -232,15 +249,15 @@ function OwnedCardsForm() {
               </div>
               {results.data?.status.stale ? <p className="mt-2 text-xs text-amber-800">Showing the last saved catalogue. Recently released cards may be missing.</p> : null}
               {!searching && !results.isError && (searchText || rarity) ? <ul className="mt-3 max-h-72 md:max-h-[calc(100dvh-310px)] overflow-y-auto overscroll-contain divide-y divide-zinc-200">{products.map((product) => <li key={product.productId}><button aria-label={`Choose ${product.name}, ${product.setCode}, ${product.rarity}`} className={`flex w-full items-center gap-2 rounded-md px-1 py-2 text-left transition hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#8a1f2d] ${selected?.productId === product.productId ? "bg-rose-50" : ""}`} onClick={() => choose(product)} type="button"><CardArtwork product={product} /><span className="min-w-0 flex-1"><span className="line-clamp-2 text-sm font-bold leading-5">{product.name}</span><span className="block truncate text-xs leading-5 text-zinc-500" title={product.setName}>{product.setName}</span><span className="mt-1 block text-xs font-semibold text-[#8a1f2d]">{product.setCode} · {product.rarity}</span>{cataloguePriceLabel(product.marketPricesUsdCents) ? <span className="mt-0.5 block text-xs tabular-nums text-zinc-500" title={`TCGplayer market estimate via TCGCSV (USD), not condition-specific. ${Object.entries(product.marketPricesUsdCents ?? {}).map(([edition, cents]) => edition + ": US$" + (cents / 100).toFixed(2)).join(" · ")}`}>TCGplayer · {cataloguePriceLabel(product.marketPricesUsdCents)}</span> : null}</span><Plus className="mr-2 size-4 shrink-0" /></button></li>)}</ul> : null}
-              {(results.data?.pageCount ?? 0) > 1 ? <div className="mt-3 flex items-center justify-between"><button aria-label="Previous results" className={secondaryButton} disabled={page === 1 || searching} onClick={() => setPage(page - 1)} type="button"><ChevronLeft className="size-4" /></button><span className="text-xs text-zinc-500">Page {page} of {results.data?.pageCount}</span><button aria-label="Next results" className={secondaryButton} disabled={page >= (results.data?.pageCount ?? 1) || searching} onClick={() => setPage(page + 1)} type="button"><ChevronRight className="size-4" /></button></div> : null}
+              {(searchText || rarity) && (results.data?.pageCount ?? 0) > 1 ? <div className="mt-3 flex items-center justify-between"><button aria-label="Previous results" className={secondaryButton} disabled={page === 1 || searching} onClick={() => setPage(page - 1)} type="button"><ChevronLeft className="size-4" /></button><span className="text-xs text-zinc-500">Page {page} of {results.data?.pageCount}</span><button aria-label="Next results" className={secondaryButton} disabled={page >= (results.data?.pageCount ?? 1) || searching} onClick={() => setPage(page + 1)} type="button"><ChevronRight className="size-4" /></button></div> : null}
             </section>
           </div>
-          <div className="min-w-0 space-y-3 md:sticky md:top-3">
-          <section aria-label="Cards to add" className="min-w-0 rounded-lg border border-zinc-300 bg-white p-3">
-            <div className="flex items-baseline justify-between gap-2"><h2 className="text-lg font-bold">Your cards</h2><div className="flex items-center gap-2">{draft.cards.length ? <button type="button" className="min-h-11 px-2 text-xs text-zinc-500 hover:text-rose-800" onClick={() => setClearOpen(true)}>Clear all</button> : null}<span className="text-sm font-semibold text-zinc-500">{totalQuantity} {totalQuantity === 1 ? "copy" : "copies"}</span></div></div>
+          <div className={`min-w-0 space-y-3 md:sticky md:top-3 ${embedded ? "border-t border-zinc-200 pt-4 md:border-l md:border-t-0 md:pl-6 md:pt-0" : ""}`}>
+          <section aria-label="Cards to add" className={embedded ? "min-w-0" : "min-w-0 rounded-lg border border-zinc-300 bg-white p-3"}>
+            <div className="flex min-h-8 items-center justify-between gap-2"><h2 className={embedded ? "text-sm font-bold" : "text-lg font-bold"}>Your cards</h2><div className="flex items-center gap-2">{draft.cards.length ? <button type="button" className="min-h-11 px-2 text-xs text-zinc-500 hover:text-rose-800" onClick={() => setClearOpen(true)}>Clear all</button> : null}<span className="text-sm font-semibold text-zinc-500">{totalQuantity} {totalQuantity === 1 ? "copy" : "copies"}</span></div></div>
             <p className="mt-1 text-xs leading-5 text-zinc-500">Matching copies combine automatically.</p>
-            {draft.cards.length ? <div className="relative mt-2"><Search className="pointer-events-none absolute left-2 top-3 size-4 text-zinc-400" /><input aria-label="Search your cards" placeholder="Search your cards" value={queueQuery} onChange={(event) => { setQueueQuery(event.target.value); setQueuePage(1); }} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-8 pr-2 text-sm outline-none focus:border-[#8a1f2d]" /></div> : null}
-            {!draft.cards.length ? <div className="my-3 rounded-md border border-dashed border-zinc-300 px-3 py-5 text-center text-sm text-zinc-500">Choose a printing to start your list.</div> : <ul className="mt-3 grid grid-cols-4 gap-2">{visibleQueueCards.map((card) => {
+            {draft.cards.length ? <div className="relative mt-2"><Search className="pointer-events-none absolute left-2 top-3 size-4 text-zinc-400" /><input aria-label="Search your cards" onKeyDown={(event) => { if (embedded && event.key === "Enter") event.preventDefault(); }} placeholder="Search your cards" value={queueQuery} onChange={(event) => { setQueueQuery(event.target.value); setQueuePage(1); }} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-8 pr-2 text-sm outline-none focus:border-[#8a1f2d]" /></div> : null}
+            {!draft.cards.length ? <div className={embedded ? "mt-3 flex min-h-24 items-center justify-center rounded-md bg-zinc-50 px-4 text-center text-sm text-zinc-500" : "my-3 rounded-md border border-dashed border-zinc-300 px-3 py-5 text-center text-sm text-zinc-500"}>Choose a printing to start your list.</div> : <ul className="mt-3 grid grid-cols-4 gap-2">{visibleQueueCards.map((card) => {
               const key = ownedCardVariantKey(card);
               const description = `${card.name}, ${card.setCode}, ${card.rarity}, ${card.edition}, ${card.condition}, ${card.quantity} to add`;
               return <li className="min-w-0" key={key}>
@@ -256,19 +273,19 @@ function OwnedCardsForm() {
             })}</ul>}
             {draft.cards.length && !queueCards.length ? <p className="py-4 text-center text-sm text-zinc-500">No cards match your search.</p> : null}
             {queuePages > 1 ? <nav aria-label="Your cards pages" className="flex items-center justify-between border-t border-zinc-100 pt-1"><button type="button" aria-label="Previous cards" className={secondaryButton} disabled={currentQueuePage === 1} onClick={() => setQueuePage(currentQueuePage - 1)}><ChevronLeft className="size-4" /></button><span className="text-xs text-zinc-500">{currentQueuePage} / {queuePages}</span><button type="button" aria-label="Next cards" className={secondaryButton} disabled={currentQueuePage === queuePages} onClick={() => setQueuePage(currentQueuePage + 1)}><ChevronRight className="size-4" /></button></nav> : null}
-            <details className="mt-2 border-t border-zinc-200 pt-3"><summary className="cursor-pointer text-sm font-bold">Acquisition details <span className="font-normal text-zinc-500">(optional)</span></summary><div className="mt-3 space-y-3"><label className="block text-sm font-semibold">Date added<input className={fieldClass} onChange={(event) => setDraft({ ...draft, date: event.target.value })} type="date" value={draft.date} /></label><label className="block text-sm font-semibold">Source<input className={fieldClass} maxLength={120} onChange={(event) => setDraft({ ...draft, source: event.target.value })} placeholder="e.g. Existing collection, gift" value={draft.source} /></label><label className="block text-sm font-semibold">Notes<textarea className={textAreaClass} maxLength={4000} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} value={draft.notes} /></label><p className="text-xs leading-5 text-zinc-500">Purchase cost stays unknown. Use Record purchase when you want to track money paid.</p></div></details>
+            {!embedded ? <><details className="mt-2 border-t border-zinc-200 pt-3"><summary className="cursor-pointer text-sm font-bold">Acquisition details <span className="font-normal text-zinc-500">(optional)</span></summary><div className="mt-3 space-y-3"><label className="block text-sm font-semibold">Date added<input className={fieldClass} onChange={(event) => setDraft({ ...draft, date: event.target.value })} type="date" value={draft.date} /></label><label className="block text-sm font-semibold">Source<input className={fieldClass} maxLength={120} onChange={(event) => setDraft({ ...draft, source: event.target.value })} placeholder="e.g. Existing collection, gift" value={draft.source} /></label><label className="block text-sm font-semibold">Notes<textarea className={textAreaClass} maxLength={4000} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} value={draft.notes} /></label><p className="text-xs leading-5 text-zinc-500">Purchase cost stays unknown. Use Record purchase when you want to track money paid.</p></div></details>
             <button className={`${primaryButton} mt-3 w-full`} disabled={!draft.cards.length || saving || Boolean(selected)} onClick={() => void save()} type="button">{saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}{saving ? "Adding cards…" : `Add ${totalQuantity || ""} ${totalQuantity === 1 ? "card" : "cards"} to collection`}</button>
             {selected ? <p className="mt-2 text-xs text-amber-800">Add the selected printing to your list, or cancel it before saving.</p> : null}
-            <p className="mt-2 text-center text-xs leading-5 text-zinc-500">You can add photos and list these cards on eBay from Inventory.</p>
+            <p className="mt-2 text-center text-xs leading-5 text-zinc-500">You can add photos and list these cards on eBay from Inventory.</p></> : null}
           </section>
           </div>
         </fieldset>
             {selected ? <OwnedDialog title="Selected printing" onClose={() => { setSelected(null); setMessage(null); }}>
               <div className="flex gap-2"><CardArtwork product={selected} small /><div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-sm font-bold leading-5">{selected.name}</h2><p className="mt-1 text-xs text-zinc-500">{selected.setCode} · {selected.rarity}</p></div></div>
               <div className="mt-3 grid grid-cols-2 gap-2"><CompactPicklist inlineOptions label="Edition" value={edition} values={editions} onChange={(value) => changeVariant(value as ProductEdition, condition)} /><CompactPicklist inlineOptions label="Condition" value={condition} values={[...cardConditions]} onChange={(value) => changeVariant(edition, value as CardCondition)} /></div>
-              <p className="mt-3 text-sm font-semibold text-zinc-700">Already owned: {selectedOwned}</p>
-              {selectedAllCopies.length !== selectedOwned ? <p className="mt-1 text-xs text-zinc-600">{selectedAllCopies.length} owned across conditions: {selectedConditionCounts}. Quantity below is for {condition}.</p> : null}
-              <p className="mt-1 text-xs text-zinc-500">Set the total you want to own. {selectedAdditional > 0 ? `${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"} will be added.` : "No new copies to add."}</p>
+              <p className="mt-3 text-sm font-semibold text-zinc-700">Already owned: {selectedExisting}</p>
+              {selectedAllCopies.length !== selectedExisting ? <p className="mt-1 text-xs text-zinc-600">{selectedAllCopies.length} owned across conditions: {selectedConditionCounts}. Quantity below is for {condition}.</p> : null}
+              <p className="mt-1 text-xs text-zinc-500" aria-live="polite">{embedded ? `This will add ${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"}, bringing your total to ${selectedExisting + selectedAdditional}. Quantity below is for this purchase or opening.` : <>Set the total you want to own. {selectedAdditional > 0 ? `${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"} will be added.` : "No new copies to add."}</>}</p>
               <div className="mt-2 flex flex-wrap gap-2"><QuantityStepper label="Quantity" value={Number(quantity)} min={Math.max(1, selectedOwned)} max={Math.max(1, selectedOwned + 1000 - totalQuantity + selectedQueued + editingOtherQuantity)} onChange={(value) => setQuantity(String(value))} /><button className={`${primaryButton} flex-1`} onClick={addSelection} type="button"><Plus className="size-4" /> {editingKey ? "Save changes" : selectedAdditional > 0 ? "Add to list" : "Done"}</button></div>
             {editingKey ? <button type="button" className="mt-3 inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-rose-700 hover:text-rose-900" onClick={() => { setDraft({ ...draft, cards: draft.cards.filter((card) => ownedCardVariantKey(card) !== editingKey) }); setSelected(null); setEditingKey(null); setMessage(null); }}><Trash2 className="size-3.5" />Remove from list</button> : null}
             {message ? <p className="mt-3 text-sm text-rose-800" role="alert">{message}</p> : null}</OwnedDialog> : null}
@@ -283,5 +300,5 @@ function OwnedCardsForm() {
         {message && !selected ? <p className="sticky bottom-4 rounded-lg border border-rose-300 bg-rose-50 p-4 text-sm font-semibold text-rose-800 shadow-sm" role="alert">{message}</p> : null}
       </>}
     </div>
-  </main>;
+  </Container>;
 }

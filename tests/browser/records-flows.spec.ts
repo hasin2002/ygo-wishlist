@@ -1,24 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const metadata = {
-  metadata: {
-    cardType: "Dark Spellcaster",
-    edition: "1st Edition",
-    imageUrl: null,
-    rarity: "Ultra Rare",
-    resolution: "page",
-    setCode: "LOB-005",
-    setName: "Legend of Blue Eyes White Dragon",
-    title: "Dark Magician",
-  },
-};
-
-async function mockMetadata(page: Page) {
-  await page.route("**/api/records/metadata", async (route) => {
-    await route.fulfill({ contentType: "application/json", json: metadata });
-  });
-}
-
 async function chooseCardPurchase(page: Page) {
   const choice = page.getByRole("button", { name: /^Single card/ });
   await choice.getByText("Single card", { exact: true }).click();
@@ -43,16 +24,14 @@ test("Purchase type choices share one compact row on wide desktop", async ({ pag
 });
 
 async function createCardPurchase(page: Page) {
-  await mockMetadata(page);
+  await mockCatalogue(page);
   await page.goto("/records/new/purchase");
   await expect(page.getByRole("heading", { name: "Record purchase" })).toBeVisible();
   await chooseCardPurchase(page);
   await page.getByLabel(/Record name/).fill("Browser purchase");
   await page.getByLabel(/All-in amount paid/).fill("1.01");
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel(/TCGplayer product link/).fill("https://www.tcgplayer.com/product/12345/dark-magician");
-  await page.getByRole("button", { name: "Fetch details" }).click();
-  await expect(page.getByRole("combobox", { name: /Card name/ })).toHaveValue("Dark Magician");
+  await chooseCatalogueCard(page);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review purchase" })).toBeVisible();
   await page.getByRole("button", { name: "Confirm preview purchase" }).click();
@@ -215,7 +194,7 @@ test("a generic Purchase draft also asks before an explicit target replaces its 
   await page.getByLabel(/Record name/).fill("New targeted purchase");
   await page.getByLabel(/All-in amount paid/).fill("1.00");
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.getByRole("combobox", { name: /Card name/ })).toHaveValue("First");
+  await expect(page.getByRole("button", { name: /First.*Change/ })).toBeVisible();
 });
 
 test("a corrupt Purchase payload is discarded before controls can read it", async ({ page }) => {
@@ -422,4 +401,89 @@ test("preview gates mixed eBay entry points and rejects crafted listing-photo op
   });
   expect(previewDelete.ok()).toBe(false);
   expect((await previewDelete.json()).message).toMatch(/preview mode/i);
+});
+
+
+async function mockCatalogue(page: Page) {
+  await page.route("**/api/trpc/cardCatalogue.search**", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify([{ result: { data: { json: {
+    products: [{ productId: 12345, name: "Dark Magician", setCode: "LOB-005", setName: "Legend of Blue Eyes White Dragon", rarity: "Ultra Rare", imageUrl: null, tcgplayerUrl: "https://www.tcgplayer.com/product/12345", marketPricesUsdCents: { "1st Edition": 56 } }],
+    total: 1, page: 1, pageCount: 1, detectedRarity: "Ultra Rare", searchText: "LOB-005", rarities: ["Ultra Rare"], status: { ready: true, stale: false, syncing: false, productCount: 1, updatedAt: null },
+  } } } }]) }));
+}
+
+async function chooseCatalogueCard(page: Page) {
+  await page.getByLabel("Card name or set code", { exact: true }).fill("LOB-005 ultra rare");
+  await expect(page.getByText("TCGplayer · US$0.56")).toBeVisible();
+  await page.getByRole("button", { name: "Choose Dark Magician, LOB-005, Ultra Rare" }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await expect(dialog).toBeVisible();
+  expect(await dialog.evaluate((element) => element.parentElement?.parentElement === document.body)).toBe(true);
+  await expect(dialog.getByRole("combobox", { name: "Edition", exact: true })).toHaveValue("1st Edition");
+  await expect(dialog.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("1");
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const queue = page.getByRole("region", { name: "Cards to add" });
+  await expect(queue.getByRole("button", { name: /Edit Dark Magician/ })).toBeVisible();
+  expect(await queue.locator("ul").evaluate((element) => getComputedStyle(element).display)).toBe("grid");
+  await expect(page.getByText("Done & add next", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel(/TCGplayer product link/)).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+}
+
+
+for (const width of [1117, 390]) test(`Bulk contents select catalogue cards without product links at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
+  await mockCatalogue(page);
+  await page.goto("/records/new/purchase");
+  await page.getByRole("button", { name: /^Bulk lot/ }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Record name/).fill("Catalogue bulk");
+  await page.getByLabel(/All-in amount paid/).fill("10.00");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel(/Total cards in lot/).fill("1");
+  await chooseCatalogueCard(page);
+  const queue = page.getByRole("region", { name: "Cards to add" });
+  await queue.getByRole("button", { name: /Edit Dark Magician/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await dialog.getByRole("button", { name: "Increase quantity" }).click();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(queue.getByRole("button", { name: /2 to add/ })).toBeVisible();
+  await page.getByLabel(/Total cards in lot/).fill("2");
+  await page.screenshot({ path: `/tmp/purchase-shared-grid-${width}.png`, fullPage: true });
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review purchase" })).toBeVisible();
+  await expect(page.getByText("Dark Magician", { exact: true }).first()).toBeVisible();
+});
+
+
+test("Tracked opening pulls select catalogue cards without product links", async ({ page }) => {
+  await mockCatalogue(page);
+  await page.goto("/records/new/opening");
+  await page.getByRole("button", { name: /^Tracked sealed/ }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: /Spellcaster.s Command Structure Deck/ }).first().click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await chooseCatalogueCard(page);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review opening" })).toBeVisible();
+});
+
+
+test("Purchase picker shows existing copies and the total after adding", async ({ page }) => {
+  await createCardPurchase(page);
+  await page.goto("/records/new/purchase");
+  await chooseCardPurchase(page);
+  await page.getByLabel(/Record name/).fill("Another purchase");
+  await page.getByLabel(/All-in amount paid/).fill("2.00");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Card name or set code", { exact: true }).fill("LOB-005");
+  await page.getByRole("button", { name: "Choose Dark Magician, LOB-005, Ultra Rare" }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await expect(dialog.getByText("Already owned: 1", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("1");
+  await expect(dialog.getByText(/This will add 1 new copy, bringing your total to 2/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Increase quantity" }).click();
+  await expect(dialog.getByText(/This will add 2 new copies, bringing your total to 3/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Edit Dark Magician.*2 to add/ })).toBeVisible();
 });

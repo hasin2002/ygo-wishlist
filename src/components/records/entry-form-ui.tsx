@@ -80,11 +80,13 @@ export function rowId(prefix: string) {
 }
 
 export function FormSection({
+  compact = false,
   children,
   description,
   number,
   title,
 }: {
+  compact?: boolean;
   children: ReactNode;
   description: string;
   number: number;
@@ -93,7 +95,7 @@ export function FormSection({
   return (
     <section className="rounded-lg border border-zinc-300 bg-white p-4 shadow-sm sm:p-5">
       <div className="flex items-start gap-3">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-zinc-950 text-sm font-black text-white">{number}</span>
+        {!compact ? <span className="grid size-8 shrink-0 place-items-center rounded-full bg-zinc-950 text-sm font-black text-white">{number}</span> : null}
         <div><h2 className="text-lg font-bold">{title}</h2><p className="mt-1 text-sm font-medium leading-5 text-zinc-500">{description}</p></div>
       </div>
       <div className="mt-5">{children}</div>
@@ -208,7 +210,14 @@ export function SuccessToast({
   );
 }
 
-export function WizardProgress({ labels, step }: { labels: string[]; step: number }) {
+export function WizardProgress({ labels, step, compact = false }: { labels: string[]; step: number; compact?: boolean }) {
+  if (compact) return (
+    <nav aria-label="Form progress" className="border-b border-zinc-300">
+      <ol className="grid" style={{ gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))` }}>
+        {labels.map((label, index) => <li key={label} aria-current={index + 1 === step ? "step" : undefined} className={`flex min-w-0 items-center gap-2 border-b-2 px-1 py-3 text-xs font-semibold sm:text-sm ${index + 1 === step ? "border-[#8a1f2d] text-[#8a1f2d]" : "border-transparent text-zinc-500"}`}><span className="shrink-0 tabular-nums">{index + 1}.</span><span>{label}</span></li>)}
+      </ol>
+    </nav>
+  );
   return (
     <nav aria-label="Form progress" className="rounded-lg border border-zinc-300 bg-white p-3 shadow-sm">
       <div className="mb-2 flex items-center justify-between text-xs font-bold text-zinc-500"><span>Step {step} of {labels.length}</span><span>{labels[step - 1]}</span></div>
@@ -233,6 +242,7 @@ export function StepPanel({ children, step }: { children: ReactNode; step: numbe
 }
 
 export function WizardActions({
+  compact = false,
   confirmDisabled = false,
   finalLabel,
   nextDisabled = false,
@@ -246,6 +256,7 @@ export function WizardActions({
   step,
   totalSteps,
 }: {
+  compact?: boolean;
   confirmDisabled?: boolean;
   finalLabel: string;
   nextDisabled?: boolean;
@@ -260,10 +271,10 @@ export function WizardActions({
   totalSteps: number;
 }) {
   return (
-    <div className={`z-20 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 rounded-lg border border-zinc-300 bg-white p-3 sm:flex sm:items-center sm:justify-between ${sticky ? "sticky bottom-[max(.75rem,env(safe-area-inset-bottom))] shadow-lg sm:static sm:shadow-sm" : ""}`}>
+    <div className={`z-20 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2 ${compact ? "bg-[#f6f4ef] py-2" : "rounded-lg border border-zinc-300 bg-white p-3"} sm:flex sm:items-center sm:justify-between ${sticky ? `sticky bottom-[max(.75rem,env(safe-area-inset-bottom))] sm:static ${compact ? "" : "shadow-lg sm:shadow-sm"}` : ""}`}>
       <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-bold text-zinc-700 hover:border-zinc-950 disabled:opacity-40 sm:w-auto sm:px-4" disabled={step === 1 || pending} onClick={onBack} type="button"><ArrowLeft className="size-4" /> Back</button>
       {step < totalSteps ? (
-        <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-zinc-950 px-3 text-sm font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5" disabled={nextDisabled || pending} onClick={onNext} type="button">{pending ? pendingLabel : nextLabel} {pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <ArrowRight className="size-4" />}</button>
+        <button className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-3 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-5 ${compact ? "bg-[#8a1f2d] hover:bg-[#711826]" : "bg-zinc-950 hover:bg-zinc-800"}`} disabled={nextDisabled || pending} onClick={onNext} type="button">{pending ? pendingLabel : nextLabel} {pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <ArrowRight className="size-4" />}</button>
       ) : (
         <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#8a1f2d] px-3 text-sm font-bold text-white transition hover:bg-[#711826] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5" disabled={confirmDisabled || pending} onClick={onConfirm} type={onConfirm ? "button" : "submit"}>{pending ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Check className="size-4" />} {pending ? pendingLabel : finalLabel}</button>
       )}

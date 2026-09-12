@@ -56,23 +56,25 @@ function DraftConflictWorkSummary({
 }
 
 export function FormDraftStatus({
+  compact = false,
   dirty,
   onDiscard,
   recoveryMessage,
   restored,
 }: {
+  compact?: boolean;
   dirty: boolean;
   onDiscard: () => void;
   recoveryMessage?: string | null;
   restored: boolean;
 }) {
   return (
-    <aside className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-600">
+    <aside className={`flex flex-wrap items-center justify-between gap-2 font-medium text-zinc-500 ${compact ? "text-xs" : "rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"}`}>
       <span aria-live="polite">
         {recoveryMessage ?? (restored ? "Draft restored in this tab." : dirty ? "Draft saved in this tab." : "Draft ready in this tab.")}
       </span>
       <button
-        className="inline-flex min-h-11 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 text-sm font-bold text-zinc-700 hover:border-zinc-950"
+        className={`inline-flex min-h-11 items-center gap-2 rounded-md text-zinc-600 hover:text-zinc-950 ${compact ? "px-1 text-xs" : "border border-zinc-300 bg-white px-3 text-sm font-bold hover:border-zinc-950"}`}
         onClick={onDiscard}
         type="button"
       >

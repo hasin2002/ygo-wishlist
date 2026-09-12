@@ -64,9 +64,14 @@ changed.
   owner-scoped Card Printing model. Catalogue refreshes never rewrite existing
   Copies, photos, Records or listing history. Identical product/edition/condition
   selections combine in the draft while every saved Copy keeps an exact ID.
-- Sealed-product identities and the detailed Purchase/Openings workflows retain
-  their existing product-reference inputs. Legacy incomplete metadata remains
-  usable and is surfaced as needing attention.
+- Single-card purchases, identified bulk contents and opening pulls use catalogue
+  search too. Catalogue selections resolve trusted identities on the server;
+  receipt costs remain separate from USD market estimates. Sealed-product
+  identities retain their existing reference editor because the catalogue contains
+  individual cards. Legacy incomplete metadata remains usable.
+- Owned-card saves batch identity reads and writes in one transaction and retain
+  their submission ID across retries. A client timeout does not prove rollback;
+  retrying the same draft returns the saved acquisition without duplicate Copies.
 - Sales initially cover card copies only.
 - Binder location remains an integration with the existing Binder feature, not
   a generalized inventory-location model. Binder, Wheel, chase, and highlights

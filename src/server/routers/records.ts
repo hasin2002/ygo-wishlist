@@ -61,8 +61,6 @@ import { requireEbayExternalCapability } from "@/server/ebay-capabilities";
 import { CopySelectionError, lockReconciledCopies } from "@/server/records/copy-selection";
 import {
   compatiblePrintingIdentity,
-  compatibleCataloguePrintingIdentity,
-  tcgplayerProductId,
   conflictsWithPrintingIdentity,
   normalizePrintingValue,
 } from "@/server/printing-identity";
@@ -72,6 +70,7 @@ import { fetchLinkMetadata } from "@/server/metadata";
 
 import { addOwnedCardsSchema, collapseOwnedCards } from "@/lib/records/owned-cards";
 import { getCatalogueProducts } from "@/server/card-catalogue";
+import { resolveCataloguePrintings } from "@/server/records/catalogue-printings";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -165,6 +164,7 @@ const productEditionSchema = z.enum(["1st Edition", "Unlimited Edition", "Limite
 const supplyCategorySchema = z.enum(["sleeves", "binder", "storage", "playmat", "other"]);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const cardInputSchema = z.object({
+  catalogueProductId: z.number().int().positive().optional(),
   id: z.string().min(1),
   condition: z.enum(cardConditions).default("Near Mint"),
   selectedTargetId: z.string().min(1).nullable().optional(),
@@ -240,6 +240,7 @@ const purchaseSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 const openingSchema = commonRecordSchema.omit({ source: true }).extend({
+  operationId: z.string().uuid().optional(),
   source: z.string().trim().min(1).max(120),
   totalPence: z.number().int().nonnegative(),
   amountKnown: z.boolean().default(true),
@@ -525,12 +526,88 @@ function conflict(message: string): never {
   throw new TRPCError({ code: "CONFLICT", message });
 }
 
+async function saveCardPricing(tx: Transaction, ownerId: string, printingId: string, input: z.infer<typeof cardInputSchema>, now: Date) {
+  if (input.pricing) {
+    const [existingPricing] = await tx
+      .select({ estimatedPricePence: cardPricingEstimates.estimatedPricePence })
+      .from(cardPricingEstimates)
+      .where(and(
+        eq(cardPricingEstimates.ownerId, ownerId),
+        eq(cardPricingEstimates.printingId, printingId),
+        eq(cardPricingEstimates.condition, input.condition),
+      ))
+      .limit(1);
+    const estimatedPricePence = input.pricing.estimatedPricePence
+      ?? existingPricing?.estimatedPricePence
+      ?? null;
+    await tx.insert(cardPricingEstimates).values({
+      id: id("pricing"),
+      ownerId,
+      printingId: printingId,
+      condition: input.condition,
+      estimatedPricePence,
+      ebaySearchUrl: input.pricing.ebaySearchUrl,
+      sampleSize: input.pricing.sampleSize ?? 0,
+      usedConditionFallback: input.pricing.usedConditionFallback ?? false,
+      refreshedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [
+        cardPricingEstimates.ownerId,
+        cardPricingEstimates.printingId,
+        cardPricingEstimates.condition,
+      ],
+      set: {
+        estimatedPricePence,
+        ebaySearchUrl: input.pricing.ebaySearchUrl,
+        sampleSize: input.pricing.sampleSize ?? 0,
+        usedConditionFallback: input.pricing.usedConditionFallback ?? false,
+        refreshedAt: now,
+        updatedAt: now,
+      },
+    });
+  }
+
+}
+
+async function resolveInputPrintings(tx: Transaction, ownerId: string, inputs: z.infer<typeof cardInputSchema>[], now: Date) {
+  const selected = inputs.filter((card) => card.catalogueProductId);
+  const resolved = new Map<z.infer<typeof cardInputSchema>, string>();
+  if (selected.length) {
+    const products = await getCatalogueProducts(selected.map((card) => card.catalogueProductId!), tx);
+    const byId = new Map(products.map((product) => [product.productId, product]));
+    const trusted = selected.map((card) => {
+      const product = byId.get(card.catalogueProductId!);
+      if (!product) conflict("A selected printing is no longer in the catalogue. Search for it again before saving.");
+      // Keep quantity/condition/edition and actual costs; use server catalogue identity.
+      Object.assign(card, { name: product.name, rarity: product.rarity, setName: product.setName,
+        setCode: product.setCode, tcgplayerUrl: product.tcgplayerUrl, imageUrl: product.imageUrl, metadataNeedsAttention: false });
+      return { ...product, edition: card.edition, condition: card.condition, quantity: card.quantity };
+    });
+    const ids = await resolveCataloguePrintings(tx, ownerId, trusted, now);
+    for (const [index, card] of selected.entries()) {
+      resolved.set(card, ids[index]);
+      await saveCardPricing(tx, ownerId, ids[index], card, now);
+    }
+  }
+  const ids: string[] = [];
+  for (const card of inputs) ids.push(resolved.get(card) ?? (await findOrCreatePrinting(tx, ownerId, card, now)).printing.id);
+  return ids;
+}
+
 async function findOrCreatePrinting(
   tx: Transaction,
   ownerId: string,
   input: z.infer<typeof cardInputSchema>,
   now: Date,
 ) {
+  if (input.catalogueProductId) {
+    const [printingId] = await resolveInputPrintings(tx, ownerId, [input], now);
+    const [printing] = await tx.select().from(cardPrintings).where(and(eq(cardPrintings.ownerId, ownerId), eq(cardPrintings.id, printingId)));
+    const [target] = await tx.select().from(cardTargets).where(and(eq(cardTargets.ownerId, ownerId), eq(cardTargets.id, printing.targetId)));
+    return { printing, target };
+  }
   const normalizedName = normalize(input.name);
   const normalizedRarity = normalize(input.rarity);
   const normalizedEditionValue = normalizeEdition(input.edition);
@@ -656,49 +733,15 @@ async function findOrCreatePrinting(
     }
   }
 
-  if (input.pricing) {
-    const [existingPricing] = await tx
-      .select({ estimatedPricePence: cardPricingEstimates.estimatedPricePence })
-      .from(cardPricingEstimates)
-      .where(and(
-        eq(cardPricingEstimates.ownerId, ownerId),
-        eq(cardPricingEstimates.printingId, printing.id),
-        eq(cardPricingEstimates.condition, input.condition),
-      ))
-      .limit(1);
-    const estimatedPricePence = input.pricing.estimatedPricePence
-      ?? existingPricing?.estimatedPricePence
-      ?? null;
-    await tx.insert(cardPricingEstimates).values({
-      id: id("pricing"),
-      ownerId,
-      printingId: printing.id,
-      condition: input.condition,
-      estimatedPricePence,
-      ebaySearchUrl: input.pricing.ebaySearchUrl,
-      sampleSize: input.pricing.sampleSize ?? 0,
-      usedConditionFallback: input.pricing.usedConditionFallback ?? false,
-      refreshedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    }).onConflictDoUpdate({
-      target: [
-        cardPricingEstimates.ownerId,
-        cardPricingEstimates.printingId,
-        cardPricingEstimates.condition,
-      ],
-      set: {
-        estimatedPricePence,
-        ebaySearchUrl: input.pricing.ebaySearchUrl,
-        sampleSize: input.pricing.sampleSize ?? 0,
-        usedConditionFallback: input.pricing.usedConditionFallback ?? false,
-        refreshedAt: now,
-        updatedAt: now,
-      },
-    });
-  }
+  await saveCardPricing(tx, ownerId, printing.id, input, now);
 
   return { printing, target };
+}
+
+async function insertCardRows(tx: Transaction, lines: (typeof recordLines.$inferInsert)[], copies: (typeof cardCopies.$inferInsert)[]) {
+  // Stay below PostgreSQL's parameter limit even for a large Bulk or Opening.
+  for (let offset = 0; offset < lines.length; offset += 500) await tx.insert(recordLines).values(lines.slice(offset, offset + 500));
+  for (let offset = 0; offset < copies.length; offset += 1000) await tx.insert(cardCopies).values(copies.slice(offset, offset + 1000));
 }
 
 async function insertRecord(
@@ -726,7 +769,8 @@ export async function loadRecordsSnapshot(
   const scoped = options.recordIds !== undefined;
   const ids = options.recordIds ?? [];
   const scope = options.scope ?? "full";
-  const includeCopies = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form";
+  // Acquisition pickers also need physical Copies to show existing ownership.
+  const includeCopies = scope === "full" || scope === "inventory" || scope === "listings" || scope === "sale-form" || scope === "purchase-form" || scope === "opening-form";
   // Copy eligibility depends on the active/void status of the acquisition
   // Record. Any scope that returns Copies must therefore return their source
   // Records too, even when Record lines are intentionally omitted.
@@ -1733,42 +1777,21 @@ export const recordsRouter = router({
         source: input.source || "Added to collection", amountKnown: false, amountPence: 0,
         notes: input.notes, revision: 1, createdAt: now, updatedAt: now,
       });
-      for (const [position, card] of cards.entries()) {
-        // Trust catalogue identity, never the display metadata supplied by a browser.
-        const product = byId.get(card.productId)!;
-        const lineId = id("line");
-        // Resolve trusted product identity before name-based creation. Older titles
-        // omit rarity suffixes and their URLs include slugs; neither changes the printing.
-        const candidates = await tx.select({ printing: cardPrintings }).from(cardPrintings)
-          .innerJoin(cardTargets, eq(cardTargets.id, cardPrintings.targetId))
-          .where(and(eq(cardPrintings.ownerId, ownerId), eq(cardTargets.ownerId, ownerId),
-            eq(cardTargets.normalizedRarity, normalize(product.rarity)),
-            eq(cardTargets.normalizedEdition, normalizeEdition(card.edition))));
-        const sameProduct = candidates.map((row) => row.printing).filter((printing) =>
-          tcgplayerProductId(printing.canonicalTcgplayerUrl || printing.tcgplayerUrl) === String(product.productId));
-        if (sameProduct.length > 1) conflict(`${product.name}: this printing has duplicate records. Review them before adding copies.`);
-        const existingPrinting = sameProduct[0];
-        if (existingPrinting && !compatibleCataloguePrintingIdentity({
-          ...existingPrinting, canonicalTcgplayerUrl: existingPrinting.canonicalTcgplayerUrl || existingPrinting.tcgplayerUrl,
-        }, { canonicalTcgplayerUrl: product.tcgplayerUrl, normalizedSetCode: normalizePrintingValue(product.setCode),
-          normalizedSetName: normalizePrintingValue(product.setName) })) {
-          conflict(`${product.name} (${product.setCode}): the existing set code conflicts with this catalogue printing. Review it before adding copies.`);
-        }
-        const printing = existingPrinting ?? (await findOrCreatePrinting(tx, ownerId, {
-          ...product, ...card, id: lineId, metadataNeedsAttention: false,
-        }, now)).printing;
-        await insertLine(tx, {
-          id: lineId, ownerId, recordId, position, kind: "card", name: product.name,
-          quantity: card.quantity, allocationPence: null,
-          detail: `${product.setCode} · ${card.edition} · ${product.rarity} · ${card.condition}`,
-          createdAt: now, updatedAt: now,
-        });
-        await tx.insert(cardCopies).values(Array.from({ length: card.quantity }, () => ({
-          id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: recordId,
-          acquiredLineId: lineId, allocationPence: null, status: "available" as const,
+      const trustedCards = cards.map((card) => ({ ...byId.get(card.productId)!, ...card }));
+      const printingIds = await resolveCataloguePrintings(tx, ownerId, trustedCards, now);
+      const lines = trustedCards.map((card, position) => ({
+        id: id("line"), ownerId, recordId, position, kind: "card" as const, name: card.name,
+        quantity: card.quantity, allocationPence: null,
+        detail: `${card.setCode} · ${card.edition} · ${card.rarity} · ${card.condition}`,
+        createdAt: now, updatedAt: now,
+      }));
+      await tx.insert(recordLines).values(lines);
+      await tx.insert(cardCopies).values(trustedCards.flatMap((card, position) =>
+        Array.from({ length: card.quantity }, () => ({
+          id: id("copy"), ownerId, printingId: printingIds[position], acquiredRecordId: recordId,
+          acquiredLineId: lines[position].id, allocationPence: null, status: "available" as const,
           condition: card.condition, createdAt: now, updatedAt: now,
-        })));
-      }
+        }))));
       return { id: recordId };
     });
   }),
@@ -1835,7 +1858,7 @@ export const recordsRouter = router({
 
       if (input.kind === "card") {
         const lineId = id("line");
-        const { printing } = await findOrCreatePrinting(tx, ownerId, input.card, now);
+        const [printingId] = await resolveInputPrintings(tx, ownerId, [input.card], now);
         await insertLine(tx, {
           id: lineId, ownerId, recordId, position: 0, kind: "card", name: input.card.name,
           quantity: input.card.quantity,
@@ -1855,7 +1878,7 @@ export const recordsRouter = router({
         });
         const allocationByCopyId = new Map(sortedCopyIds.map((copyId, index) => [copyId, allocations[index]!]));
         await tx.insert(cardCopies).values(copyIds.map((copyId) => ({
-          id: copyId, ownerId, printingId: printing.id, acquiredRecordId: recordId,
+          id: copyId, ownerId, printingId, acquiredRecordId: recordId,
           acquiredLineId: lineId, allocationPence: allocationByCopyId.get(copyId)!,
           status: "available" as const, condition: input.card.condition, createdAt: now, updatedAt: now,
         })));
@@ -1907,16 +1930,18 @@ export const recordsRouter = router({
           name: lotName, totalQuantity: input.totalCardCount, itemizedQuantity: identifiedCount,
           status: identifiedCount >= input.totalCardCount ? "itemized" : "open", createdAt: now, updatedAt: now,
         });
+        const printingIds = await resolveInputPrintings(tx, ownerId, input.cards, now);
+        const lines: (typeof recordLines.$inferInsert)[] = [];
+        const copies: (typeof cardCopies.$inferInsert)[] = [];
         let allocationIndex = 0;
         for (const [position, card] of input.cards.entries()) {
           const lineId = id("line");
-          const { printing } = await findOrCreatePrinting(tx, ownerId, card, now);
           const allocations = Array.from({ length: card.quantity }, (_, offset) => (
             input.amountKnown
               ? allocatePenceAt(input.totalPence, input.totalCardCount, allocationIndex + offset)
               : null
           ));
-          await insertLine(tx, {
+          lines.push({
             id: lineId, ownerId, recordId, position: position + 1, kind: "card", name: card.name,
             quantity: card.quantity,
             allocationPence: input.amountKnown
@@ -1925,13 +1950,14 @@ export const recordsRouter = router({
             detail: `${card.setCode || "Unknown code"} · ${card.edition} · from ${lotName}`,
             createdAt: now, updatedAt: now,
           });
-          await tx.insert(cardCopies).values(allocations.map((allocationPence, offset) => ({
-            id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: recordId,
+          copies.push(...allocations.map((allocationPence, offset) => ({
+            id: id("copy"), ownerId, printingId: printingIds[position], acquiredRecordId: recordId,
             acquiredLineId: lineId, bulkLotId: lotId, allocationIndex: allocationIndex + offset,
             allocationPence, status: "available" as const, condition: card.condition, createdAt: now, updatedAt: now,
           })));
           allocationIndex += card.quantity;
         }
+        await insertCardRows(tx, lines, copies);
       } else {
         const lineId = id("line");
         const name = input.category === "other"
@@ -1960,9 +1986,18 @@ export const recordsRouter = router({
 
   createOpening: authenticatedProcedure.input(openingSchema).mutation(async ({ ctx, input }) => {
     const ownerId = ctx.collectionOwnerId;
-    const openingId = id("record");
+    let openingId = id("record");
+    let duplicate = false;
     const now = new Date();
     await db.transaction(async (tx) => {
+      if (input.operationId) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ownerId}), hashtext('create-opening'))`);
+        const [existing] = await tx.select().from(recordEntries).where(and(eq(recordEntries.ownerId, ownerId), eq(recordEntries.submissionId, input.operationId))).limit(1);
+        if (existing) {
+          if (existing.type !== "pack-opening") conflict("This submission belongs to another Record. Start a new opening draft.");
+          openingId = existing.id; duplicate = true; return;
+        }
+      }
       const canonicalUrl = canonicalProductUrl(input.product.tcgplayerUrl);
       let sealed = input.useTrackedStock && input.sealedUnitId
         ? (await tx.select().from(sealedUnits).where(and(
@@ -2005,24 +2040,27 @@ export const recordsRouter = router({
       }
 
       await insertRecord(tx, {
-        id: openingId, ownerId, type: "pack-opening", status: "active", occurredOn: input.date,
+        id: openingId, ownerId, submissionId: input.operationId, type: "pack-opening", status: "active", occurredOn: input.date,
         title: input.recordName, titleGenerated: false, source: input.source, amountPence: 0,
         amountKnown: true, notes: input.notes, revision: 1, createdAt: now, updatedAt: now,
       });
+      const printingIds = await resolveInputPrintings(tx, ownerId, input.pulls, now);
+      const lines: (typeof recordLines.$inferInsert)[] = [];
+      const copies: (typeof cardCopies.$inferInsert)[] = [];
       for (const [position, pull] of input.pulls.entries()) {
         const lineId = id("line");
-        const { printing } = await findOrCreatePrinting(tx, ownerId, pull, now);
-        await insertLine(tx, {
+        lines.push({
           id: lineId, ownerId, recordId: openingId, position, kind: "card", name: pull.name,
           quantity: pull.quantity, detail: `${pull.setCode || "Unknown code"} · ${pull.edition} · ${pull.rarity} · pulled`,
           createdAt: now, updatedAt: now,
         });
-        await tx.insert(cardCopies).values(Array.from({ length: pull.quantity }, () => ({
-          id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: openingId,
+        copies.push(...Array.from({ length: pull.quantity }, () => ({
+          id: id("copy"), ownerId, printingId: printingIds[position], acquiredRecordId: openingId,
           acquiredLineId: lineId, status: "available" as const, condition: pull.condition,
           createdAt: now, updatedAt: now,
         })));
       }
+      await insertCardRows(tx, lines, copies);
       const updated = await tx.update(sealedUnits).set({
         status: "opened", openedRecordId: openingId, updatedAt: now,
       }).where(and(
@@ -2031,7 +2069,7 @@ export const recordsRouter = router({
       )).returning({ id: sealedUnits.id });
       if (!updated.length) conflict("That sealed product was opened elsewhere. Refresh and try again.");
     });
-    return { id: openingId };
+    return { id: openingId, ...(duplicate ? { warning: "This opening was already saved. No duplicate copies were added." } : {}) };
   }),
 
   createSale: authenticatedProcedure.input(saleSchema).mutation(async ({ ctx, input }) => {
