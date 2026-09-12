@@ -11,9 +11,10 @@ import { SearchablePicklist } from "@/components/records/searchable-picklist";
 import { AppHeader } from "@/components/app-header";
 import { fieldClass, textAreaClass, today } from "@/components/records/entry-form-ui";
 import { useRecordsDataSource } from "@/components/records/records-preview-provider";
-import { addOwnedCardsSchema, collapseOwnedCards, matchingOwnedCardCopies, ownedCardsDraftSchema, ownedCardVariantKey, type AddOwnedCardsDraft, type OwnedCardDraft, type OwnedCardProduct } from "@/lib/records/owned-cards";
+import { addOwnedCardsSchema, matchingOwnedCardCopies, ownedCardsDraftSchema, ownedCardVariantKey, type AddOwnedCardsDraft, type OwnedCardDraft, type OwnedCardProduct } from "@/lib/records/owned-cards";
 import { cardConditions, type CardCondition, type ProductEdition } from "@/lib/records/types";
 import { taskReturnHref } from "@/lib/navigation-intent";
+import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import { trpc } from "@/trpc/client";
 
 const editions: ProductEdition[] = ["1st Edition", "Unlimited Edition", "Limited Edition"];
@@ -30,9 +31,9 @@ function OwnedDialog({ title, onClose, children }: { title: string; onClose: () 
   </div>, document.body);
 }
 
-function CardArtwork({ product, small = false }: { product: OwnedCardProduct; small?: boolean }) {
+function CardArtwork({ product, small = false, tile = false }: { product: OwnedCardProduct; small?: boolean; tile?: boolean }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  return <div className={`grid shrink-0 place-items-center overflow-hidden rounded border border-zinc-200 bg-zinc-100 ${small ? "h-14 w-10" : "h-[72px] w-12"}`}>
+  return <div className={`grid shrink-0 place-items-center overflow-hidden rounded border border-zinc-200 bg-zinc-100 ${tile ? "aspect-[5/7] w-full" : small ? "h-14 w-10" : "h-[72px] w-12"}`}>
     {product.imageUrl && failedUrl === product.imageUrl ? <span className="px-1 text-center text-[10px] text-zinc-500">Image unavailable</span> : product.imageUrl ? <Image onError={() => setFailedUrl(product.imageUrl)} alt="" className="h-full w-full object-contain" height={96} src={`/api/image-proxy?url=${encodeURIComponent(product.imageUrl)}`} unoptimized width={64} /> : <span className="px-1 text-center text-xs text-zinc-500">No image</span>}
   </div>;
 }
@@ -70,6 +71,7 @@ function OwnedCardsForm() {
   const [searchText, setSearchText] = useState(query);
   const [rarity, setRarity] = useState<string | undefined>();
   const [page, setPage] = useState(1);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<OwnedCardProduct | null>(null);
   const [edition, setEdition] = useState<ProductEdition>("1st Edition");
   const [condition, setCondition] = useState<CardCondition>("Near Mint");
@@ -126,6 +128,8 @@ function OwnedCardsForm() {
   const selectedOwned = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition, condition }).length : 0;
   const selectedKey = selected ? ownedCardVariantKey({ ...selected, edition, condition, quantity: 1 }) : "";
   const selectedQueued = draft?.cards.find((card) => ownedCardVariantKey(card) === selectedKey)?.quantity ?? 0;
+  const editingCard = draft?.cards.find((card) => ownedCardVariantKey(card) === editingKey);
+  const editingOtherQuantity = editingKey !== selectedKey ? editingCard?.quantity ?? 0 : 0;
   const selectedAdditional = Number(quantity) - selectedOwned;
   const searching = query.trim() !== searchText || results.isFetching;
 
@@ -141,34 +145,41 @@ function OwnedCardsForm() {
   }
 
   function choose(product: OwnedCardProduct) {
-    setSelected(product); setEdition("1st Edition");
+    setEditingKey(null); setSelected(product); setEdition("1st Edition");
     setQuantity(initialQuantity(product, "1st Edition", condition)); setMessage(null);
   }
 
   function changeVariant(nextEdition: ProductEdition, nextCondition: CardCondition) {
     setEdition(nextEdition); setCondition(nextCondition);
-    if (selected) setQuantity(initialQuantity(selected, nextEdition, nextCondition));
+    if (selected) {
+      if (editingCard) {
+        const variant = { ...selected, edition: nextEdition, condition: nextCondition, quantity: 1 };
+        const owned = matchingOwnedCardCopies(source.snapshot, variant).length;
+        const other = draft?.cards.find((card) => ownedCardVariantKey(card) === ownedCardVariantKey(variant) && ownedCardVariantKey(card) !== editingKey)?.quantity ?? 0;
+        setQuantity(String(owned + editingCard.quantity + other));
+      } else setQuantity(initialQuantity(selected, nextEdition, nextCondition));
+    }
     setMessage(null);
   }
 
   function addSelection() {
     if (!draft || !selected) return;
     const count = selectedAdditional;
-    if (!Number.isInteger(count) || count < 0 || totalQuantity - selectedQueued + count > 1000) {
+    if (!Number.isInteger(count) || count < 0 || totalQuantity - selectedQueued - editingOtherQuantity + count > 1000) {
       setMessage("Add up to 1,000 new copies at a time."); return;
     }
-    const cards = draft.cards.filter((card) => ownedCardVariantKey(card) !== selectedKey);
+    const cards = draft.cards.filter((card) => ownedCardVariantKey(card) !== selectedKey && ownedCardVariantKey(card) !== editingKey);
     if (count > 0) cards.push({ ...selected, edition, condition, quantity: count });
     if (cards.length > 100) { setMessage("Save this list before adding more than 100 different variants."); return; }
     setDraft({ ...draft, cards }); setSelected(null); setMessage(null);
     searchRef.current?.focus();
   }
 
-  function updateCard(key: string, update: Partial<OwnedCardDraft>) {
-    if (!draft) return;
-    const cards = collapseOwnedCards(draft.cards.map((card) => ownedCardVariantKey(card) === key ? { ...card, ...update } : card));
-    if (cards.reduce((sum, card) => sum + card.quantity, 0) > 1000) { setMessage("Add up to 1,000 copies at a time."); return; }
-    setDraft({ ...draft, cards }); setMessage(null);
+  function editCard(card: OwnedCardDraft) {
+    setEditingKey(ownedCardVariantKey(card)); setSelected(card);
+    setEdition(card.edition); setCondition(card.condition);
+    setQuantity(String(matchingOwnedCardCopies(source.snapshot, card).length + card.quantity));
+    setMessage(null);
   }
 
   async function save() {
@@ -227,14 +238,18 @@ function OwnedCardsForm() {
             <div className="flex items-baseline justify-between gap-2"><h2 className="text-lg font-bold">Your cards</h2><div className="flex items-center gap-2">{draft.cards.length ? <button type="button" className="min-h-11 px-2 text-xs text-zinc-500 hover:text-rose-800" onClick={() => setClearOpen(true)}>Clear all</button> : null}<span className="text-sm font-semibold text-zinc-500">{totalQuantity} {totalQuantity === 1 ? "copy" : "copies"}</span></div></div>
             <p className="mt-1 text-xs leading-5 text-zinc-500">Matching copies combine automatically.</p>
             {draft.cards.length ? <div className="relative mt-2"><Search className="pointer-events-none absolute left-2 top-3 size-4 text-zinc-400" /><input aria-label="Search your cards" placeholder="Search your cards" value={queueQuery} onChange={(event) => { setQueueQuery(event.target.value); setQueuePage(1); }} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-8 pr-2 text-sm outline-none focus:border-[#8a1f2d]" /></div> : null}
-            {!draft.cards.length ? <div className="my-3 rounded-md border border-dashed border-zinc-300 px-3 py-5 text-center text-sm text-zinc-500">Choose a printing to start your list.</div> : <ul className="mt-3 divide-y divide-zinc-200">{visibleQueueCards.map((card) => {
+            {!draft.cards.length ? <div className="my-3 rounded-md border border-dashed border-zinc-300 px-3 py-5 text-center text-sm text-zinc-500">Choose a printing to start your list.</div> : <ul className="mt-3 grid grid-cols-4 gap-2">{visibleQueueCards.map((card) => {
               const key = ownedCardVariantKey(card);
-              return <li className="py-3" key={key}>
-                <div className="flex gap-2"><CardArtwork product={card} small /><div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm font-bold leading-5" title={card.name}>{card.name}</p><p className="mt-0.5 text-xs leading-4 text-zinc-500">{card.setCode} · {card.rarity}</p></div><button aria-label={`Remove ${card.name} ${card.condition}`} className="grid size-9 shrink-0 place-items-center text-zinc-400 hover:text-rose-700" onClick={() => setDraft({ ...draft, cards: draft.cards.filter((item) => ownedCardVariantKey(item) !== key) })} type="button"><Trash2 className="size-3.5" /></button></div>
-                <div className="mt-2 flex items-start justify-between gap-2">
-                  <details className="min-w-0 flex-1"><summary className="min-h-11 cursor-pointer py-2 text-xs font-semibold leading-5 text-zinc-600">{card.edition}<span className="block">{card.condition}</span></summary><div className="relative z-10 space-y-2 pb-2"><CompactPicklist label={`Edition for ${card.name}`} value={card.edition} values={editions} onChange={(value) => updateCard(key, { edition: value as ProductEdition })} /><CompactPicklist label={`Condition for ${card.name}`} value={card.condition} values={[...cardConditions]} onChange={(value) => updateCard(key, { condition: value as CardCondition })} /></div></details>
-                  <QuantityStepper label={`Quantity for ${card.name} ${card.condition}`} value={card.quantity} max={1000 - totalQuantity + card.quantity} onChange={(quantity) => updateCard(key, { quantity })} />
-                </div>
+              const description = `${card.name}, ${card.setCode}, ${card.rarity}, ${card.edition}, ${card.condition}, ${card.quantity} to add`;
+              return <li className="min-w-0" key={key}>
+                <button aria-label={`Edit ${description}`} title={description} className="group relative block w-full overflow-hidden rounded-md text-left shadow-sm ring-1 ring-zinc-200 transition hover:ring-[#8a1f2d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8a1f2d]" onClick={() => editCard(card)} type="button">
+                  <CardArtwork product={card} tile />
+                  <span className="absolute right-1 top-1 rounded bg-zinc-950/85 px-1 py-0.5 text-[10px] font-bold tabular-nums text-white">+{card.quantity}</span>
+                  <span className="absolute inset-x-0 bottom-0 bg-zinc-950/85 px-1 py-1 text-white">
+                    <span className="block text-[10px] font-bold leading-3">{rarityAbbreviation(card.rarity)}</span>
+                    <span className="block truncate text-[9px] font-medium leading-3">{card.setCode}</span>
+                  </span>
+                </button>
               </li>;
             })}</ul>}
             {draft.cards.length && !queueCards.length ? <p className="py-4 text-center text-sm text-zinc-500">No cards match your search.</p> : null}
@@ -252,7 +267,8 @@ function OwnedCardsForm() {
               <p className="mt-3 text-sm font-semibold text-zinc-700">Already owned: {selectedOwned}</p>
               {selectedAllCopies.length !== selectedOwned ? <p className="mt-1 text-xs text-zinc-600">{selectedAllCopies.length} owned across conditions: {selectedConditionCounts}. Quantity below is for {condition}.</p> : null}
               <p className="mt-1 text-xs text-zinc-500">Set the total you want to own. {selectedAdditional > 0 ? `${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"} will be added.` : "No new copies to add."}</p>
-              <div className="mt-2 flex flex-wrap gap-2"><QuantityStepper label="Quantity" value={Number(quantity)} min={Math.max(1, selectedOwned)} max={Math.max(1, selectedOwned + 1000 - totalQuantity + selectedQueued)} onChange={(value) => setQuantity(String(value))} /><button className={`${primaryButton} flex-1`} onClick={addSelection} type="button"><Plus className="size-4" /> {selectedAdditional > 0 ? "Add to list" : "Done"}</button></div>
+              <div className="mt-2 flex flex-wrap gap-2"><QuantityStepper label="Quantity" value={Number(quantity)} min={Math.max(1, selectedOwned)} max={Math.max(1, selectedOwned + 1000 - totalQuantity + selectedQueued + editingOtherQuantity)} onChange={(value) => setQuantity(String(value))} /><button className={`${primaryButton} flex-1`} onClick={addSelection} type="button"><Plus className="size-4" /> {editingKey ? "Save changes" : selectedAdditional > 0 ? "Add to list" : "Done"}</button></div>
+            {editingKey ? <button type="button" className="mt-3 inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-rose-700 hover:text-rose-900" onClick={() => { setDraft({ ...draft, cards: draft.cards.filter((card) => ownedCardVariantKey(card) !== editingKey) }); setSelected(null); setEditingKey(null); setMessage(null); }}><Trash2 className="size-3.5" />Remove from list</button> : null}
             {message ? <p className="mt-3 text-sm text-rose-800" role="alert">{message}</p> : null}</OwnedDialog> : null}
 
         {filterOpen ? <OwnedDialog title="Filter rarity" onClose={() => setFilterOpen(false)}>

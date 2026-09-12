@@ -38,9 +38,9 @@ for (const width of [1280, 843, 390]) {
     await selection.getByRole("button", { name: "Increase quantity", exact: true }).click();
     await selection.getByRole("button", { name: "Add to list" }).click();
     const list = page.getByRole("region", { name: "Cards to add" });
-    await expect(list.getByRole("spinbutton")).toHaveValue("3");
+    await expect(list.getByRole("button", { name: /Edit .*3 to add/ })).toBeVisible();
     await page.reload();
-    await expect(list.getByRole("spinbutton")).toHaveValue("3");
+    await expect(list.getByRole("button", { name: /Edit .*3 to add/ })).toBeVisible();
     await page.getByLabel("Card name or set code").fill("Blue-Eyes");
     await page.getByRole("button", { name: "Choose Blue-Eyes White Dragon, RA02-EN001, Secret Rare" }).click();
     await selection.getByRole("combobox", { name: "Edition", exact: true }).click();
@@ -48,7 +48,7 @@ for (const width of [1280, 843, 390]) {
     await selection.getByRole("combobox", { name: "Condition", exact: true }).click();
     await selection.getByRole("option", { name: "Lightly Played", exact: true }).click();
     await selection.getByRole("button", { name: "Add to list" }).click();
-    await expect(list.getByRole("spinbutton")).toHaveCount(2);
+    await expect(list.getByRole("button", { name: /^Edit / })).toHaveCount(2);
     if (width === 843) {
       const searchBox = await page.getByRole("region", { name: "Find cards" }).boundingBox();
       const listBox = await list.boundingBox();
@@ -92,11 +92,11 @@ test("queue pagination, search, rarity modal and confirmed clear", async ({ page
     await dialog.getByRole("button", { name: "Add to list" }).click();
   }
   const queue = page.getByRole("region", { name: "Cards to add" });
-  await expect(queue.getByRole("spinbutton")).toHaveCount(4);
+  await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(4);
   await queue.getByRole("button", { name: "Next cards" }).click();
-  await expect(queue.getByRole("spinbutton")).toHaveCount(1);
+  await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(1);
   await queue.getByLabel("Search your cards").fill("Near Mint");
-  await expect(queue.getByRole("spinbutton")).toHaveCount(1);
+  await expect(queue.getByRole("button", { name: /^Edit / })).toHaveCount(1);
   await queue.getByRole("button", { name: "Clear all", exact: true }).click();
   await page.getByRole("button", { name: "Keep cards", exact: true }).click();
   await expect(queue.getByText("5 copies", { exact: true })).toBeVisible();
@@ -129,4 +129,34 @@ test("existing owned quantity starts at current total and saves only the increas
   await expect(dialog.getByText("Set the total you want to own. 1 new copy will be added.")).toBeVisible();
   await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
   await expect(page.getByRole("button", { name: "Add 1 card to collection", exact: true })).toBeVisible();
+});
+
+test("compact queue tiles reopen the quantity editor without duplicating variants", async ({ page }) => {
+  await page.setViewportSize({ width: 1117, height: 837 });
+  await page.goto("/records/new/owned");
+  await page.getByLabel("Card name or set code").fill("LOB-001");
+  await page.getByRole("button", { name: "Choose Blue-Eyes White Dragon, LOB-001, Ultra Rare" }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
+  const queue = page.getByRole("region", { name: "Cards to add" });
+  const tile = queue.getByRole("button", { name: /^Edit / });
+  await expect(tile).toHaveCount(1);
+  await expect(tile.getByText("UR", { exact: true })).toBeVisible();
+  await expect(tile.getByText("LOB-001", { exact: true })).toBeVisible();
+  const box = await tile.boundingBox();
+  expect(box!.height).toBeLessThan(160);
+  await tile.click();
+  await expect(dialog.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("1");
+  await dialog.getByRole("button", { name: "Increase quantity", exact: true }).click();
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(tile).toHaveCount(1);
+  await expect(tile).toHaveAccessibleName(/2 to add/);
+  await tile.click();
+  await dialog.getByRole("button", { name: "Increase quantity", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(tile).toHaveAccessibleName(/2 to add/);
+  await page.screenshot({ path: "/tmp/owned-card-grid.png", fullPage: true });
+  await tile.click();
+  await dialog.getByRole("button", { name: "Remove from list", exact: true }).click();
+  await expect(tile).toHaveCount(0);
 });
