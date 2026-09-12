@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      catalogue_sync_only:
+        description: Refresh the production TCGCSV catalogue without deploying
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,7 +19,7 @@ concurrency:
 
 jobs:
   migrate-and-deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.catalogue_sync_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -57,3 +62,23 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: npx --yes vercel@58.4.4 deploy --prod --yes --token "$VERCEL_TOKEN"
+
+  sync-catalogue:
+    if: github.event_name == 'workflow_dispatch' && inputs.catalogue_sync_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Sync production card catalogue
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npm run catalogue:sync
