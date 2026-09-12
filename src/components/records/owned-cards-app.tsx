@@ -232,7 +232,7 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
       </section> : <>
         {!embedded ? <p className="max-w-2xl text-sm leading-6 text-zinc-600">Search a card name or set code. Include a rarity to narrow the results, then choose the printing you own.</p> : null}
         {!embedded && source.mode === "preview" ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-900">Preview mode: saving changes only this browser tab.</p> : null}
-        <fieldset className="grid min-w-0 items-start gap-3 disabled:opacity-70 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,.85fr)]" disabled={saving}>
+        <fieldset className={`grid min-w-0 items-start disabled:opacity-70 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,.85fr)] ${embedded ? "gap-6" : "gap-3"}`} disabled={saving}>
           <div className="min-w-0 space-y-4">
             <section className={embedded ? "min-w-0" : "rounded-lg border border-zinc-300 bg-white p-3"} aria-label="Find cards">
               <div className="flex min-h-8 items-center justify-between gap-2">
@@ -251,12 +251,12 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
               {(searchText || rarity) && (results.data?.pageCount ?? 0) > 1 ? <div className="mt-3 flex items-center justify-between"><button aria-label="Previous results" className={secondaryButton} disabled={page === 1 || searching} onClick={() => setPage(page - 1)} type="button"><ChevronLeft className="size-4" /></button><span className="text-xs text-zinc-500">Page {page} of {results.data?.pageCount}</span><button aria-label="Next results" className={secondaryButton} disabled={page >= (results.data?.pageCount ?? 1) || searching} onClick={() => setPage(page + 1)} type="button"><ChevronRight className="size-4" /></button></div> : null}
             </section>
           </div>
-          <div className="min-w-0 space-y-3 md:sticky md:top-3">
+          <div className={`min-w-0 space-y-3 md:sticky md:top-3 ${embedded ? "border-t border-zinc-200 pt-4 md:border-l md:border-t-0 md:pl-6 md:pt-0" : ""}`}>
           <section aria-label="Cards to add" className={embedded ? "min-w-0" : "min-w-0 rounded-lg border border-zinc-300 bg-white p-3"}>
-            <div className="flex items-baseline justify-between gap-2"><h2 className="text-lg font-bold">Your cards</h2><div className="flex items-center gap-2">{draft.cards.length ? <button type="button" className="min-h-11 px-2 text-xs text-zinc-500 hover:text-rose-800" onClick={() => setClearOpen(true)}>Clear all</button> : null}<span className="text-sm font-semibold text-zinc-500">{totalQuantity} {totalQuantity === 1 ? "copy" : "copies"}</span></div></div>
+            <div className="flex min-h-8 items-center justify-between gap-2"><h2 className={embedded ? "text-sm font-bold" : "text-lg font-bold"}>Your cards</h2><div className="flex items-center gap-2">{draft.cards.length ? <button type="button" className="min-h-11 px-2 text-xs text-zinc-500 hover:text-rose-800" onClick={() => setClearOpen(true)}>Clear all</button> : null}<span className="text-sm font-semibold text-zinc-500">{totalQuantity} {totalQuantity === 1 ? "copy" : "copies"}</span></div></div>
             <p className="mt-1 text-xs leading-5 text-zinc-500">Matching copies combine automatically.</p>
             {draft.cards.length ? <div className="relative mt-2"><Search className="pointer-events-none absolute left-2 top-3 size-4 text-zinc-400" /><input aria-label="Search your cards" onKeyDown={(event) => { if (embedded && event.key === "Enter") event.preventDefault(); }} placeholder="Search your cards" value={queueQuery} onChange={(event) => { setQueueQuery(event.target.value); setQueuePage(1); }} className="h-10 w-full rounded-md border border-zinc-200 bg-zinc-50 pl-8 pr-2 text-sm outline-none focus:border-[#8a1f2d]" /></div> : null}
-            {!draft.cards.length ? <div className="my-3 rounded-md border border-dashed border-zinc-300 px-3 py-5 text-center text-sm text-zinc-500">Choose a printing to start your list.</div> : <ul className="mt-3 grid grid-cols-4 gap-2">{visibleQueueCards.map((card) => {
+            {!draft.cards.length ? <div className={embedded ? "mt-3 flex min-h-24 items-center justify-center rounded-md bg-zinc-50 px-4 text-center text-sm text-zinc-500" : "my-3 rounded-md border border-dashed border-zinc-300 px-3 py-5 text-center text-sm text-zinc-500"}>Choose a printing to start your list.</div> : <ul className="mt-3 grid grid-cols-4 gap-2">{visibleQueueCards.map((card) => {
               const key = ownedCardVariantKey(card);
               const description = `${card.name}, ${card.setCode}, ${card.rarity}, ${card.edition}, ${card.condition}, ${card.quantity} to add`;
               return <li className="min-w-0" key={key}>

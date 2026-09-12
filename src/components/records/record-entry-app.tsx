@@ -168,15 +168,17 @@ export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
     />
   ) : flow === "purchase" ? <PurchaseForm onSaved={(id, warning) => setSavedRecord({ id, warning })} /> : flow === "pack-opening" ? <OpeningForm onSaved={(id, warning) => setSavedRecord({ id, warning })} /> : <SaleForm onSaved={(id, warning) => setSavedRecord({ id, warning })} />;
 
+  const compactEntry = !editing && (flow === "purchase" || flow === "pack-opening");
+
   return (
     <main className="app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
+      <div className={`mx-auto flex w-full max-w-7xl flex-col ${compactEntry ? "gap-3" : "gap-5"}`}>
         <AppHeader title={editing ? content.title.replace("Record ", "Edit ") : content.title} />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <Link className="inline-flex min-h-11 w-fit items-center gap-2 rounded-md text-sm font-bold text-zinc-600 hover:text-zinc-950" href={returnHref} replace><ArrowLeft className="size-4" /> Back to Records</Link>
-          <p className="text-xs font-semibold text-zinc-500">{editing ? "Changes update the existing Record; they never create another one." : "Unfinished work is kept in this browser tab."}</p>
+          {!compactEntry ? <p className="text-xs font-semibold text-zinc-500">{editing ? "Changes update the existing Record; they never create another one." : "Unfinished work is kept in this browser tab."}</p> : null}
         </div>
-        <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#8a1f2d]">{content.icon}</span><p className="max-w-2xl pt-1 text-sm font-medium leading-6 text-zinc-600">{content.description}</p></div>
+        {!compactEntry ? <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-lg bg-rose-50 text-[#8a1f2d]">{content.icon}</span><p className="max-w-2xl pt-1 text-sm font-medium leading-6 text-zinc-600">{content.description}</p></div> : null}
         {source.mode === "preview" ? <PreviewNotice>Submitting updates only the resettable preview in this browser tab.</PreviewNotice> : null}
         {!editing && savedRecord ? <SavedState flow={flow} mode={source.mode} recordId={savedRecord.id} warning={savedRecord.warning} onAddAnother={() => setSavedRecord(null)} /> : form}
       </div>
