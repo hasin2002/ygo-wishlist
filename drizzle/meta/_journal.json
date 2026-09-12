@@ -78,6 +78,13 @@
       "when": 1786244072830,
       "tag": "0010_create_card_pricing_estimates",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789234694907,
+      "tag": "0011_owned_card_catalogue",
+      "breakpoints": true
     }
   ]
 }

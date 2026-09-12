@@ -46,7 +46,6 @@ import { DestructiveToast } from "@/components/records/entry-form-ui";
 import { rarityAbbreviation } from "@/lib/rarity-abbreviations";
 import { useClientReady } from "@/lib/use-client-ready";
 import { taskReturnHref } from "@/lib/navigation-intent";
-import { paidCostSummary } from "@/lib/records/paid-cost-summary";
 import {
   collectionRefreshFailureMessage,
   useCollectionChange,
@@ -2329,9 +2328,9 @@ export function WishlistApp() {
                                 Chase {card.chaseLevel}
                               </span>
                             ) : null}
-                            {card.status === "owned" && (card.paidPriceText !== null || (card.paidPriceCompleteness?.unknownCopyCount ?? 0) > 0) ? (
+                            {card.status === "owned" && card.paidPriceText !== null ? (
                               <span className="inline-flex h-7 items-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-xs font-black tabular-nums text-emerald-800">
-                                {paidCostSummary({ formattedKnownTotal: card.paidPriceText !== null ? normalizePaidPrice(card.paidPriceText) : "£0.00", knownCopyCount: card.paidPriceText !== null ? Math.max(1, card.paidPriceCompleteness?.knownCopyCount ?? 1) : 0, unknownCopyCount: card.paidPriceCompleteness?.unknownCopyCount ?? 0 })}
+                                {normalizePaidPrice(card.paidPriceText)}
                               </span>
                             ) : null}
                             {card.status === "owned" && card.purchaseMonth ? (

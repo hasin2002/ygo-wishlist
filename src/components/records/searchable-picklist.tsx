@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { Check, ChevronDown, Info, Search } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 export type SearchablePicklistOption = {
+  imageUrl?: string | null;
   detail: string;
   displayText: string;
   id: string;
@@ -11,7 +13,16 @@ export type SearchablePicklistOption = {
   searchText: string;
 };
 
+function PicklistThumbnail({ imageUrl }: { imageUrl: string }) {
+  const [failed, setFailed] = useState(false);
+  return <span className="grid h-11 w-8 shrink-0 place-items-center overflow-hidden rounded border border-zinc-200 bg-zinc-100">
+    {failed ? <span className="text-[9px] text-zinc-400">Card</span> : <Image alt="" className="h-full w-full object-contain" height={44} width={32} unoptimized src={`/api/image-proxy?url=${encodeURIComponent(imageUrl)}`} onError={() => setFailed(true)} />}
+  </span>;
+}
+
 export function SearchablePicklist({
+  compact = false,
+  inlineOptions = false,
   emptyMessage,
   label,
   labelHint,
@@ -23,6 +34,8 @@ export function SearchablePicklist({
   selectedId,
   visibleRows = 5,
 }: {
+  compact?: boolean;
+  inlineOptions?: boolean;
   emptyMessage: string;
   label: string;
   labelHint?: string;
@@ -115,14 +128,14 @@ export function SearchablePicklist({
       }}
       ref={containerRef}
     >
-      <div className="flex min-h-8 items-center gap-1">
+      <div className={compact ? "sr-only" : "flex min-h-8 items-center gap-1"}>
         <label className="text-sm font-bold text-zinc-800" htmlFor={inputId}>{label}</label>
         {labelHint ? <span className="group/hint relative inline-flex hover:z-50 focus-within:z-50">
           <button aria-describedby={hintId} aria-label={`Why ${label} is selected together`} className="relative grid size-8 place-items-center rounded-md text-zinc-500 transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:bg-zinc-100 hover:text-zinc-800 focus-visible:bg-zinc-100 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]" type="button"><Info aria-hidden="true" className="size-3.5" /></button>
           <span className="pointer-events-none absolute left-0 top-full mt-1 w-72 max-w-[min(18rem,calc(100vw-2rem))] translate-y-1 rounded-lg border border-zinc-200 bg-zinc-950 px-3 py-2 text-left text-xs font-semibold leading-5 text-white opacity-0 shadow-xl transition duration-150 group-hover/hint:pointer-events-auto group-hover/hint:translate-y-0 group-hover/hint:opacity-100 group-focus-within/hint:pointer-events-auto group-focus-within/hint:translate-y-0 group-focus-within/hint:opacity-100" id={hintId} role="tooltip">{labelHint}</span>
         </span> : null}
       </div>
-      <div className="relative mt-1">
+      <div className={compact ? "relative" : "relative mt-1"}>
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
         <input
           aria-activedescendant={isOpen && activeOption ? `${listId}-${activeOption.id}` : undefined}
@@ -155,8 +168,8 @@ export function SearchablePicklist({
         <ChevronDown aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`} />
       </div>
       {isOpen ? (
-        <div aria-label={resultsLabel} className="absolute z-40 mt-2 w-full overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg" id={listId} role="listbox">
-          <div className="overflow-y-auto p-1.5" style={{ maxHeight: `calc(${visibleRows} * 3.375rem + .75rem)` }}>
+        <div aria-label={resultsLabel} className={`${inlineOptions ? "relative" : "absolute z-40"} mt-2 w-full overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg`} id={listId} role="listbox">
+          <div className="overflow-y-auto p-1.5" style={{ maxHeight: `calc(${visibleRows} * ${visibleOptions.some((option) => option.imageUrl) ? "4rem" : "3.375rem"} + .75rem)` }}>
             {visibleOptions.length ? visibleOptions.map((option, index) => {
               const isSelected = option.id === selectedId;
               const isActive = option.id === activeOption?.id;
@@ -203,6 +216,7 @@ export function SearchablePicklist({
                   role="option"
                   type="button"
                 >
+                  {option.imageUrl ? <PicklistThumbnail key={option.imageUrl} imageUrl={option.imageUrl} /> : null}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold">{option.label}</span>
                     <span className="mt-0.5 block truncate text-xs font-medium text-zinc-500">{option.detail}</span>

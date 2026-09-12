@@ -54,10 +54,19 @@ changed.
   temporary `legacyCards` read adapter may seed the resettable Records preview
   while legacy rows exist; it must be removed after those rows are migrated and
   must never gain a mutation.
-- New card identities and sealed-product identities use a required TCGplayer
-  product URL as their primary reference. Names, images, printing/set facts, and
-  rarity are derived from that reference where possible. Legacy rows with
-  missing metadata remain usable and are surfaced as needing attention.
+- **Add owned cards** is the normal card-ingestion flow. It searches a local
+  TCGCSV catalogue by name, set code/abbreviation and rarity, then records selected
+  physical Copies in one Imported Acquisition. It does not require a pasted URL
+  or a single/bulk choice. Condition, edition and quantity are confirmed by the
+  owner; cost is unknown unless separately recorded through Purchase.
+- The shared TCGCSV catalogue is discovery data, never ownership. Selecting a
+  product resolves its trusted TCGplayer reference and metadata into the existing
+  owner-scoped Card Printing model. Catalogue refreshes never rewrite existing
+  Copies, photos, Records or listing history. Identical product/edition/condition
+  selections combine in the draft while every saved Copy keeps an exact ID.
+- Sealed-product identities and the detailed Purchase/Openings workflows retain
+  their existing product-reference inputs. Legacy incomplete metadata remains
+  usable and is surfaced as needing attention.
 - Sales initially cover card copies only.
 - Binder location remains an integration with the existing Binder feature, not
   a generalized inventory-location model. Binder, Wheel, chase, and highlights

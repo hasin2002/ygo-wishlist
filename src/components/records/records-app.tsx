@@ -455,7 +455,7 @@ function RecordCardItemsEditor({
   const [saving, setSaving] = useState(false);
   const cardLines = record.lines.filter((line) => line.kind === "card");
   const hasBulkContainer = record.lines.some((line) => line.kind === "bulk");
-  const isMultiCardRecord = record.type === "pack-opening" || hasBulkContainer;
+  const isMultiCardRecord = record.type === "pack-opening" || record.type === "imported-acquisition" || hasBulkContainer;
   const openedProduct = record.type === "pack-opening"
     ? source.snapshot.sealedUnits.find((unit) => unit.openedRecordId === record.id) ?? null
     : null;

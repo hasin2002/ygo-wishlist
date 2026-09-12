@@ -66,7 +66,7 @@ try {
   run("pg_ctl", ["-D", dataDirectory, "-l", path.join(dataDirectory, "postgres.log"), "-o", `-h 127.0.0.1 -p ${port}`, "-w", "start"]);
   run("createdb", ["-h", "127.0.0.1", "-p", String(port), "-U", "postgres", marker]);
   run(process.execPath, ["scripts/push-database-schema.mjs", "--force"], { env: testEnvironment });
-  run(process.execPath, ["--experimental-transform-types", "--experimental-loader", "./tests/node-ts-loader.mjs", "--test", "--test-force-exit", "tests/records-transactions.test.ts"], { env: testEnvironment });
+  run(process.execPath, ["--experimental-transform-types", "--experimental-loader", "./tests/node-ts-loader.mjs", "--test", "--test-force-exit", ...process.argv.slice(2), "tests/records-transactions.test.ts"], { env: testEnvironment });
 } finally {
   run("pg_ctl", ["-D", dataDirectory, "-m", "immediate", "stop"], { allowFailure: true });
   await rm(dataDirectory, { force: true, recursive: true });

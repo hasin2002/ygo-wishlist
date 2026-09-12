@@ -12,6 +12,7 @@ import { useSession } from "@/lib/auth-client";
 import { usePathname } from "next/navigation";
 import {
   applyOpening,
+  applyOwnedCards,
   applyPurchase,
   applySale,
   changeRecordStatus,
@@ -235,6 +236,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
     refresh: async () => undefined,
     resolveTcgplayerProduct,
     searchLibraryCards: (query) => searchLibraryCards(snapshot ?? emptySnapshot, query),
+    addOwnedCards: (input) => withSnapshot((current) => applyOwnedCards(current, input)),
     createPurchase: (input) => withSnapshot((current) => applyPurchase(current, input)),
     createOpening: (input) => withSnapshot((current) => applyOpening(current, input)),
     createSale: (input) => withSnapshot((current) => applySale(current, input)),
@@ -301,7 +303,7 @@ function RecordsPreviewStateProvider({ children }: { children: ReactNode }) {
 function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNode; ownerScope: string }) {
   const clientReady = useClientReady();
   const pathname = usePathname();
-  const routeOwnsSnapshot = pathname === "/records" || pathname === "/records/history" || pathname === "/records/actions";
+  const routeOwnsSnapshot = pathname === "/records" || pathname === "/records/history" || pathname === "/records/actions" || pathname === "/records/new/owned";
   const snapshotScope = pathname === "/records/inventory"
     ? "inventory" as const
     : pathname.startsWith("/records/listings")
@@ -320,6 +322,7 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
     staleTime: 30_000,
   });
   const collectionChanged = useCollectionChange();
+  const addOwnedCards = trpc.records.addOwnedCards.useMutation();
   const createPurchase = trpc.records.createPurchase.useMutation();
   const createOpening = trpc.records.createOpening.useMutation();
   const createSale = trpc.records.createSale.useMutation();
@@ -397,6 +400,7 @@ function RecordsLiveStateProvider({ children, ownerScope }: { children: ReactNod
     refresh: async () => { if (!routeOwnsSnapshot) await snapshotQuery.refetch(); },
     resolveTcgplayerProduct,
     searchLibraryCards: (query) => searchLibraryCards(snapshotQuery.data ?? emptySnapshot, query),
+    addOwnedCards: (input) => finish(addOwnedCards.mutateAsync(input)),
     createPurchase: (input) => finish(createPurchase.mutateAsync(input)),
     createOpening: (input) => finish(createOpening.mutateAsync(input)),
     createSale: (input) => finish(createSale.mutateAsync(input)),
@@ -475,6 +479,7 @@ const loadingValue: RecordsDataSource = {
   refresh: async () => undefined,
   resolveTcgplayerProduct,
   searchLibraryCards: () => [],
+  addOwnedCards: async () => ({ ok: false, message: "Records are still loading." }),
   createPurchase: async () => ({ ok: false, message: "Records are still loading." }),
   createOpening: async () => ({ ok: false, message: "Records are still loading." }),
   createSale: async () => ({ ok: false, message: "Records are still loading." }),

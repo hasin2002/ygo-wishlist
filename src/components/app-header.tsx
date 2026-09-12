@@ -17,6 +17,7 @@ import { useSession } from "@/lib/auth-client";
 import { addTaskHref, currentNavigationHref } from "@/lib/navigation-intent";
 
 const addItems = [
+  { description: "Find printings and add cards you own", href: "/records/new/owned", icon: Plus, label: "Add owned cards" },
   { description: "Create a card target you want to collect", href: "/wishlist/new", icon: Star, label: "Add to wishlist" },
   { description: "Cards, sealed, bulk, and supplies", href: "/records/new/purchase", icon: Plus, label: "Purchase" },
   { description: "Open sealed product and record pulls", href: "/records/new/opening", icon: PackageOpen, label: "Pack opening" },

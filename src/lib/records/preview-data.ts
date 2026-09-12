@@ -1,3 +1,4 @@
+import { collapseOwnedCards, type AddOwnedCardsDraft } from "./owned-cards.ts";
 import type {
   CardContentsInput,
   CardCopy,
@@ -927,6 +928,30 @@ function addCopies(
   }
 
   return ids;
+}
+
+export function applyOwnedCards(snapshot: RecordsSnapshot, input: AddOwnedCardsDraft) {
+  const id = `record-${input.operationId}`;
+  if (snapshot.records.some((record) => record.id === id)) {
+    return { next: snapshot, result: { ok: true, id } satisfies DataSourceResult };
+  }
+  const next = clone(snapshot);
+  const priorTargets = new Set(next.targets.map((target) => target.id));
+  const cards = collapseOwnedCards(input.cards);
+  const lines = cards.map((card) => {
+    const ids = addCopies(next, card, id);
+    return recordLine("card", card.name, card.quantity, ids, null,
+      `${card.setCode} · ${card.edition} · ${card.rarity} · ${card.condition}`);
+  });
+  next.targets.forEach((target) => { if (!priorTargets.has(target.id)) target.desiredQuantity = 0; });
+  const quantity = cards.reduce((sum, card) => sum + card.quantity, 0);
+  next.records.unshift({
+    id, type: "imported-acquisition", status: "active", date: input.date,
+    title: `Added ${quantity} owned ${quantity === 1 ? "card" : "cards"}`,
+    source: input.source || "Added to collection", listingUrl: null,
+    amountPence: 0, amountKnown: false, notes: input.notes, lines, revision: 1, createdAt: nowIso(),
+  });
+  return { next, result: { ok: true, id } satisfies DataSourceResult };
 }
 
 export function applyPurchase(snapshot: RecordsSnapshot, input: PurchaseInput) {

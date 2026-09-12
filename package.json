@@ -47,7 +47,9 @@
     "ebay:listings:backfill:dry-run": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/backfill-ebay-listing-composition.mjs",
     "ebay:listings:backfill:apply": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/backfill-ebay-listing-composition.mjs --apply",
     "wishlist:seed-json": "node scripts/seed-wishlist-from-combined-json.mjs",
-    "wishlist:backfill-types": "node scripts/backfill-unified-card-types.mjs"
+    "wishlist:backfill-types": "node scripts/backfill-unified-card-types.mjs",
+    "catalogue:sync": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/sync-card-catalogue.mjs",
+    "test:owned-cards": "node --experimental-strip-types --test tests/card-catalogue.test.ts tests/owned-cards.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1092.0",

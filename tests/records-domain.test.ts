@@ -186,7 +186,8 @@ test("value presentation keeps physical Copy costs separate from grouped card to
   assert.doesNotMatch(recordsApp, /Purchase value/);
   assert.match(libraryApp, /Owned market estimate/);
   assert.match(libraryApp, /Known purchase subtotal/);
-  assert.match(wheelApp, /Record purchase/);
+  assert.match(wheelApp, /Add owned card/);
+  assert.match(wheelApp, /\/records\/new\/owned\?cardName=/);
   assert.match(wheelApp, /Known market subtotal/);
   assert.match(wheelApp, /Market est\. \{formatCurrency\(item\.priceValue\)\}/);
   assert.doesNotMatch(wheelApp, /return "Market estimate unknown"/);

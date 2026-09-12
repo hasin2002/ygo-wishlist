@@ -1,3 +1,4 @@
+import { cardCatalogueRouter } from "@/server/card-catalogue";
 import { binderRouter } from "@/server/routers/binder";
 import { legacyCardsReadRouter } from "@/server/routers/cards";
 import { ebayRouter } from "@/server/routers/ebay";
@@ -8,6 +9,7 @@ import { wheelRouter } from "@/server/routers/wheel";
 import { router } from "@/server/trpc";
 
 export const appRouter = router({
+  cardCatalogue: cardCatalogueRouter,
   binder: binderRouter,
   ebay: ebayRouter,
   library: libraryRouter,

@@ -1338,3 +1338,37 @@ export type EbayNotificationEventRow = typeof ebayNotificationEvents.$inferSelec
 export type EbayNotificationSubscriptionRow =
   typeof ebayNotificationSubscriptions.$inferSelect;
 export type User = typeof users.$inferSelect;
+
+// Shared reference catalogue; ownership continues to use cardPrintings/cardCopies.
+export const cardCatalogueProducts = pgTable("card_catalogue_products", {
+  productId: integer("product_id").primaryKey(),
+  groupId: integer("group_id").notNull(),
+  name: text("name").notNull(),
+  imageUrl: text("image_url"),
+  tcgplayerUrl: text("tcgplayer_url").notNull(),
+  setCode: text("set_code").notNull(),
+  setName: text("set_name").notNull(),
+  rarity: text("rarity").notNull(),
+  searchText: text("search_text").notNull(),
+}, (table) => [
+  index("card_catalogue_search_idx").using("gin", sql`to_tsvector('simple', ${table.searchText})`),
+  index("card_catalogue_set_code_idx").on(table.setCode),
+  index("card_catalogue_rarity_idx").on(table.rarity),
+]);
+
+export const cardCatalogueSync = pgTable("card_catalogue_sync", {
+  id: text("id").primaryKey(),
+  sourceTimestamp: text("source_timestamp"),
+  pendingTimestamp: text("pending_timestamp"),
+  pendingGroups: jsonb("pending_groups"),
+  lastAttemptAt: timestamp("last_attempt_at", {mode: "date"}),
+  updatedAt: timestamp("updated_at", {mode: "date"}),
+  productCount: integer("product_count").notNull().default(0),
+  syncing: boolean("syncing").notNull().default(false),
+});
+
+export const cardCatalogueStaging = pgTable("card_catalogue_staging", {
+  groupId: integer("group_id").primaryKey(),
+  sourceTimestamp: text("source_timestamp").notNull(),
+  products: jsonb("products").notNull(),
+});
