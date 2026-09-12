@@ -215,7 +215,7 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
 
   const Container = embedded ? "div" : "main";
   return <Container className={embedded ? "min-w-0" : "app-page-shell min-h-screen bg-[#f6f4ef] px-4 py-5 text-zinc-950 sm:px-6"}>
-    <div className="mx-auto flex max-w-6xl flex-col gap-3">
+    <div className={embedded ? "flex min-w-0 w-full flex-col gap-3" : "mx-auto flex max-w-6xl flex-col gap-3"}>
       {!embedded ? <><AppHeader title="Add owned cards" />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-bold text-zinc-600" href={taskReturnHref(params.get("origin"), "/records/inventory")}><ArrowLeft className="size-4" /> Back to collection</Link>
