@@ -70,3 +70,23 @@ export function conflictsWithPrintingIdentity(
   return (sameProduct || sameCompleteSet)
     && !compatiblePrintingIdentity(candidate, requested);
 }
+
+/** Product IDs survive TCGplayer's title slugs and query-string variations. */
+export function tcgplayerProductId(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const url = new URL(value.includes("://") ? value : `https://${value}`);
+    if (!/^(www\.)?tcgplayer\.com$/i.test(url.hostname)) return null;
+    return url.pathname.match(/^\/product\/(\d+)(?:\/|$)/)?.[1] ?? null;
+  } catch { return null; }
+}
+
+/** Trusted catalogue imports may resolve a legacy set prefix using the same product ID. */
+export function compatibleCataloguePrintingIdentity(existing: PrintingIdentityInput, catalogue: PrintingIdentityInput) {
+  const product = tcgplayerProductId(existing.canonicalTcgplayerUrl);
+  if (!product || product !== tcgplayerProductId(catalogue.canonicalTcgplayerUrl)) return false;
+  const oldCode = normalizePrintingValue(existing.normalizedSetCode);
+  const newCode = normalizePrintingValue(catalogue.normalizedSetCode);
+  return placeholders.has(oldCode) || oldCode === newCode
+    || (/^[a-z0-9]+$/.test(oldCode) && newCode.startsWith(oldCode + "-"));
+}
