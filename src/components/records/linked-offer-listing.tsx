@@ -416,12 +416,20 @@ export function LinkedOfferListing({
   }, [successToast]);
 
   const targetOptions = useMemo(() => {
-    const printingTargetIds = new Map(source.snapshot.printings.map((printing) => [printing.id, printing.targetId]));
+    const printingsById = new Map(source.snapshot.printings.map((printing) => [printing.id, printing]));
+    const ownedAttributes = new Map<string, Set<string>>();
+    const ownedImages = new Map<string, string>();
     const ownedCounts = new Map<string, number>();
     for (const copy of source.snapshot.copies) {
       if (copy.status !== "available" || !isCardCondition(copy.condition)) continue;
-      const ownedTargetId = printingTargetIds.get(copy.printingId);
-      if (ownedTargetId) ownedCounts.set(ownedTargetId, (ownedCounts.get(ownedTargetId) ?? 0) + 1);
+      const printing = printingsById.get(copy.printingId);
+      if (!printing) continue;
+      const ownedTargetId = printing.targetId;
+      ownedCounts.set(ownedTargetId, (ownedCounts.get(ownedTargetId) ?? 0) + 1);
+      const attributes = ownedAttributes.get(ownedTargetId) ?? new Set<string>();
+      attributes.add(printing.setCode).add(printing.setName).add(copy.condition);
+      ownedAttributes.set(ownedTargetId, attributes);
+      if (printing.imageUrl && !ownedImages.has(ownedTargetId)) ownedImages.set(ownedTargetId, printing.imageUrl);
     }
     return source.snapshot.targets.flatMap((target) => {
       const ownedCount = ownedCounts.get(target.id) ?? 0;
@@ -431,7 +439,8 @@ export function LinkedOfferListing({
         displayText: `${target.name} · ${target.rarity} · ${target.edition}`,
         id: target.id,
         label: target.name,
-        searchText: `${target.name} ${target.rarity} ${target.edition}`.toLocaleLowerCase("en-GB"),
+        imageUrl: ownedImages.get(target.id) || target.imageUrl,
+        searchText: `${target.name} ${target.rarity} ${target.edition} ${[...(ownedAttributes.get(target.id) ?? [])].join(" ")}`.toLocaleLowerCase("en-GB"),
       }];
     });
   }, [source.snapshot.copies, source.snapshot.printings, source.snapshot.targets]);
@@ -462,7 +471,8 @@ export function LinkedOfferListing({
     displayText: `${candidate.printing.setCode || candidate.printing.setName} · ${candidate.condition} · ${candidate.copies.length} owned`,
     id: candidate.key,
     label: candidate.printing.setCode || candidate.printing.setName,
-    searchText: `${candidate.printing.setCode} ${candidate.printing.setName} ${candidate.condition}`.toLocaleLowerCase("en-GB"),
+    imageUrl: candidate.printing.imageUrl || candidate.target.imageUrl,
+    searchText: `${candidate.target.name} ${candidate.target.rarity} ${candidate.target.edition} ${candidate.printing.setCode} ${candidate.printing.setName} ${candidate.condition}`.toLocaleLowerCase("en-GB"),
   })), [groups]);
 
   const selectedVariantKey = groups.some((candidate) => candidate.key === variantKey)
@@ -876,7 +886,7 @@ export function LinkedOfferListing({
           <header className="flex items-start gap-3 rounded-t-xl border-b border-zinc-200 bg-zinc-50 px-4 py-3 sm:px-5"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-[#8a1f2d] shadow-sm ring-1 ring-zinc-200"><Boxes aria-hidden="true" className="size-5" /></span><div><h2 className="font-black" id="stock-selection-title">Choose matching stock</h2><p className="mt-0.5 text-sm font-medium leading-5 text-zinc-600">Select one exact Printing and condition, then choose how many Copies to list.</p></div></header>
           <div className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(19rem,0.8fr)]">
             <div className="grid content-start gap-4 p-4 sm:p-5">
-              <div className="grid gap-4 2xl:grid-cols-2"><SearchablePicklist emptyMessage="No owned cards match that search. Try the card name, rarity, or edition." key={targetId || "no-target"} label="Card target" onSelect={(nextTargetId) => { setTargetId(nextTargetId); setVariantKey(""); setQuantity(null); resetPlan(); }} options={targetOptions} placeholder="Search owned cards" resultsLabel="Owned card targets" selectedId={targetId} visibleRows={3} /><SearchablePicklist emptyMessage="No Printing and condition options match that search." key={`variant-${targetId}`} label="Printing and condition" labelHint="Copies are grouped by Printing and condition so every card in the listing matches." onSelect={(nextVariantKey) => { setVariantKey(nextVariantKey); setQuantity(null); resetPlan(); }} options={variantOptions} placeholder="Search Printing or condition" resultsLabel="Printing and condition options" selectedId={selectedVariantKey} visibleRows={3} /></div>
+              <div className="grid gap-4 2xl:grid-cols-2"><SearchablePicklist emptyMessage="No owned cards match that search. Try the card name, set code, set name, rarity, edition, or condition." key={targetId || "no-target"} label="Card target" onSelect={(nextTargetId) => { setTargetId(nextTargetId); setVariantKey(""); setQuantity(null); resetPlan(); }} options={targetOptions} placeholder="Search name, set code, rarity…" resultsLabel="Owned card targets" selectedId={targetId} visibleRows={3} /><SearchablePicklist emptyMessage="No Printing and condition options match that search." key={`variant-${targetId}`} label="Printing and condition" labelHint="Copies are grouped by Printing and condition so every card in the listing matches." onSelect={(nextVariantKey) => { setVariantKey(nextVariantKey); setQuantity(null); resetPlan(); }} options={variantOptions} placeholder="Search Printing or condition" resultsLabel="Printing and condition options" selectedId={selectedVariantKey} visibleRows={3} /></div>
               {group ? <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#8a1f2d]">Selected variant</p><h3 className="mt-1 text-lg font-black">{group.target.name}</h3></div>{group.printing.imageUrl || group.target.imageUrl ? <button aria-label={`View card image for ${group.target.name}`} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-md px-2.5 text-xs font-bold text-zinc-600 transition hover:bg-white hover:text-zinc-950 focus-visible:ring-2 focus-visible:ring-[#8a1f2d]/30" onClick={() => setCardImageOpen(true)} ref={cardImageTriggerRef} type="button"><ImageIcon aria-hidden="true" className="size-4" />View card</button> : null}</div><p className="mt-1 text-sm font-medium leading-5 text-zinc-600">{group.printing.setCode} · {group.printing.setName} · {group.target.rarity} · {group.target.edition} · {group.condition}</p>{cardImageOpen && (group.printing.imageUrl || group.target.imageUrl) ? <CardImagePreviewDialog imageUrl={group.printing.imageUrl || group.target.imageUrl || ""} name={group.target.name} onClose={() => setCardImageOpen(false)} rarity={group.target.rarity} triggerRef={cardImageTriggerRef} /> : null}</div> : <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm font-semibold text-zinc-600">Choose a card target and compatible variant.</div>}
             </div>
             <aside aria-label="Listing quantity" className="relative overflow-hidden rounded-b-xl border-t border-zinc-200 bg-zinc-50/70 p-4 sm:p-5 lg:rounded-bl-none lg:border-l lg:border-t-0">

@@ -153,7 +153,7 @@ export function RecordEntryApp({ flow }: { flow: EntryFlow }) {
       onRetry={() => router.push(returnHref)}
       title="Could not open this Record for editing"
     />
-  ) : editing && editingRecord && editSource && flow === "purchase" ? (
+  ) : editing && editingRecord && editSource && flow === "purchase" && editingRecord.type !== "imported-acquisition" ? (
     <PurchaseForm edit={{ record: editingRecord, snapshot: editSource.snapshot }} onSaved={() => router.push(returnHref)} />
   ) : editing && editingRecord && editSource && flow === "pack-opening" ? (
     <OpeningForm edit={{ record: editingRecord, snapshot: editSource.snapshot }} onSaved={() => router.push(returnHref)} />

@@ -10,6 +10,7 @@ import { Client } from "pg";
 import { db } from "../src/db/index.ts";
 import {
   bulkLots,
+  cardCatalogueProducts,
   cardCopies,
   cardCopyImages,
   cardPrintings,
@@ -35,6 +36,7 @@ import {
 import { ebayRouter } from "../src/server/routers/ebay.ts";
 import { libraryRouter } from "../src/server/routers/library.ts";
 import { recordsRouter } from "../src/server/routers/records.ts";
+import { cardCatalogueRouter } from "../src/server/card-catalogue.ts";
 import {
   CopySelectionError,
   lockReconciledCopies,
@@ -1780,4 +1782,47 @@ test("spending month bounds handle short months, leap years and year rollover", 
   for (const month of ["2026-00", "2026-13"]) {
     await assert.rejects(spend.setMonthlyFavourite({ cardId: null, month }), { code: "BAD_REQUEST" });
   }
+});
+
+
+test("catalogue ingestion creates exact copies, groups variants and safely retries without eBay credentials", async () => {
+  const productId = 990001;
+  await db.insert(cardCatalogueProducts).values({ productId, groupId: 990, name: "Ingestion transaction card", imageUrl: null,
+    tcgplayerUrl: `https://www.tcgplayer.com/product/${productId}`, setCode: "ING-001", setName: "Ingestion test set", rarity: "Ultra Rare", searchText: "ingestion transaction card ing 001 ing001" });
+  const catalogue = cardCatalogueRouter.createCaller(context);
+  const search = await catalogue.search({ query: "ING-001 ultra rare" });
+  assert.equal(search.products[0]?.productId, productId);
+  assert.equal(search.detectedRarity, "Ultra Rare");
+  assert.equal((await catalogue.search({ query: "ING001" })).products[0]?.productId, productId);
+  const unauthorized = cardCatalogueRouter.createCaller({ collectionOwnerId: null, session: null });
+  await assert.rejects(unauthorized.search({ query: "ING-001" }), /Sign in/);
+  const variant = { productId, edition: "1st Edition" as const, condition: "Near Mint" as const, quantity: 2 };
+  const input = { operationId: randomUUID(), date: "2026-09-12", source: "Existing collection", notes: "", cards: [variant, variant, { ...variant, condition: "Lightly Played" as const, quantity: 1 }] };
+  const [saved, retried] = await Promise.all([records.addOwnedCards(input), records.addOwnedCards(input)]);
+  assert.equal(saved.id, retried.id);
+  const copies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, saved.id));
+  const lines = await db.select().from(recordLines).where(eq(recordLines.recordId, saved.id));
+  assert.equal(copies.length, 5);
+  assert.equal(new Set(copies.map((copy) => copy.id)).size, 5);
+  assert.equal(new Set(copies.map((copy) => copy.printingId)).size, 1);
+  assert.equal(lines.length, 2);
+  assert.deepEqual(lines.map((line) => line.quantity).sort(), [1, 4]);
+  assert(copies.every((copy) => copy.status === "available" && copy.allocationPence === null && copy.bulkLotId === null));
+  const snapshot = await records.snapshot({ scope: "inventory" });
+  for (const copy of copies) {
+    assert(snapshot.copies.some((candidate) => candidate.id === copy.id));
+    assert.equal(snapshot.copyEbayExposures.find((candidate) => candidate.copyId === copy.id)?.action.disposition, "sell");
+  }
+  const printing = snapshot.printings.find((candidate) => candidate.id === copies[0].printingId)!;
+  const target = snapshot.targets.find((candidate) => candidate.id === printing.targetId)!;
+  assert.equal(target.edition, "1st Edition");
+  assert.equal(target.rarity, "Ultra Rare");
+  assert.equal(target.desiredQuantity, 0);
+  const next = await records.addOwnedCards({ ...input, operationId: randomUUID(), cards: [variant] });
+  const newCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, next.id));
+  assert(newCopies.every((copy) => copy.printingId === printing.id));
+  await assert.rejects(records.addOwnedCards({ ...input, operationId: randomUUID(), cards: [{ ...variant, productId: 990002 }] }), /no longer available/);
+  await records.removeCardCopy({ copyId: newCopies[0].id });
+  const afterRemoval = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, next.id));
+  assert.equal(afterRemoval.length, 1);
 });

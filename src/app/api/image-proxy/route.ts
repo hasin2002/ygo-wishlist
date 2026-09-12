@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { remoteImageRetriever } from "@/server/remote-images";
+import { RemoteImageError, remoteImageRetriever } from "@/server/remote-images";
 
 export const runtime = "nodejs";
 
@@ -31,7 +31,13 @@ export async function GET(request: Request) {
         "x-content-type-options": "nosniff",
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof RemoteImageError && (error.code === "rate_limited" || error.code === "timed_out")) {
+      return NextResponse.json({ error: "Image temporarily unavailable." }, {
+        status: error.code === "rate_limited" ? 429 : 504,
+        headers: { "cache-control": "no-store", "retry-after": "10" },
+      });
+    }
     // Do not expose destination, resolver, timeout, or upstream response detail.
     return unavailableResponse();
   }

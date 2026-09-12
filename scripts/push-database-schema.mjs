@@ -14,9 +14,39 @@ const repairScript = path.join(
   "scripts",
   "repair-ebay-composition-schema.mjs",
 );
-const forwardedArguments = process.argv.slice(2);
+const catalogueOnly = process.argv.includes("--catalogue-only");
+const forwardedArguments = process.argv.slice(2).filter((argument) => argument !== "--catalogue-only");
+
+// Drizzle's table filter still includes unrelated sequences. This additive
+// development path applies only the reviewed catalogue DDL and cannot drop data.
+if (catalogueOnly) {
+  const { readFile } = await import("node:fs/promises");
+  const { default: pg } = await import("pg");
+  const migration = await readFile(path.join(projectRoot, "drizzle/0011_owned_card_catalogue.sql"), "utf8");
+  const statements = migration.split("--> statement-breakpoint").map((statement) => statement.trim()).filter(Boolean);
+  if (statements.some((statement) => !/^CREATE (?:TABLE|INDEX) "card_catalogue_/.test(statement))) {
+    throw new Error("Catalogue-only push accepts only additive catalogue tables and indexes.");
+  }
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 8000 });
+  try {
+    await client.connect();
+    await client.query("begin");
+    for (const statement of statements) {
+      await client.query(statement.replace(/^CREATE (TABLE|INDEX) /, "CREATE $1 IF NOT EXISTS "));
+    }
+    await client.query("commit");
+    console.log("Catalogue tables and indexes are ready. No existing tables or sequences were changed.");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    await client.end();
+  }
+  process.exit(0);
+}
 
 function runRepair() {
+
   const result = spawnSync(
     process.execPath,
     [repairScript, "--apply"],

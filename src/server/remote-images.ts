@@ -18,7 +18,7 @@ export const remoteImagePolicy = {
   maxUrlLength: 8_192,
   requestTimeoutMs: 8_000,
   maxConcurrentRequests: 8,
-  maxRequestsPerClientPerMinute: 24,
+  maxRequestsPerClientPerMinute: 120,
   maxRequestsPerMinute: 120,
   maxRateEntries: 64,
   rateWindowMs: 60_000,
@@ -221,6 +221,27 @@ export function createRemoteImageRetriever({
   const clientRates = new Map<string, RateEntry>();
   let globalRate: RateEntry = { count: 0, startedAt: 0 };
   let inFlight = 0;
+  const waiting: Array<() => void> = [];
+  type ImageResult = { bytes: Uint8Array; contentType: string };
+  const pending = new Map<string, Promise<ImageResult>>();
+  async function acquire() {
+    if (inFlight < remoteImagePolicy.maxConcurrentRequests) { inFlight += 1; return; }
+    if (waiting.length >= 60) throw new RemoteImageError("rate_limited");
+    await new Promise<void>((resolve, reject) => {
+      const resume = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => {
+        const index = waiting.indexOf(resume);
+        if (index >= 0) waiting.splice(index, 1);
+        reject(new RemoteImageError("timed_out"));
+      }, requestTimeoutMs);
+      waiting.push(resume);
+    });
+  }
+  function release() {
+    const next = waiting.shift();
+    if (next) next();
+    else inFlight -= 1;
+  }
 
   function consumeRateLimit(key: string) {
     const timestamp = now();
@@ -256,19 +277,18 @@ export function createRemoteImageRetriever({
     return addresses[0]!;
   }
 
-  return {
+  const retriever = {
     async retrieve(value: string, { abuseKey = "anonymous" }: { abuseKey?: string } = {}) {
       const initialUrl = parseApprovedRemoteImageUrl(value);
       const key = initialUrl.href;
-      consumeRateLimit(abuseKey.slice(0, 128));
       const cached = cache.get(key);
       if (cached && cached.expiresAt > now()) {
         cache.delete(key);
         cache.set(key, cached);
         return { bytes: new Uint8Array(cached.bytes), contentType: cached.contentType };
       }
-      if (inFlight >= remoteImagePolicy.maxConcurrentRequests) throw new RemoteImageError("rate_limited");
-      inFlight += 1;
+      consumeRateLimit(abuseKey.slice(0, 128));
+      await acquire();
       const controller = new AbortController();
       const deadline = Date.now() + requestTimeoutMs;
       try {
@@ -340,11 +360,28 @@ export function createRemoteImageRetriever({
         }
         throw new RemoteImageError("unavailable");
       } finally {
-        inFlight -= 1;
+        release();
       }
     },
     rateEntryCountForTests() {
       return clientRates.size;
+    },
+  };
+  return {
+    ...retriever,
+    async retrieve(value: string, options: { abuseKey?: string } = {}) {
+      const key = parseApprovedRemoteImageUrl(value).href;
+      let job = pending.get(key);
+      if (!job) {
+        job = retriever.retrieve(key, options);
+        pending.set(key, job);
+      }
+      try {
+        const result = await job;
+        return { ...result, bytes: new Uint8Array(result.bytes) };
+      } finally {
+        if (pending.get(key) === job) pending.delete(key);
+      }
     },
   };
 }

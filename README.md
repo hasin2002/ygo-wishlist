@@ -33,9 +33,8 @@ and uses the same removal rules as Records. No separate ownership flag is stored
 
 Records is the operational source of truth. A Purchase, Pack Opening, Sale, or
 other Record change creates, sells, voids, or restores exact Copy IDs together
-with their history. Use Records → Purchase when a card selected in the Wheel is
-acquired; the target is prefilled, but the Record still captures the real date,
-source, amount, and printing details.
+with their history. Use Add → Add owned cards to search and add physical cards. Use Records →
+Purchase when the acquisition should capture money paid or sealed stock.
 
 Money labels are deliberately scoped. A Library or Binder market estimate is a
 current guide price, never money paid or sale proceeds. A Purchase total belongs
@@ -293,3 +292,41 @@ npm run auth:set-role -- --username account-name --role admin
 
 Use `--role user` to remove administrator access. The command refuses to demote
 the last administrator so the site cannot be left without one.
+
+
+## Adding owned cards and maintaining the catalogue
+
+Use **Add → Add owned cards** (`/records/new/owned`). Search a card name, set
+abbreviation or full set code; rarity phrases and aliases such as `ultra rare`,
+`QCSR`, `PCR` and `PUR` narrow results automatically. The detected filter can be
+removed or changed. Select an exact printing, confirm edition and condition,
+and add its quantity to the list. Matching variants combine. Save creates one
+Imported Acquisition with individual physical Copy IDs, retaining all normal
+Inventory photo and eBay listing actions. Costs stay unknown; use the detailed
+Purchase flow for money paid. Drafts are saved per owner in this browser tab.
+
+The catalogue is a separate, shared discovery index populated from TCGCSV.
+Queries only read local Postgres and time out after 20 seconds; they do not fetch
+all sets during a user search. Refreshing the catalogue never rewrites owned
+printings, quantities, photos or eBay listing history.
+
+For the development database already configured in `.env.local`:
+
+```bash
+npm run db:push -- --catalogue-only
+npm run catalogue:sync
+```
+
+The bounded push applies only the additive catalogue migration, preserving
+unrelated development tables and sequences. Production continues to use the
+normal reviewed migration/deployment process; these instructions do not grant
+production mutation approval.
+
+Run the sync command daily from a trusted server process when maintaining an
+active catalogue. It checks TCGCSV's build timestamp at most once per 24 hours,
+uses a custom User-Agent and paced requests, and stages sets resumably. Rerun the
+same command after interruption to continue from completed sets. The new
+catalogue becomes searchable only when the complete import succeeds; failed
+refreshes keep the previous catalogue available. Initial import takes several
+minutes, independently of search latency. No credentials for TCGCSV or eBay are
+needed for importing card metadata.

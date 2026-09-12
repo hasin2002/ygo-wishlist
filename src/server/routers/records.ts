@@ -68,6 +68,9 @@ import { adminProcedure, authenticatedProcedure, router } from "@/server/trpc";
 import { dismissRecordsSuggestion, listRecordsActions, syncRecordsActions } from "@/server/records/actions";
 import { fetchLinkMetadata } from "@/server/metadata";
 
+import { addOwnedCardsSchema, collapseOwnedCards } from "@/lib/records/owned-cards";
+import { getCatalogueProducts } from "@/server/card-catalogue";
+
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function listingIdsForCopies(
@@ -1699,6 +1702,56 @@ export const recordsRouter = router({
       }
     });
     return { id: input.targetId };
+  }),
+
+  addOwnedCards: authenticatedProcedure.input(addOwnedCardsSchema).mutation(async ({ ctx, input }) => {
+    const ownerId = ctx.collectionOwnerId;
+    return db.transaction(async (tx) => {
+      // Serialize retries and concurrent adds for this owner before resolving identities.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${ownerId}), hashtext('add-owned-cards'))`);
+      const [existing] = await tx.select().from(recordEntries).where(and(
+        eq(recordEntries.ownerId, ownerId), eq(recordEntries.submissionId, input.operationId),
+      )).limit(1);
+      if (existing) {
+        if (existing.type !== "imported-acquisition") conflict("This submission belongs to another Record. Start a new add-card draft.");
+        return { id: existing.id, warning: "These cards were already saved. No duplicate copies were added." };
+      }
+      const cards = collapseOwnedCards(input.cards);
+      const products = await getCatalogueProducts(cards.map((card) => card.productId), tx);
+      const byId = new Map(products.map((product) => [product.productId, product]));
+      if (cards.some((card) => !byId.has(card.productId))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A selected printing is no longer available in the catalogue. Search for it again before saving." });
+      }
+      const now = new Date();
+      const recordId = id("record");
+      const quantity = cards.reduce((sum, card) => sum + card.quantity, 0);
+      await tx.insert(recordEntries).values({
+        id: recordId, ownerId, submissionId: input.operationId, type: "imported-acquisition",
+        status: "active", occurredOn: input.date, title: `Added ${quantity} owned ${quantity === 1 ? "card" : "cards"}`,
+        source: input.source || "Added to collection", amountKnown: false, amountPence: 0,
+        notes: input.notes, revision: 1, createdAt: now, updatedAt: now,
+      });
+      for (const [position, card] of cards.entries()) {
+        // Trust catalogue identity, never the display metadata supplied by a browser.
+        const product = byId.get(card.productId)!;
+        const lineId = id("line");
+        const { printing } = await findOrCreatePrinting(tx, ownerId, {
+          ...product, ...card, id: lineId, metadataNeedsAttention: false,
+        }, now);
+        await insertLine(tx, {
+          id: lineId, ownerId, recordId, position, kind: "card", name: product.name,
+          quantity: card.quantity, allocationPence: null,
+          detail: `${product.setCode} · ${card.edition} · ${product.rarity} · ${card.condition}`,
+          createdAt: now, updatedAt: now,
+        });
+        await tx.insert(cardCopies).values(Array.from({ length: card.quantity }, () => ({
+          id: id("copy"), ownerId, printingId: printing.id, acquiredRecordId: recordId,
+          acquiredLineId: lineId, allocationPence: null, status: "available" as const,
+          condition: card.condition, createdAt: now, updatedAt: now,
+        })));
+      }
+      return { id: recordId };
+    });
   }),
 
   createPurchase: authenticatedProcedure.input(purchaseSchema).mutation(async ({ ctx, input }) => {

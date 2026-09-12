@@ -104,7 +104,9 @@ test("Library results expose Wanted and Owned below the image without a Deficit 
 
 test("Library cards keep a visible Wishlist or Owned identifier without a redundant paid label", () => {
   assert.match(source, /\{card\.status === "owned" \? "Owned" : "Wishlist"\}/);
-  assert.match(source, /paidCostSummary\(\{ formattedKnownTotal: card\.paidPriceText !== null \? normalizePaidPrice\(card\.paidPriceText\)/);
+  assert.match(source, /card\.status === "owned" && card\.paidPriceText !== null/);
+  assert.match(source, /\{normalizePaidPrice\(card\.paidPriceText\)\}/);
+  assert.doesNotMatch(source, /paidCostSummary\(/);
   assert.doesNotMatch(source, /`Known paid \$\{normalizePaidPrice\(card\.paidPriceText\)\}`/);
   assert.match(source, /data-library-metadata/);
   assert.match(source, /inline-flex h-7 items-center whitespace-nowrap[\s\S]*?text-xs font-black tabular-nums text-emerald-800/);

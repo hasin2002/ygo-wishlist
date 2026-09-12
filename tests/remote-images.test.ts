@@ -132,9 +132,9 @@ test("uses bounded successful-response caching and applies the per-client abuse 
 
   const limited = createRemoteImageRetriever({ request: async () => successfulResponse(), resolve: publicResolver });
   for (let count = 0; count < remoteImagePolicy.maxRequestsPerClientPerMinute; count += 1) {
-    await limited.retrieve(source, { abuseKey: "busy-client" });
+    await limited.retrieve(source + "?id=" + count, { abuseKey: "busy-client" });
   }
-  await assert.rejects(limited.retrieve(source, { abuseKey: "busy-client" }), (error: unknown) => error instanceof RemoteImageError && error.code === "rate_limited");
+  await assert.rejects(limited.retrieve(source + "?extra=1", { abuseKey: "busy-client" }), (error: unknown) => error instanceof RemoteImageError && error.code === "rate_limited");
 });
 
 test("prunes expired client rate keys and keeps the rate map bounded", async () => {
@@ -144,14 +144,38 @@ test("prunes expired client rate keys and keeps the rate map bounded", async () 
     request: async () => successfulResponse(),
     resolve: publicResolver,
   });
-  for (let count = 0; count < 12; count += 1) await retriever.retrieve(source, { abuseKey: `old-client-${count}` });
+  for (let count = 0; count < 12; count += 1) await retriever.retrieve(source + "?old=" + count, { abuseKey: `old-client-${count}` });
   assert.equal(retriever.rateEntryCountForTests(), 12);
   now += remoteImagePolicy.rateWindowMs + 1;
   await retriever.retrieve(source, { abuseKey: "current-client" });
   assert.equal(retriever.rateEntryCountForTests(), 1);
 
   for (let count = 0; count <= remoteImagePolicy.maxRateEntries; count += 1) {
-    await retriever.retrieve(source, { abuseKey: `rotating-client-${count}` });
+    await retriever.retrieve(source + "?rotating=" + count, { abuseKey: `rotating-client-${count}` });
   }
   assert.equal(retriever.rateEntryCountForTests(), remoteImagePolicy.maxRateEntries);
+});
+
+
+test("queues a full search page and shares simultaneous image requests", async () => {
+  let active = 0;
+  let peak = 0;
+  let calls = 0;
+  const retriever = createRemoteImageRetriever({
+    resolve: publicResolver,
+    request: async () => {
+      calls += 1;
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return successfulResponse();
+    },
+  });
+  const images = await Promise.all(Array.from({ length: 60 }, (_, index) => retriever.retrieve(source + "?image=" + (index % 30))));
+  assert.equal(images.length, 60);
+  assert.equal(calls, 30);
+  assert.equal(peak, remoteImagePolicy.maxConcurrentRequests);
+  for (let index = 0; index < 150; index += 1) await retriever.retrieve(source + "?image=0");
+  assert.equal(calls, 30, "cache hits do not consume the upstream request budget");
 });

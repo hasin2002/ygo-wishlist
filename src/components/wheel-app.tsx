@@ -560,7 +560,7 @@ export function WheelApp() {
     setSelectedCardModal(null);
     setTilt({ x: 0, y: 0 });
     window.location.assign(
-      `/records/new/purchase?cardName=${encodeURIComponent(item.card.name)}&targetId=${encodeURIComponent(item.card.id)}`,
+      `/records/new/owned?cardName=${encodeURIComponent(item.card.name)}&targetId=${encodeURIComponent(item.card.id)}`,
     );
   }
 
@@ -957,10 +957,10 @@ export function WheelApp() {
                             <ExternalLink className="size-3" />
                           </a>
                           <button
-                            aria-label={`Record a purchase for ${item.card.name}`}
+                            aria-label={`Add owned copies of ${item.card.name}`}
                             className="relative inline-flex size-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-500 shadow-[0_1px_0_rgba(0,0,0,0.02)] transition after:absolute after:-inset-1.5 after:rounded-lg after:content-[''] hover:border-[#8a1f2d]/30 hover:bg-rose-50 hover:text-[#8a1f2d]"
                             onClick={() => openPurchaseSheet(item)}
-                            title="Record purchase"
+                            title="Add owned card"
                             type="button"
                           >
                             <ShoppingBag className="size-3" />
@@ -1131,7 +1131,7 @@ export function WheelApp() {
                 type="button"
               >
                 <ShoppingBag className="size-4" />
-                Record purchase
+                Add owned card
               </button>
             </div>
           </div>

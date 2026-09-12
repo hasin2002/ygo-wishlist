@@ -1,3 +1,4 @@
+import type { AddOwnedCardsDraft } from "./owned-cards";
 export const recordsPreviewStorageKey = "ygo-library:records-preview:v1";
 export const recordsDraftStorageKey = "ygo-library:records-drafts:v1";
 
@@ -428,6 +429,7 @@ export type RecordsDataSource = {
   refresh: () => Promise<void>;
   resolveTcgplayerProduct: (url: string) => Promise<ResolveProductResult>;
   searchLibraryCards: (query: string) => LibraryCardSuggestion[];
+  addOwnedCards: (input: AddOwnedCardsDraft) => Promise<DataSourceResult>;
   createPurchase: (input: PurchaseInput) => Promise<DataSourceResult>;
   createOpening: (input: OpeningInput) => Promise<DataSourceResult>;
   createSale: (input: SaleInput) => Promise<DataSourceResult>;
