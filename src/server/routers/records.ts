@@ -61,6 +61,8 @@ import { requireEbayExternalCapability } from "@/server/ebay-capabilities";
 import { CopySelectionError, lockReconciledCopies } from "@/server/records/copy-selection";
 import {
   compatiblePrintingIdentity,
+  compatibleCataloguePrintingIdentity,
+  tcgplayerProductId,
   conflictsWithPrintingIdentity,
   normalizePrintingValue,
 } from "@/server/printing-identity";
@@ -1735,9 +1737,26 @@ export const recordsRouter = router({
         // Trust catalogue identity, never the display metadata supplied by a browser.
         const product = byId.get(card.productId)!;
         const lineId = id("line");
-        const { printing } = await findOrCreatePrinting(tx, ownerId, {
+        // Resolve trusted product identity before name-based creation. Older titles
+        // omit rarity suffixes and their URLs include slugs; neither changes the printing.
+        const candidates = await tx.select({ printing: cardPrintings }).from(cardPrintings)
+          .innerJoin(cardTargets, eq(cardTargets.id, cardPrintings.targetId))
+          .where(and(eq(cardPrintings.ownerId, ownerId), eq(cardTargets.ownerId, ownerId),
+            eq(cardTargets.normalizedRarity, normalize(product.rarity)),
+            eq(cardTargets.normalizedEdition, normalizeEdition(card.edition))));
+        const sameProduct = candidates.map((row) => row.printing).filter((printing) =>
+          tcgplayerProductId(printing.canonicalTcgplayerUrl || printing.tcgplayerUrl) === String(product.productId));
+        if (sameProduct.length > 1) conflict(`${product.name}: this printing has duplicate records. Review them before adding copies.`);
+        const existingPrinting = sameProduct[0];
+        if (existingPrinting && !compatibleCataloguePrintingIdentity({
+          ...existingPrinting, canonicalTcgplayerUrl: existingPrinting.canonicalTcgplayerUrl || existingPrinting.tcgplayerUrl,
+        }, { canonicalTcgplayerUrl: product.tcgplayerUrl, normalizedSetCode: normalizePrintingValue(product.setCode),
+          normalizedSetName: normalizePrintingValue(product.setName) })) {
+          conflict(`${product.name} (${product.setCode}): the existing set code conflicts with this catalogue printing. Review it before adding copies.`);
+        }
+        const printing = existingPrinting ?? (await findOrCreatePrinting(tx, ownerId, {
           ...product, ...card, id: lineId, metadataNeedsAttention: false,
-        }, now);
+        }, now)).printing;
         await insertLine(tx, {
           id: lineId, ownerId, recordId, position, kind: "card", name: product.name,
           quantity: card.quantity, allocationPence: null,

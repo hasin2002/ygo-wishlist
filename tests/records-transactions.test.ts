@@ -1818,9 +1818,24 @@ test("catalogue ingestion creates exact copies, groups variants and safely retri
   assert.equal(target.edition, "1st Edition");
   assert.equal(target.rarity, "Ultra Rare");
   assert.equal(target.desiredQuantity, 0);
+  // Reproduce older purchases: slug URL, set prefix and title without rarity suffix.
+  await db.update(cardPrintings).set({ setCode: "ING", normalizedSetCode: "ing",
+    tcgplayerUrl: `https://www.tcgplayer.com/product/${productId}/old-title?Language=all`,
+    canonicalTcgplayerUrl: `tcgplayer.com/product/${productId}/old-title`,
+  }).where(eq(cardPrintings.id, printing.id));
+  await db.update(cardCatalogueProducts).set({ name: "Ingestion transaction card (Ultra Rare)" })
+    .where(eq(cardCatalogueProducts.productId, productId));
   const next = await records.addOwnedCards({ ...input, operationId: randomUUID(), cards: [variant] });
   const newCopies = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, next.id));
   assert(newCopies.every((copy) => copy.printingId === printing.id));
+  assert.equal((await db.select().from(cardPrintings).where(eq(cardPrintings.targetId, target.id))).length, 1);
+  assert.equal((await db.select().from(cardTargets).where(eq(cardTargets.id, target.id)))[0].name, target.name);
+  for (const copy of copies) assert((await db.select().from(cardCopies).where(eq(cardCopies.id, copy.id))).length === 1);
+  await db.update(cardPrintings).set({ setCode: "ING-999", normalizedSetCode: "ing-999" }).where(eq(cardPrintings.id, printing.id));
+  const rejectedOperation = randomUUID();
+  await assert.rejects(records.addOwnedCards({ ...input, operationId: rejectedOperation, cards: [variant] }), /existing set code conflicts/);
+  assert.equal((await db.select().from(recordEntries).where(eq(recordEntries.submissionId, rejectedOperation))).length, 0);
+  await db.update(cardPrintings).set({ setCode: "ING", normalizedSetCode: "ing" }).where(eq(cardPrintings.id, printing.id));
   await assert.rejects(records.addOwnedCards({ ...input, operationId: randomUUID(), cards: [{ ...variant, productId: 990002 }] }), /no longer available/);
   await records.removeCardCopy({ copyId: newCopies[0].id });
   const afterRemoval = await db.select().from(cardCopies).where(eq(cardCopies.acquiredRecordId, next.id));
