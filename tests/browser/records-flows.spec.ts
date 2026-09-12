@@ -467,3 +467,23 @@ test("Tracked opening pulls select catalogue cards without product links", async
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review opening" })).toBeVisible();
 });
+
+
+test("Purchase picker shows existing copies and the total after adding", async ({ page }) => {
+  await createCardPurchase(page);
+  await page.goto("/records/new/purchase");
+  await chooseCardPurchase(page);
+  await page.getByLabel(/Record name/).fill("Another purchase");
+  await page.getByLabel(/All-in amount paid/).fill("2.00");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Card name or set code", { exact: true }).fill("LOB-005");
+  await page.getByRole("button", { name: "Choose Dark Magician, LOB-005, Ultra Rare" }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await expect(dialog.getByText("Already owned: 1", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("1");
+  await expect(dialog.getByText(/This will add 1 new copy, bringing your total to 2/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Increase quantity" }).click();
+  await expect(dialog.getByText(/This will add 2 new copies, bringing your total to 3/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Edit Dark Magician.*2 to add/ })).toBeVisible();
+});

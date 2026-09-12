@@ -141,7 +141,8 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
   const activeRarity = rarity ?? results.data?.detectedRarity ?? "";
   const selectedAllCopies = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition }) : [];
   const selectedConditionCounts = [...new Set(selectedAllCopies.map((copy) => copy.condition))].map((condition) => `${selectedAllCopies.filter((copy) => copy.condition === condition).length} ${condition}`).join(" · ");
-  const selectedOwned = !embedded && selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition, condition }).length : 0;
+  const selectedExisting = selected ? matchingOwnedCardCopies(source.snapshot, { ...selected, edition, condition }).length : 0;
+  const selectedOwned = embedded ? 0 : selectedExisting;
   const selectedKey = selected ? ownedCardVariantKey({ ...selected, edition, condition, quantity: 1 }) : "";
   const selectedQueued = draft?.cards.find((card) => ownedCardVariantKey(card) === selectedKey)?.quantity ?? 0;
   const editingCard = draft?.cards.find((card) => ownedCardVariantKey(card) === editingKey);
@@ -282,9 +283,9 @@ function OwnedCardsForm({ embedded }: { embedded?: EmbeddedPicker } = {}) {
             {selected ? <OwnedDialog title="Selected printing" onClose={() => { setSelected(null); setMessage(null); }}>
               <div className="flex gap-2"><CardArtwork product={selected} small /><div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-sm font-bold leading-5">{selected.name}</h2><p className="mt-1 text-xs text-zinc-500">{selected.setCode} · {selected.rarity}</p></div></div>
               <div className="mt-3 grid grid-cols-2 gap-2"><CompactPicklist inlineOptions label="Edition" value={edition} values={editions} onChange={(value) => changeVariant(value as ProductEdition, condition)} /><CompactPicklist inlineOptions label="Condition" value={condition} values={[...cardConditions]} onChange={(value) => changeVariant(edition, value as CardCondition)} /></div>
-              {!embedded ? <><p className="mt-3 text-sm font-semibold text-zinc-700">Already owned: {selectedOwned}</p>
-              {selectedAllCopies.length !== selectedOwned ? <p className="mt-1 text-xs text-zinc-600">{selectedAllCopies.length} owned across conditions: {selectedConditionCounts}. Quantity below is for {condition}.</p> : null}
-              <p className="mt-1 text-xs text-zinc-500">Set the total you want to own. {selectedAdditional > 0 ? `${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"} will be added.` : "No new copies to add."}</p></> : <p className="mt-3 text-xs text-zinc-500">Quantity in this purchase or opening.</p>}
+              <p className="mt-3 text-sm font-semibold text-zinc-700">Already owned: {selectedExisting}</p>
+              {selectedAllCopies.length !== selectedExisting ? <p className="mt-1 text-xs text-zinc-600">{selectedAllCopies.length} owned across conditions: {selectedConditionCounts}. Quantity below is for {condition}.</p> : null}
+              <p className="mt-1 text-xs text-zinc-500" aria-live="polite">{embedded ? `This will add ${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"}, bringing your total to ${selectedExisting + selectedAdditional}. Quantity below is for this purchase or opening.` : <>Set the total you want to own. {selectedAdditional > 0 ? `${selectedAdditional} new ${selectedAdditional === 1 ? "copy" : "copies"} will be added.` : "No new copies to add."}</>}</p>
               <div className="mt-2 flex flex-wrap gap-2"><QuantityStepper label="Quantity" value={Number(quantity)} min={Math.max(1, selectedOwned)} max={Math.max(1, selectedOwned + 1000 - totalQuantity + selectedQueued + editingOtherQuantity)} onChange={(value) => setQuantity(String(value))} /><button className={`${primaryButton} flex-1`} onClick={addSelection} type="button"><Plus className="size-4" /> {editingKey ? "Save changes" : selectedAdditional > 0 ? "Add to list" : "Done"}</button></div>
             {editingKey ? <button type="button" className="mt-3 inline-flex min-h-11 items-center gap-2 text-xs font-semibold text-rose-700 hover:text-rose-900" onClick={() => { setDraft({ ...draft, cards: draft.cards.filter((card) => ownedCardVariantKey(card) !== editingKey) }); setSelected(null); setEditingKey(null); setMessage(null); }}><Trash2 className="size-3.5" />Remove from list</button> : null}
             {message ? <p className="mt-3 text-sm text-rose-800" role="alert">{message}</p> : null}</OwnedDialog> : null}
