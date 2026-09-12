@@ -412,23 +412,27 @@ async function mockCatalogue(page: Page) {
 }
 
 async function chooseCatalogueCard(page: Page) {
-  const trigger = page.getByRole("button", { name: /Search card name or set code/ });
-  await trigger.click();
-  const dialog = page.getByRole("dialog", { name: "Choose card printing" });
+  await page.getByLabel("Card name or set code", { exact: true }).fill("LOB-005 ultra rare");
+  await expect(page.getByText("TCGplayer · US$0.56")).toBeVisible();
+  await page.getByRole("button", { name: "Choose Dark Magician, LOB-005, Ultra Rare" }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
   await expect(dialog).toBeVisible();
   expect(await dialog.evaluate((element) => element.parentElement?.parentElement === document.body)).toBe(true);
-  await dialog.getByLabel("Card name or set code").fill("LOB-005 ultra rare");
-  await expect(dialog.getByText("TCGplayer · US$0.56")).toBeVisible();
-  if (page.viewportSize()?.width === 390) await page.screenshot({ path: "/tmp/catalogue-picker-mobile.png" });
-  await dialog.getByRole("button", { name: "Choose Dark Magician, LOB-005, Ultra Rare" }).click();
+  await expect(dialog.getByRole("combobox", { name: "Edition", exact: true })).toHaveValue("1st Edition");
+  await expect(dialog.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("1");
+  await dialog.getByRole("button", { name: "Add to list", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("combobox", { name: "Card edition", exact: true })).toHaveValue("1st Edition");
+  const queue = page.getByRole("region", { name: "Cards to add" });
+  await expect(queue.getByRole("button", { name: /Edit Dark Magician/ })).toBeVisible();
+  expect(await queue.locator("ul").evaluate((element) => getComputedStyle(element).display)).toBe("grid");
+  await expect(page.getByText("Done & add next", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel(/TCGplayer product link/)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
-test("Bulk contents select catalogue cards without product links", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+
+for (const width of [1117, 390]) test(`Bulk contents select catalogue cards without product links at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
   await mockCatalogue(page);
   await page.goto("/records/new/purchase");
   await page.getByRole("button", { name: /^Bulk lot/ }).click();
@@ -438,6 +442,14 @@ test("Bulk contents select catalogue cards without product links", async ({ page
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel(/Total cards in lot/).fill("1");
   await chooseCatalogueCard(page);
+  const queue = page.getByRole("region", { name: "Cards to add" });
+  await queue.getByRole("button", { name: /Edit Dark Magician/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Selected printing" });
+  await dialog.getByRole("button", { name: "Increase quantity" }).click();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(queue.getByRole("button", { name: /2 to add/ })).toBeVisible();
+  await page.getByLabel(/Total cards in lot/).fill("2");
+  await page.screenshot({ path: `/tmp/purchase-shared-grid-${width}.png`, fullPage: true });
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review purchase" })).toBeVisible();
   await expect(page.getByText("Dark Magician", { exact: true }).first()).toBeVisible();
